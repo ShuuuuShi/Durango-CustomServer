@@ -7,6 +7,105 @@ using Durango.Utils;
 
 namespace Durango.Online;
 
+/// <summary>
+/// [5 ก.ย. 2026] ตัววัดสุขภาพเซิร์ฟ — เก็บที่เดียว ให้ <c>/health</c> อ่าน
+///
+/// ทำไมต้องมี: ก่อนหน้านี้ไม่มีตัวเลขให้ดูเลยสักตัว เวลาเซิร์ฟหน่วงต้องเดาเอาว่าเป็นเพราะอะไร
+/// (อาการ "tps 120 → 2" ตอนมือถือโหลด bundle กว่าจะรู้ว่าเป็น GC ก็ไล่หาอยู่หลายวัน)
+/// มีตัวเลขแล้วดูออกทันทีว่ารอบเกมช้าจริงไหม เซฟค้างไหม พังกี่ครั้ง
+///
+/// ออกแบบให้เบา: เก็บเวลาลง ring buffer ที่จองไว้ครั้งเดียว (ไม่ alloc ต่อรอบ)
+/// เก็บเป็น "ไมโครวินาที" ไม่ใช่ ms เพราะรอบปกติสั้นกว่า 1 ms ⇒ ปัดเป็น ms แล้วจะเป็น 0 หมด
+/// การเรียงลำดับหาค่า p50/p99 ทำเฉพาะตอนมีคนขอ /health เท่านั้น ไม่ได้ทำทุกรอบ
+///
+/// ⚠️ เขียนจาก main loop และอ่านจาก /health ซึ่งก็รันบน main loop เดียวกัน (Gateway.Process
+/// ถูกเรียกใน Host.Process) ⇒ ไม่ต้องล็อก
+/// </summary>
+public static class ServerMetrics
+{
+    /// <summary>จำนวนรอบที่เก็บย้อนหลัง — 512 รอบ ≈ 4 วินาทีที่ 120 tps (พอเห็นอาการกระตุกสด ๆ)</summary>
+    private const int SampleCount = 512;
+
+    private static readonly double _usPerTimestamp = 1_000_000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+    /// <summary>เวลาต่อรอบเต็ม (เริ่มรอบ → เริ่มรอบถัดไป รวม Thread.Sleep) — บอกว่า tps ตกจริงไหม</summary>
+    private static readonly int[] _tickUs = new int[SampleCount];
+
+    /// <summary>เวลาที่ใช้ทำงานจริงในรอบ (host.Process อย่างเดียว) — บอกว่างานล้นงบเวลาไหม</summary>
+    private static readonly int[] _workUs = new int[SampleCount];
+
+    private static int _sampleAt;
+
+    private static int _sampleFilled;
+
+    private static long _bootAt;
+
+    private static long _lastSaveAt;
+
+    private static int _saveFailures;
+
+    private static int _loopErrors;
+
+    public static void MarkBoot() => _bootAt = Environment.TickCount64;
+
+    /// <summary>เรียกท้ายทุกรอบของ main loop — รับค่าเป็น timestamp ดิบของ Stopwatch (แปลงหน่วยที่นี่)</summary>
+    public static void RecordTick(long loopTimestamps, long workTimestamps)
+    {
+        int i = _sampleAt;
+        _tickUs[i] = ToMicros(loopTimestamps);
+        _workUs[i] = ToMicros(workTimestamps);
+        _sampleAt = (i + 1) % SampleCount;
+        if (_sampleFilled < SampleCount) _sampleFilled++;
+    }
+
+    private static int ToMicros(long timestamps)
+    {
+        if (timestamps <= 0) return 0;
+        double us = timestamps * _usPerTimestamp;
+        return us >= int.MaxValue ? int.MaxValue : (int)us;
+    }
+
+    public static void RecordSaveOk() => _lastSaveAt = Environment.TickCount64;
+
+    public static void RecordSaveFailed() => _saveFailures++;
+
+    public static void RecordLoopError() => _loopErrors++;
+
+    public static long UptimeSec => _bootAt == 0 ? 0 : (Environment.TickCount64 - _bootAt) / 1000;
+
+    /// <summary>เซฟสำเร็จครั้งล่าสุดเมื่อกี่วินาทีที่แล้ว — -1 = ยังไม่เคยเซฟสำเร็จเลยตั้งแต่บูต</summary>
+    public static long LastSaveAgoSec => _lastSaveAt == 0 ? -1 : (Environment.TickCount64 - _lastSaveAt) / 1000;
+
+    public static int SaveFailures => _saveFailures;
+
+    public static int LoopErrors => _loopErrors;
+
+    public static int Samples => _sampleFilled;
+
+    public static void TickStats(out double p50, out double p99, out double max) => Stats(_tickUs, out p50, out p99, out max);
+
+    public static void WorkStats(out double p50, out double p99, out double max) => Stats(_workUs, out p50, out p99, out max);
+
+    /// <summary>คืนค่าเป็น "มิลลิวินาที" (ตัวเลขที่คนอ่านเข้าใจ) จากตัวอย่างที่เก็บเป็นไมโครวินาที</summary>
+    private static void Stats(int[] src, out double p50, out double p99, out double max)
+    {
+        int n = _sampleFilled;
+        if (n == 0)
+        {
+            p50 = p99 = max = 0.0;
+            return;
+        }
+        // ตัวอย่างเรียงจาก index 0 เสมอ: ตอนยังไม่เต็ม _sampleFilled == _sampleAt
+        // ตอนเต็มแล้ววนทับของเก่า ⇒ ทั้งอาเรย์คือของจริงทั้งหมด (ลำดับไม่สำคัญเพราะจะ sort อยู่แล้ว)
+        int[] sorted = new int[n];
+        Array.Copy(src, sorted, n);
+        Array.Sort(sorted);
+        p50 = Math.Round(sorted[n / 2] / 1000.0, 2);
+        p99 = Math.Round(sorted[Math.Min(n - 1, (int)(n * 0.99))] / 1000.0, 2);
+        max = Math.Round(sorted[n - 1] / 1000.0, 2);
+    }
+}
+
 // แทน nexonSRC/Durango.Online/Server.cs + Servers.cs (โฮสต์ฝั่ง client)
 // ความต่างจากต้นฉบับ (เอกสารเต็มใน docs/server/ServerNx.md):
 //  - ต้นฉบับ: 1 สล็อต = 1 โลก (offline โฮสต์คนเดียว) — ที่นี่: โลกเดียว (สล็อต 0) + ผู้เล่นหลายคน
@@ -40,6 +139,18 @@ public class Host
     public Gateway Gateway { get; private set; }
 
     public IReadOnlyList<Context> Contexts => _contexts;
+
+    /// <summary>
+    /// [5 ก.ย. 2026] เพดานผู้เล่นออนไลน์พร้อมกัน (--max-players) — 0 หรือติดลบ = ไม่จำกัด
+    /// เดิม Program รับค่ามาแล้วพิมพ์ออกจอเฉย ๆ ไม่มีที่ไหนเอาไปใช้เลย (ดู Gateway /entry)
+    /// </summary>
+    public int MaxPlayers { get; set; }
+
+    /// <summary>
+    /// รหัสผ่านของเส้นทางสำหรับคนดูแล (/health) — ว่าง = ให้เฉพาะเครื่องตัวเองเรียกได้
+    /// ตั้งด้วย --admin-token หรือ env DURANGO_ADMIN_TOKEN (ดู Gateway.IsAdminAllowed)
+    /// </summary>
+    public string AdminToken { get; set; }
 
     public Host(string clusterKey)
     {
@@ -127,7 +238,8 @@ public class Host
         {
             PublicHost = publicHost,
             AssetBundleAndroidDir = androidBundlesDir,
-            AssetsDir = assetsDir
+            AssetsDir = assetsDir,
+            AdminToken = this.AdminToken
         };
         Gateway.Start(gatewayPort);
     }
@@ -146,14 +258,119 @@ public class Host
         _worldCtx?.Save(persistent: false);
     }
 
+    /// <summary>
+    /// เซฟทุกอย่าง — เซฟทีละส่วน ส่วนไหนพังก็ไปต่อ
+    ///
+    /// [แก้เอง] 5 ก.ย. 2026 — เดิมไม่มี try/catch เลย: ถ้าเซฟผู้เล่นคนแรกพัง (ดิสก์เต็ม/ไฟล์ถูกล็อก)
+    /// คนที่เหลือ **ไม่ได้เซฟเลยสักคน** แล้ว exception ยังเด้งขึ้นไปถึง main loop กลายเป็น loop error
+    /// ปนกับปัญหาอื่น ⇒ ตอนนี้แยกนับเป็น save_failures ให้เห็นชัดใน /health
+    /// </summary>
     public void SaveAll()
     {
-        _worldCtx?.Save(persistent: false);
-        Worlds?.SaveAll();
+        bool ok = true;
+        try
+        {
+            _worldCtx?.Save(persistent: false);
+        }
+        catch (Exception e)
+        {
+            ok = false;
+            Console.WriteLine("[save] ⚠️ เซฟโลกหลักไม่สำเร็จ: " + e.Message);
+        }
+        try
+        {
+            Worlds?.SaveAll();
+        }
+        catch (Exception e)
+        {
+            ok = false;
+            Console.WriteLine("[save] ⚠️ เซฟโลกของเกาะไม่สำเร็จ: " + e.Message);
+        }
         foreach (Context context in _contexts)
         {
-            context.Player.Save();
+            try
+            {
+                context.Player.Save();
+            }
+            catch (Exception e)
+            {
+                ok = false;
+                Console.WriteLine($"[save] ⚠️ เซฟผู้เล่นสล็อต {context.PlayerSlot} ไม่สำเร็จ: {e.Message}");
+            }
         }
+        if (ok)
+        {
+            ServerMetrics.RecordSaveOk();
+        }
+        else
+        {
+            ServerMetrics.RecordSaveFailed();
+        }
+    }
+
+    /// <summary>ตัวชี้ฟิลด์ผู้เล่นใน World — ค้นหาครั้งเดียวแล้วเก็บไว้ (ดู PlayersOnline)</summary>
+    private static System.Reflection.FieldInfo _worldPlayersField;
+
+    private static bool _worldPlayersFieldMissing;
+
+    /// <summary>
+    /// จำนวนผู้เล่นที่อยู่ในโลกจริงตอนนี้ รวมทุกเกาะ — คืน -1 เมื่อ "นับไม่ได้"
+    ///
+    /// ⚠️ ทำไมต้องส่องด้วย reflection: World เก็บผู้เล่นไว้ใน <c>private readonly List&lt;Player&gt; _players</c>
+    /// (Core/World.cs:44) และไม่เปิด public ให้เลยสักทาง ส่วน GameServer ก็เก็บ _connections เป็น private
+    /// (Core/GameServer.cs:27) — ทั้งสองไฟล์อยู่นอกขอบเขตที่งานรอบนี้แก้ได้
+    /// **วิธีที่ถูกต้องกว่าคือเพิ่มบรรทัดเดียวใน World.cs: `public int PlayerCount => _players.Count;`
+    /// แล้วเปลี่ยนมาเรียกอันนั้นแทน** — ที่นี่อ่านอย่างเดียว ไม่แก้ค่า และแคช FieldInfo ไว้
+    /// ⇒ ต้นทุนต่อครั้ง = อ่านฟิลด์ + .Count ต่อ 1 เกาะ และเรียกเฉพาะตอนมีคนขอ /health เท่านั้น
+    ///
+    /// เรื่องเธรด: ลิสต์นี้ถูกแก้จาก main loop และผู้เรียก (/health, /entry) ก็รันบน main loop เดียวกัน
+    /// </summary>
+    public int PlayersOnline()
+    {
+        if (_worldPlayersFieldMissing) return -1;
+        if (_worldPlayersField == null)
+        {
+            _worldPlayersField = typeof(World).GetField("_players",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            if (_worldPlayersField == null)
+            {
+                _worldPlayersFieldMissing = true;
+                Console.WriteLine("[health] นับผู้เล่นออนไลน์ไม่ได้ — World._players หายไป (เปลี่ยนชื่อ?)");
+                return -1;
+            }
+        }
+        try
+        {
+            int total = 0;
+            if (Worlds != null)
+            {
+                foreach (KeyValuePair<string, World> kv in Worlds.Loaded)
+                {
+                    if (_worldPlayersField.GetValue(kv.Value) is System.Collections.ICollection players)
+                    {
+                        total += players.Count;
+                    }
+                }
+            }
+            else if (GameServer?.World != null && _worldPlayersField.GetValue(GameServer.World) is System.Collections.ICollection one)
+            {
+                total = one.Count;
+            }
+            return total;
+        }
+        catch (Exception)
+        {
+            return -1;
+        }
+    }
+
+    /// <summary>จำนวนเกาะที่เปิดอยู่ในหน่วยความจำตอนนี้ (โลกถูกสร้างแบบ lazy เมื่อมีคนไปถึง)</summary>
+    public int WorldsLoaded()
+    {
+        if (Worlds == null) return GameServer?.World != null ? 1 : 0;
+        int n = 0;
+        foreach (KeyValuePair<string, World> _ in Worlds.Loaded) n++;
+        return n;
     }
 
     public PlayerContext FindContextByEntityId(string entityId) =>

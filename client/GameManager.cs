@@ -167,6 +167,12 @@ public class GameManager : Singleton<GameManager>
 
 	protected override void OnAwake()
 	{
+		// ── เครื่องมือทดสอบ ลบทั้งบล็อกนี้ก่อนเปิดจริง ──────────────────────────────
+		// BotBridge เปิด TCP 8192 ให้สั่งเกมจากภายนอกได้ (เดิน/เก็บ/ตี/แตะ UI/อ่านสถานะ)
+		// ต้องเรียกตรงนี้เพราะไม่มีโค้ดไหนอ้างถึงคลาสนั้นเลย Unity เลย strip ทิ้งตอน build
+		// ⇒ RuntimeInitializeOnLoadMethod ไม่เคยถูกเรียก
+		BotBridge.Bootstrap();
+		// ────────────────────────────────────────────────────────────────────────────
 		ZipConstants.DefaultCodePage = 0;
 		IsSceneClosing = false;
 		IsPrologueMode = IsSceneName("Prologue");

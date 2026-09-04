@@ -75,6 +75,8 @@ internal static class Program
         string androidBundles = null;
         string publicHost = null;
         int maxPlayers = 200;
+        // token ของ /health — เอาจาก env ได้ด้วย จะได้ไม่ต้องโผล่ในบรรทัดคำสั่ง (ps เห็นหมด)
+        string adminToken = Environment.GetEnvironmentVariable("DURANGO_ADMIN_TOKEN");
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -110,6 +112,7 @@ internal static class Program
                     break;
                 }
                 case "--max-players": maxPlayers = int.Parse(args[++i]); break;
+                case "--admin-token": adminToken = args[++i]; break;
                 case "--tps": _ticksPerSecond = int.Parse(args[++i]); break;
                 case "--cluster-mode":
                     Host.ClusterMode = args[++i].ToEnum(Durango.Logic.Clusters.Mode.Offline);
@@ -118,7 +121,8 @@ internal static class Program
                 case "-h":
                     Console.WriteLine("DurangoServerNx — เซิร์ฟแท้พอร์ตตรง · มือถือก่อน");
                     Console.WriteLine("  --name, --gateway-port, --game-port, --data, --terrains, --terrain,");
-                    Console.WriteLine("  --assetbundles-android, --public-host, --url-prefix, --max-players, --tps, --cluster-mode");
+                    Console.WriteLine("  --assetbundles-android, --public-host, --url-prefix, --max-players, --tps, --cluster-mode,");
+                    Console.WriteLine("  --admin-token <t>   token ของ /health (หรือ env DURANGO_ADMIN_TOKEN) — ไม่ตั้ง = เรียกได้เฉพาะเครื่องตัวเอง");
                     return 0;
             }
         }
@@ -137,6 +141,10 @@ internal static class Program
         AppData.BasePath = Path.GetFullPath(Path.Combine(dataDir, "..", "AppData-nx"));
         var host = new Host(name);
         _host = host;
+        // [5 ก.ย. 2026] ค่าพวกนี้ต้องตั้ง **ก่อน** host.Start() เพราะ Start เป็นคนสร้าง Gateway
+        // แล้วส่ง AdminToken ต่อให้ตอนนั้น (เดิม --max-players ถูกพิมพ์ออกจอเฉย ๆ ไม่มีใครใช้)
+        host.MaxPlayers = maxPlayers;
+        host.AdminToken = adminToken;
         host.Load();
 
         try
@@ -155,13 +163,22 @@ internal static class Program
         Console.WriteLine($"[boot] พร้อม — gateway http://0.0.0.0:{gatewayPort} · game tcp:{gamePort} · " +
                           $"cluster_mode={Host.ClusterMode} · max-players={maxPlayers}");
         Console.WriteLine("[boot] มือถือ: ต่อ gateway port 8190 ตามที่ APK ฝังมา (หรือ --url-prefix ถ้าเปลี่ยนพอร์ต)");
+        Console.WriteLine(string.IsNullOrEmpty(adminToken)
+            ? "[boot] /health เปิดเฉพาะ 127.0.0.1 (ยังไม่ได้ตั้ง --admin-token)"
+            : "[boot] /health ต้องมี ?token=… (ตั้งจาก --admin-token/env แล้ว)");
 
         // ---- main loop (ต้นฉบับ: GameManager.Update → Server.Process ทุกเฟรม; เซิร์ฟรันคงที่ 120 TPS) ----
         int frameMs = 1000 / _ticksPerSecond;
         long lastSave = 0;
         int loopErrors = 0;
+        ServerMetrics.MarkBoot();
         while (true)
         {
+            // [5 ก.ย. 2026] จับเวลาต่อรอบให้ /health อ่าน — ใช้ Stopwatch.GetTimestamp() ซึ่งเป็นการ
+            // อ่านตัวนับของ CPU ตรง ๆ (ระดับ 20 ns) ไม่ได้สร้าง object อะไร ⇒ ใส่ในลูป 120 รอบ/วิ ได้
+            // เก็บ 2 ค่า: เวลาทำงานจริง (host.Process) กับเวลารอบเต็ม (รวม sleep + เซฟ)
+            // เพราะอาการ "tps ตก" อาจมาจากงานล้น หรือจาก GC ที่หยุดโลกตอนไหนก็ได้
+            long tickBegin = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 host.Process();
@@ -170,6 +187,7 @@ internal static class Program
             {
                 // ต้องดังพอให้เห็น ไม่ใช่กลืนเงียบ ๆ — และถ้าพังรัว ๆ ให้ยอมตายเพื่อไม่ให้วนเสียหาย
                 loopErrors++;
+                ServerMetrics.RecordLoopError();
                 Console.WriteLine($"[loop] ⚠️ ข้อผิดพลาดรอบที่ {loopErrors}: {e}");
                 if (loopErrors >= 100)
                 {
@@ -178,6 +196,7 @@ internal static class Program
                     return 1;
                 }
             }
+            long workEnd = System.Diagnostics.Stopwatch.GetTimestamp();
             Thread.Sleep(frameMs);
 
             // เซฟโลกทุก 60 วิ (ต้นฉบับเซฟทันทีทุก event — เพิ่มเข็มขัดนิรภัยเหมือนเซิร์ฟเดิม)
@@ -187,6 +206,7 @@ internal static class Program
                 lastSave = now;
                 host.SaveAll();
             }
+            ServerMetrics.RecordTick(System.Diagnostics.Stopwatch.GetTimestamp() - tickBegin, workEnd - tickBegin);
         }
     }
 

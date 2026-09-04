@@ -52,6 +52,12 @@ public class Gateway
     /// </summary>
     public string AssetsDir { get; set; }
 
+    /// <summary>
+    /// [5 ก.ย. 2026] รหัสผ่านของเส้นทางสำหรับคนดูแล (ตอนนี้มีแต่ /health) — Host ส่งค่าให้ตอนสร้าง
+    /// ว่าง = ให้เรียกได้เฉพาะจากเครื่องตัวเอง (loopback) ดู <see cref="IsAdminAllowed"/>
+    /// </summary>
+    public string AdminToken { get; set; }
+
     private string _bundleIndexAndroidCache;
 
     public Gateway(Host host, GameServer gameServer, WorldContext worldCtx, PlayerContext playerCtx)
@@ -140,6 +146,30 @@ public class Gateway
 
         _webServer.GetRoute["/entry"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
         {
+            // [5 ก.ย. 2026] เพดานผู้เล่น (--max-players) — เดิมรับค่ามาแล้วพิมพ์ทิ้ง ไม่มีที่ไหนใช้เลย
+            //
+            // ทำไมมาห้ามที่ /entry: นี่คือด่านสุดท้ายก่อน client จะรู้ที่อยู่ TCP ของโลก
+            // (frontend_addresses) ⇒ ห้ามที่นี่ = ตัวละครยังไม่ทันโผล่ในโลก ไม่ต้องเตะใครออก
+            //
+            // ⚠️ เป็นด่าน "อ่อน" ไม่ใช่ด่านแข็ง: ใครที่ถือ frontend_addresses อยู่แล้วยังต่อ TCP ได้
+            // ด่านแข็งต้องอยู่ที่ Auth ใน Core/GameServer.cs:153 ซึ่งอยู่นอกขอบเขตที่งานรอบนี้แก้ได้
+            // ⚠️ นับไม่ได้ (PlayersOnline คืน -1) ⇒ ปล่อยผ่าน ดีกว่ากันคนเข้าเพราะตัวนับพัง
+            int cap = _host.MaxPlayers;
+            if (cap > 0)
+            {
+                int online = _host.PlayersOnline();
+                if (online >= cap)
+                {
+                    Console.WriteLine($"[gateway] /entry ปฏิเสธ — เซิร์ฟเต็ม ({online}/{cap})");
+                    return new WebServer.JsonResponse(new JObject
+                    {
+                        ["error"] = "server_full",
+                        ["players_online"] = online,
+                        ["max_players"] = cap
+                    }.ToString(), HttpStatusCode.ServiceUnavailable);
+                }
+            }
+
             // [5 ก.ย. 2026] ตัวเกมบอกที่นี่ว่าจะเล่นตัวละครไหน — /entry?entity_id=…&platform=…
             // (client/Durango.UI/TitleMenuGroup.cs:1039-1046) และยิงมาแบบ auth:true คือมี header
             // Authorization = session token ⇒ ย้าย token ให้ชี้ตัวละครนั้น ไม่งั้น Auth ฝั่ง TCP
@@ -205,6 +235,59 @@ public class Gateway
 
         _webServer.PostRoute["/accounts"] = (HttpListenerRequest request, Dictionary<string, string> _) =>
             new WebServer.JsonResponse(Json.Write(_host.BuildAccount()));
+
+        // [5 ก.ย. 2026] /health — ตัวเลขสุขภาพเซิร์ฟสำหรับคนดูแล (ตัวเกมไม่ได้เรียกเส้นนี้)
+        //
+        // ทำไมต้องมี: เวลาผู้เล่นบอกว่า "เซิร์ฟหน่วง" เดิมไม่มีอะไรให้ดูเลย ต้องเดาล้วน ๆ
+        // ตอนนี้ดูได้ทันทีว่ารอบเกมช้าจริงไหม (tick_ms) · เซฟล่าสุดเมื่อไร · พังไปกี่ครั้ง
+        // · มีแพ็กเก็ตชนิดไหนที่เกมส่งมาแล้วเรายังไม่รองรับ (unhandled_packet_types)
+        //
+        // ⚠️ route นี้รันบนลูปเกม (Gateway.Process ถูกเรียกใน Host.Process) ⇒ ต้องเบา
+        // งานหนักสุดคือ sort ตัวอย่างเวลา 512 ตัว ซึ่งทำเฉพาะตอนมีคนเรียกเท่านั้น
+        _webServer.GetRoute["/health"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request))
+            {
+                return new WebServer.TextResponse("text/plain", "403 Forbidden", HttpStatusCode.Forbidden);
+            }
+
+            ServerMetrics.TickStats(out double tickP50, out double tickP99, out double tickMax);
+            ServerMetrics.WorkStats(out double workP50, out double workP99, out double workMax);
+
+            // แพ็กเก็ตที่ยังไม่มี handler — ตัวนับของจริงอยู่ที่ Connection.UnhandledCounts แล้ว
+            // (GameCode/Durango.Online/Connection.cs:430) เธรดรับ TCP เป็นคนเขียน ⇒ ต้องอ่านใต้ล็อกเดียวกัน
+            JObject unhandled = new();
+            lock (Connection.UnhandledCounts)
+            {
+                foreach (KeyValuePair<uint, int> kv in Connection.UnhandledCounts)
+                {
+                    unhandled[kv.Key.ToString()] = kv.Value;
+                }
+            }
+
+            JObject health = new()
+            {
+                ["uptime_sec"] = ServerMetrics.UptimeSec,
+                ["tick_ms"] = new JObject
+                {
+                    ["p50"] = tickP50,
+                    ["p99"] = tickP99,
+                    ["max"] = tickMax,
+                    ["samples"] = ServerMetrics.Samples
+                },
+                // เวลาที่ใช้ทำงานจริงต่อรอบ (ไม่รวม sleep) — แยกไว้เพราะ tick_ms รวมเวลานอนไปด้วย
+                ["work_ms"] = new JObject { ["p50"] = workP50, ["p99"] = workP99, ["max"] = workMax },
+                ["players_online"] = _host.PlayersOnline(),
+                ["max_players"] = _host.MaxPlayers,
+                ["worlds_loaded"] = _host.WorldsLoaded(),
+                ["regions_in_catalog"] = RegionCatalog.All?.Count ?? 0,
+                ["last_save_ago_sec"] = ServerMetrics.LastSaveAgoSec,
+                ["save_failures"] = ServerMetrics.SaveFailures,
+                ["loop_errors"] = ServerMetrics.LoopErrors,
+                ["unhandled_packet_types"] = unhandled
+            };
+            return new WebServer.JsonResponse(health.ToString());
+        };
 
         // /terrains/* ทั้งหมดจัดการใน UnhandledUrl เพราะชื่อเกาะเป็นตัวแปร (ดู TerrainRoute)
 
@@ -275,6 +358,42 @@ public class Gateway
             }
             return new WebServer.BinaryReponse { Content = ms.ToArray() };
         };
+    }
+
+    /// <summary>
+    /// [5 ก.ย. 2026] ด่านกันคนนอกของเส้นทางสำหรับคนดูแล (/health)
+    ///
+    /// เซิร์ฟนี้ bind แบบ wildcard (WebServer.cs:302) ⇒ ทุกเส้นทางเปิดออกอินเทอร์เน็ตหมด
+    /// ตัวเลขใน /health บอกจำนวนคนออนไลน์/สถานะเซิร์ฟ ไม่ควรให้ใครก็อ่านได้
+    ///
+    /// ตั้ง token แล้ว → ต้องส่ง ?token=… (หรือหัว X-Admin-Token) มาให้ตรง เรียกจากที่ไหนก็ได้
+    /// ไม่ได้ตั้ง      → ยอมเฉพาะ loopback (curl บนเครื่องเซิร์ฟเอง) เพื่อให้ไล่บั๊กได้โดยไม่เผลอเปิดให้คนนอก
+    ///
+    /// เทียบแบบใช้เวลาคงที่ ไม่ให้เดา token ทีละตัวอักษรจากเวลาตอบกลับได้
+    /// </summary>
+    private bool IsAdminAllowed(HttpListenerRequest request)
+    {
+        string want = AdminToken;
+        if (string.IsNullOrEmpty(want))
+        {
+            IPAddress from = request?.RemoteEndPoint?.Address;
+            return from != null && IPAddress.IsLoopback(from);
+        }
+        string got = request?.QueryString?["token"];
+        if (string.IsNullOrEmpty(got))
+        {
+            got = request?.Headers?["X-Admin-Token"];
+        }
+        if (string.IsNullOrEmpty(got) || got.Length != want.Length)
+        {
+            return false;
+        }
+        int diff = 0;
+        for (int i = 0; i < want.Length; i++)
+        {
+            diff |= got[i] ^ want[i];
+        }
+        return diff == 0;
     }
 
     /// <summary>หา context จาก Authorization header (session token — client ใส่ทุก request แบบ auth)</summary>
@@ -416,23 +535,29 @@ public class Gateway
                 return (HttpListenerRequest request, Dictionary<string, string> postData) => new WebServer.BadRequestResponse();
             }
             string aPath = Path.Combine(AssetBundleAndroidDir, aName);
+            // [แก้เอง] 5 ก.ย. 2026 — เสิร์ฟแบบสตรีม (FileResponse) แทน File.ReadAllBytes
+            //
+            // bundle ก้อนละหลาย MB: ReadAllBytes = byte[] ก้อนใหญ่ตกไป Large Object Heap ทุกคำขอ
+            // มือถือหลายเครื่องโหลดพร้อมกัน ⇒ GC ถี่จนลูปเกมหยุดเดิน (วัดจริง 13 คน = 2 tps)
+            // FileResponse อ่านทีละ 64 KB เขียนตรงลง OutputStream — หน่วยความจำคงที่ ไม่แตะ LOH
+            // (คลาสนี้มีมาตั้งแต่ 4 ก.ย. แต่ไม่เคยถูกเรียกใช้จริงเลย)
             return (HttpListenerRequest request, Dictionary<string, string> postData) =>
             {
                 if (File.Exists(aPath))
                 {
-                    return new WebServer.BinaryReponse { Content = File.ReadAllBytes(aPath) };
+                    return new WebServer.FileResponse(aPath);
                 }
                 string resolvedA = ResolveBundleIgnoringHash(aName, AssetBundleAndroidDir);
                 if (resolvedA != null)
                 {
-                    return new WebServer.BinaryReponse { Content = File.ReadAllBytes(resolvedA) };
+                    return new WebServer.FileResponse(resolvedA);
                 }
                 // soundbank พากย์เสียงแยกภาษา: ชุด Android มีแค่ en_us — เสิร์ฟ en_us แทนทุกภาษา
                 string fallbackA = ResolveVoiceBankFallback(aName, AssetBundleAndroidDir);
                 if (fallbackA != null)
                 {
                     Console.WriteLine("[assetbundle-android] {0} ไม่มี ⇒ เสิร์ฟ en_us แทน", aName);
-                    return new WebServer.BinaryReponse { Content = File.ReadAllBytes(fallbackA) };
+                    return new WebServer.FileResponse(fallbackA);
                 }
                 Console.WriteLine("[assetbundle-android] 404 {0}", aName);
                 return new WebServer.NotFountResponse();
@@ -444,41 +569,9 @@ public class Gateway
             return TerrainRoute(url);
         }
 
-        if (url.StartsWith("/assetbundles/android/"))
-        {
-            if (string.IsNullOrEmpty(AssetBundleAndroidDir) || !Directory.Exists(AssetBundleAndroidDir))
-            {
-                return null;
-            }
-            string aName = Path.GetFileName(url.Substring("/assetbundles/android/".Length).Split('?')[0]);
-            if (string.IsNullOrEmpty(aName) || aName.Contains(".."))
-            {
-                return (HttpListenerRequest request, Dictionary<string, string> postData) => new WebServer.BadRequestResponse();
-            }
-            string aPath = Path.Combine(AssetBundleAndroidDir, aName);
-            return (HttpListenerRequest request, Dictionary<string, string> postData) =>
-            {
-                if (File.Exists(aPath))
-                {
-                    return new WebServer.BinaryReponse { Content = File.ReadAllBytes(aPath) };
-                }
-                string resolvedA = ResolveBundleIgnoringHash(aName, AssetBundleAndroidDir);
-                if (resolvedA != null)
-                {
-                    return new WebServer.BinaryReponse { Content = File.ReadAllBytes(resolvedA) };
-                }
-                // soundbank พากย์เสียงแยกภาษา: ชุด Android มีแค่ en_us — เสิร์ฟ en_us แทนทุกภาษา
-                string fallbackA = ResolveVoiceBankFallback(aName, AssetBundleAndroidDir);
-                if (fallbackA != null)
-                {
-                    Console.WriteLine("[assetbundle-android] {0} ไม่มี ⇒ เสิร์ฟ en_us แทน", aName);
-                    return new WebServer.BinaryReponse { Content = File.ReadAllBytes(fallbackA) };
-                }
-                Console.WriteLine("[assetbundle-android] 404 {0}", aName);
-                return new WebServer.NotFountResponse();
-            };
-        }
-
+        // [ลบเอง] 5 ก.ย. 2026 — ตรงนี้เคยมีบล็อก "/assetbundles/android/" ชุดที่สอง เหมือนกันทุกบรรทัด
+        // แต่เข้าไม่ถึงเลย เพราะเงื่อนไขชุดแรก (ข้างบน) จับ url เดียวกันไปก่อนเสมอ ⇒ ลบทิ้ง
+        // (แก้ที่ชุดแรกที่เดียวพอ ไม่ต้องแก้สองที่แล้วลืมที่ใดที่หนึ่ง)
         return (HttpListenerRequest request, Dictionary<string, string> _) => new WebServer.BadRequestResponse();
     }
 

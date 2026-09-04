@@ -41,6 +41,18 @@ public class WebServer
 		/// </summary>
 		public string Location;
 
+		/// <summary>
+		/// ขนาด body ที่ "รู้ล่วงหน้าโดยไม่ต้องสร้าง byte[]" (เช่นไฟล์บนดิสก์) — null = ไม่รู้
+		///
+		/// 🐛 [5 ก.ย. 2026] ถ้าไม่มีค่านี้ FileResponse จะไร้ความหมาย เพราะ Process() บัฟเฟอร์ทุก
+		/// response ลง MemoryStream แล้ว ToArray() ⇒ ไฟล์ 20 MB ก็ยังกลายเป็น byte[] ก้อนใหญ่
+		/// ตกไป Large Object Heap เหมือนเดิม (คือต้นตอที่ FileResponse ตั้งใจแก้พอดี)
+		///
+		/// มีค่า = Process() เขียนตรงลง OutputStream ข้ามการบัฟเฟอร์ และยังตั้ง Content-Length
+		/// ได้ครบเหมือนเดิม เพราะรู้ขนาดตั้งแต่ก่อนเขียน (BestHTTP ของเกมต้องมีหัวนี้ — ดู Process)
+		/// </summary>
+		public virtual long? DirectLength => null;
+
 		public abstract void Write(Stream stream);
 	}
 
@@ -126,14 +138,22 @@ public class WebServer
 	{
 		private readonly string _path;
 
+		private readonly long _length;
+
 		public FileResponse(string path, string etag = null, int maxAgeSeconds = 2592000)
 		{
 			_path = path;
+			// อ่านขนาดตั้งแต่ตอนสร้าง = ตั้ง Content-Length ได้โดยไม่ต้องบัฟเฟอร์ไฟล์เพื่อวัดขนาด
+			// (ถ้าไม่มีหัวนี้ HttpListener จะตอบเป็น chunked แล้วเกมค้างหน้า title — ดู Process)
+			_length = new FileInfo(path).Length;
 			ContentType = "application/octet-stream";
 			StatusCode = HttpStatusCode.OK;
 			ETag = etag;
 			MaxAgeSeconds = maxAgeSeconds;
 		}
+
+		/// <summary>บอก Process() ว่าเขียนตรงลง OutputStream ได้เลย ไม่ต้องผ่าน MemoryStream</summary>
+		public override long? DirectLength => _length;
 
 		public override void Write(Stream stream)
 		{
@@ -506,6 +526,22 @@ public class WebServer
 				// HttpListenerResponse จะ fallback เป็น Transfer-Encoding: chunked เสมอ
 				// ซึ่ง BestHTTP (เวอร์ชันเก่าที่เกมใช้) parse ไม่ผ่าน ทำให้ IsSuccess เป็น false
 				// ทั้งที่ status 200 จริง (เกมค้างที่ title พร้อม error "(Knock)" เสมอ)
+				// [แก้เอง] 5 ก.ย. 2026 — ทางลัดของไฟล์ใหญ่: เขียนตรงลง OutputStream ไม่ผ่าน MemoryStream
+				//
+				// ทำไม: bundle ก้อนละหลาย MB × มือถือหลายเครื่องพร้อมกัน ถ้าบัฟเฟอร์ทั้งไฟล์ก่อน
+				// จะได้ byte[] ก้อนใหญ่ตกไป Large Object Heap ทุกคำขอ ⇒ GC ถี่จนลูปเกมหยุดเดิน
+				// (วัดจริง: ผู้เล่น 13 คน + มือถือโหลด bundle = 2 tps) — ดูคอมเมนต์ที่ FileResponse
+				//
+				// ⚠️ ยังตั้ง ContentLength64 เสมอ (เอาจากขนาดไฟล์) ห้ามปล่อยเป็น chunked เด็ดขาด
+				// ⚠️ ไม่บีบ gzip ให้ทางนี้ — ของที่มาทางนี้คือ .bundle ซึ่งบีบ LZ4 มาแล้ว
+				//    (เงื่อนไข gzip ข้างล่างก็ข้าม octet-stream อยู่แล้ว ⇒ ผลลัพธ์เหมือนเดิมทุกประการ)
+				long? directLength = value3.DirectLength;
+				if (directLength.HasValue)
+				{
+					key.Response.ContentLength64 = directLength.Value;
+					value3.Write(key.Response.OutputStream);
+				}
+				else
 				using (MemoryStream buffer = new MemoryStream())
 				{
 					value3.Write(buffer);
