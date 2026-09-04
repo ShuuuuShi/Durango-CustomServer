@@ -546,7 +546,9 @@ public partial class Player
         // ซึ่งตรงกับ body_parts.body.max_hp) ⇒ หักที่หลอดนี้ ไม่ได้เก็บ HP แยกอีกชุด
         _survival.Add(SurvivalState.KeyLife, -value);
         FlushSurvival();
-        if (_survival.ValueAt(SurvivalState.KeyLife, Gauge.CurrentTime) <= 0f)
+        // เทียบกับ 1 ไม่ใช่ 0 — หลอดเลือดมีความชันบวก อ่านช้าไปเสี้ยววินาทีค่าจะไต่พ้น 0 แล้ว
+        // (เหตุผลเต็มอยู่ที่ Player.Hunting.DeadLifeThreshold)
+        if (_survival.ValueAt(SurvivalState.KeyLife, Gauge.CurrentTime) <= DeadLifeThreshold)
         {
             Die();
         }

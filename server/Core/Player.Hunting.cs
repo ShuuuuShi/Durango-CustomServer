@@ -71,8 +71,106 @@ public partial class Player
             {
                 // ออกนอกระยะ ⇒ ลืมไว้ก่อน เดี๋ยวกลับเข้ามาค่อยส่งใหม่ (ตัวเกมทำลายทิ้งเองอยู่แล้ว)
                 _animalSet.Remove(animal.EntityId);
+                continue;
             }
+
+            if (animal.IsAlive) AnimalTurn(animal, now);
         }
+    }
+
+    /// <summary>
+    /// ตาของสัตว์ตัวหนึ่ง — ตัดสินใจว่าจะกัดผู้เล่นคนนี้ไหม
+    ///
+    /// ═══ ทำไมต้องอยู่ฝั่งเซิร์ฟ ═══
+    /// **การเดินเล่นของสัตว์เป็นของฝั่งเกม** — <c>client/ClientAnimalActor.cs</c> เป็น component
+    /// บนตัวโมเดล ที่เดินสุ่มรอบจุดเกิดเองทุกเฟรมโดยไม่ต้องถามเซิร์ฟ (มี <c>_wanderRadius</c>
+    /// กับตารางท่าทางของมันเอง) ⇒ **เซิร์ฟไม่ต้องส่ง Move ให้สัตว์ ห้ามส่งด้วย จะไปสู้กับมัน**
+    ///
+    /// แต่ **การต่อสู้เป็นของฝั่งเซิร์ฟ** — ฝั่งเกมไม่เคยอ่าน <c>ai_factor_id</c> ใน animal.json เลย
+    /// สักที่เดียว (เช็คแล้วทั้งซอร์ส) และรับผลเป็น <c>Damaged</c> อย่างเดียว
+    /// ⇒ ตรรกะไล่กัดอยู่บนเซิร์ฟจริงของ NEXON ซึ่งไม่มีซอร์ส ต้องเขียนเอง
+    ///
+    /// กติกาที่ใช้ (อิงฟิลด์จริงในข้อมูล ไม่ได้ตั้งลอย ๆ):
+    /// • <c>type</c> = Carnivore/Scavenger → ไล่กัดคนที่เข้ามาใกล้เอง
+    /// • <c>type</c> = Herbivore → กัดเฉพาะคนที่ตีมันก่อน (ตั้ง AggroTargetId ตอนโดนตี)
+    /// • จังหวะการตีจาก <c>attack_cooltime</c> · ความแรงจากสูตร <c>attack</c> ของชนิดนั้น
+    /// </summary>
+    private void AnimalTurn(AnimalManager.Animal animal, double now)
+    {
+        AnimalTypes.Info info = AnimalTypes.Get(animal.EntityType);
+        if (info == null) return;
+        if (!_context.AppearPlayer.IsAlive) return;             // ตายแล้วไม่ต้องรุมซ้ำ
+
+        bool hunting = animal.AggroTargetId == EntityId;
+        if (!hunting && !info.IsAggressive) return;             // สัตว์กินพืชไม่แตะคนก่อน
+
+        if (!IsWithinTiles(animal.Tile, AnimalAggroTiles)) return;
+        if (now < animal.NextAttackAt) return;
+
+        animal.NextAttackAt = now + Math.Max(0.5f, info.AttackCooltime);
+        animal.AggroTargetId = EntityId;
+
+        // ป้องกันของผู้เล่น: players.json → player.defense (ข้อมูลจริงเป็น 0 ⇒ กินเต็ม ๆ)
+        // เกราะจากชุดที่ใส่ยังไม่ได้คิด — ระบบค่าสถานะจากอุปกรณ์ยังไม่มี
+        float value = Math.Max(CombatTuning.MinDamage,
+                               (float)Math.Round(animal.Attack - BattleDataStore.Stats.defense));
+
+        _world.BroadCast(new Damaged
+        {
+            VictimId = EntityId,
+            AttackerId = animal.EntityId,
+            EventAt = Times.UnixTimeNow(),
+            Damage = new Damage
+            {
+                Result = DamageResult.Hit,
+                Value = (int)value,
+                Part = BodyPart.Body,
+                Direction = CombatTuning.HitDirection,
+                AttackType = AttackType.BareHands,
+                Effects = DamageEffects.None
+            }
+        });
+
+        _survival.Add(SurvivalState.KeyLife, -value);
+        FlushSurvival();
+
+        // ⚠️ ต้องเทียบกับค่ามากกว่า 0 นิดหนึ่ง: หลอดเลือดมีความชันบวก (ฟื้นเอง) ⇒ พออ่านค่า
+        // อีกเสี้ยววินาทีถัดมามันไต่ขึ้นพ้น 0 แล้ว ทำให้เช็ค "<= 0" ไม่เคยจริงเลยแม้เลือดจะหมด
+        // (เจอของจริง: หมาป่าตีจนเลือดเหลือ 0 บนจอ แต่เซิร์ฟไม่เคยเรียก Die)
+        if (_survival.ValueAt(SurvivalState.KeyLife, now) <= DeadLifeThreshold)
+        {
+            Console.WriteLine($"[ล่าสัตว์] {info.Name} lv{animal.CombatLevel} ฆ่า " +
+                              $"{EntityId[..Math.Min(8, EntityId.Length)]}");
+            Die();
+        }
+        OnContextChanged();
+    }
+
+    /// <summary>
+    /// **ค่าของเรา** — สัตว์กินเนื้อเริ่มไล่กัดเมื่อผู้เล่นเข้ามาใกล้กี่ช่อง
+    ///
+    /// ข้อมูลเกมมี <c>bound_radius</c> (200-400) กับ <c>herd_collide_distance</c> แต่ทั้งคู่เป็น
+    /// ขนาดตัว/ระยะเบียดกันของฝูง ไม่ใช่ระยะเห็นเหยื่อ — ระยะไล่ล่าอยู่ใน ai_factor ซึ่งไม่มีในข้อมูล
+    /// 4 ช่อง ≈ ระยะที่ผู้เล่นเห็นตัวสัตว์เต็ม ๆ บนจอ และใกล้เคียงระยะเก็บของ (5 ช่อง)
+    /// </summary>
+    private const int AnimalAggroTiles = 4;
+
+    /// <summary>เลือดต่ำกว่านี้ถือว่าตาย — เผื่อความชันของหลอดที่ไต่ขึ้นระหว่างอ่านค่า</summary>
+    private const float DeadLifeThreshold = 1f;
+
+    /// <summary>ผู้เล่นอยู่ในระยะกี่ช่องจากจุดนี้ไหม (1 ช่อง = 200 หน่วยพิกัดโลก)</summary>
+    private bool IsWithinTiles(Point2 tile, int tiles)
+    {
+        Movement[] movements = _context.AppearPlayer.Move.Movements;
+        if (movements == null || movements.Length == 0 ||
+            movements[0].Path == null || movements[0].Path.Length == 0)
+        {
+            return false;   // ยังไม่รู้ตำแหน่ง — อย่าเพิ่งกัด (ตรงข้ามกับตอนเก็บของที่ไม่บล็อก)
+        }
+        WorldPosition pos = movements[0].Path[0].Position;
+        float dx = pos.x / 200f - tile.x;
+        float dy = pos.y / 200f - tile.y;
+        return dx * dx + dy * dy <= tiles * tiles;
     }
 
     /// <summary>**ค่าของเรา** — ทุกกี่วินาทีถึงตรวจระยะสัตว์รอบตัวหนึ่งครั้ง</summary>
@@ -132,6 +230,7 @@ public partial class Player
         int value = Math.Max(CombatTuning.MinDamage, (int)Math.Round(raw - defense));
 
         animal.Life = Math.Max(0f, animal.Life - value);
+        animal.AggroTargetId = EntityId;      // ตีมันแล้วมันสู้กลับ แม้เป็นสัตว์กินพืช
 
         AnimalTypes.Info hit = AnimalTypes.Get(animal.EntityType);
         Console.WriteLine($"[ล่าสัตว์] ตี {hit?.Name ?? animal.EntityType.ToString()} lv{animal.CombatLevel} " +

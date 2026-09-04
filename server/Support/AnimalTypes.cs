@@ -31,7 +31,15 @@ public static class AnimalTypes
         public bool Tamable;
         public string PreferredFoodTag;
         public string DropItem;
-        public string Kind;            // Herbivore / Carnivore / …
+        public string Kind;            // Herbivore / Carnivore / Omnivore …
+        public float AttackCooltime = 2.2f;   // วินาทีต่อการโจมตีหนึ่งครั้ง
+
+        /// <summary>
+        /// ไล่กัดคนที่เดินผ่านเองไหม — ค่า <c>type</c> ในไฟล์มี 4 แบบเท่านั้น (นับจาก 214 ชนิด):
+        /// Herbivore 139 (กินพืช — สู้เฉพาะตอนถูกตี) · Carnivore 69 · Scavenger 5 (กินซาก
+        /// แต่เป็นสัตว์ดุ) · Sandbag 1 (หุ่นซ้อมมือ ไม่ควรตีใคร)
+        /// </summary>
+        public bool IsAggressive => Kind is "Carnivore" or "Scavenger";
     }
 
     private static Dictionary<ushort, Info> _byType;
@@ -77,7 +85,8 @@ public static class AnimalTypes
                 Tamable = (bool?)o["tamable"] ?? false,
                 PreferredFoodTag = (string)o["preferred_food_tag"],
                 DropItem = (string)o["drop_item"],
-                Kind = (string)o["type"]
+                Kind = (string)o["type"],
+                AttackCooltime = (float?)o["attack_cooltime"] ?? 2.2f
             };
 
             // "name": {"이구아노돈": null} — ฟอร์แมต gettext ของ NEXON: คีย์คือข้อความต้นทาง
