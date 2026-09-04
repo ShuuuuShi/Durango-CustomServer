@@ -1,0 +1,27 @@
+# ผลลัพธ์การ build
+**/bin/
+**/obj/
+**/publish/
+
+# ตัวเกม (1 GB — ก๊อปมาจากชุดแจก ไม่ใช่ซอร์ส)
+game/
+game-backup/
+
+# สถานะตอนรัน
+**/logs/
+**/AppData*/
+*.log
+*.log.err
+*.pid
+launcher.session
+saves/
+
+# ไฟล์ของเครื่อง/เอดิเตอร์
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+Thumbs.db
+Desktop.ini
+__pycache__/
