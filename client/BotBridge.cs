@@ -286,6 +286,8 @@ public static class BotBridge
                 case "use": return CmdUse(args);
                 case "log": return CmdLog(args);
                 case "equip": return CmdEquip(args);
+                case "touch": return CmdTouch(args);
+                case "menus": return CmdMenus();
                 default: return Err("unknown cmd: " + cmd);
             }
         }
@@ -518,6 +520,58 @@ public static class BotBridge
     }
 
     // ---------------------------------------------------------------- interaction menu
+
+    /// <summary>
+    /// แตะสิ่งปลูกสร้างที่ใกล้ที่สุด (หรือระบุ id=) แล้วรอเมนูจากเซิร์ฟ
+    ///
+    /// เป็นคู่กับ <c>menus</c> — ใช้ตรวจว่าเซิร์ฟส่ง Touched.Interactions มาถูกไหม
+    /// ซึ่งเป็นสาเหตุอันดับหนึ่งของอาการ "กดแล้วไม่มีอะไรขึ้น" ในโปรเจกต์นี้
+    /// </summary>
+    private static string CmdTouch(Dictionary<string, string> args)
+    {
+        if (PlayerBehavior.LocalPlayer == null) return Err("no local player");
+
+        var objs = new List<GameObject>();
+        InteractionSystem.SearchPropObjects(objs);
+        args.TryGetValue("id", out string wantId);
+
+        GameObject best = null;
+        float bestDist = float.MaxValue;
+        foreach (GameObject go in objs)
+        {
+            if (go == null) continue;
+            if (!string.IsNullOrEmpty(wantId) && ObjectIdentifier.GetEntityId(go) != wantId) continue;
+            float d = InteractionObject.GetDistance(go);
+            if (d < bestDist) { bestDist = d; best = go; }
+        }
+        if (best == null) return Err("no prop near");
+
+        var inter = GameSystem<InteractionSystem>.Instance();
+        inter.SetInteractionTarget(new InteractionObject(best));
+        inter.SendTouchMsg();
+        return Ok();
+    }
+
+    /// <summary>รายการเมนูที่เซิร์ฟส่งมาจากการแตะครั้งล่าสุด — ใช้ดูว่ามีปุ่มอะไรให้กดบ้าง</summary>
+    private static string CmdMenus()
+    {
+        if (!GameSystem<InteractionSystem>.HasInstance()) return Err("no interaction system");
+        var sb = new StringBuilder(256);
+        sb.Append("{\"ok\":true,\"menus\":[");
+        bool first = true;
+        foreach (InteractionMenuData menu in GameSystem<InteractionSystem>.Instance().MenuList)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append("{\"action\":");
+            JStr(sb, menu.Action.ToString());
+            sb.Append(",\"disabled\":").Append(menu.Disabled ? "true" : "false");
+            sb.Append(",\"denied\":").Append(menu.AccessDenied ? "true" : "false");
+            sb.Append('}');
+        }
+        sb.Append("]}");
+        return sb.ToString();
+    }
 
     private static string CmdMenu(Dictionary<string, string> args)
     {

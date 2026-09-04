@@ -1032,6 +1032,11 @@ public partial class Player
                 // เกมไม่ได้ดู components เอง มันเชื่อรายการที่เซิร์ฟส่งมาใน Touched.Interactions ล้วน ๆ
                 if (blueprint.Components.Contains("Port")) list.Add(Shared.System.Interaction.SailingRoutes);
                 if (blueprint.Components.Contains("Growable") && flag) list.Add(Shared.System.Interaction.Plant);
+                // [5 ก.ย. 2026] กรง — ไม่ใส่ 2 บรรทัดนี้ แตะกรงแล้วไม่มีปุ่มอะไรขึ้นเลย
+                // (client/Durango.UI/GrowCageGroup.cs:62 ผูกหน้าจอไว้กับ Interaction.Cage)
+                // สถานะความจุกรงเติมให้ตอนสร้าง/โหลดโลกแล้วที่ Support/CageTypes.cs
+                if (blueprint.Components.Contains("GrowCage")) list.Add(Shared.System.Interaction.Cage);
+                if (blueprint.Components.Contains("DomesticCage")) list.Add(Shared.System.Interaction.OpenDomesticCage);
                 if (blueprint.Components.Contains("Modular") && flag)
                 {
                     list.Add(Shared.System.Interaction.AddOnManage);

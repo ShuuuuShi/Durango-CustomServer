@@ -41,11 +41,13 @@ public class ArtifactManager
             foreach (string key in keys)
             {
                 AppearArtifact artifact = _artifacts[key];
-                if (!WorkbenchTags.Apply(ref artifact)) continue;
+                bool changed = WorkbenchTags.Apply(ref artifact);
+                changed |= CageTypes.Apply(ref artifact);
+                if (!changed) continue;
                 _artifacts[key] = artifact;
                 patched++;
             }
-            if (patched > 0) Console.WriteLine($"[โต๊ะคราฟต์] เติมแท็กให้สิ่งปลูกสร้างเดิม {patched} หลัง");
+            if (patched > 0) Console.WriteLine($"[โต๊ะคราฟต์] เติมแท็ก/สถานะกรงให้สิ่งปลูกสร้างเดิม {patched} หลัง");
         }
     }
 
@@ -53,6 +55,8 @@ public class ArtifactManager
     {
         // โต๊ะคราฟต์ต้องมีแท็กติดไปด้วย ไม่งั้นฝั่งเกมถือว่า "ไม่มีโต๊ะ" (ดู Support/WorkbenchTags.cs)
         WorkbenchTags.Apply(ref artifact);
+        // กรงต้องมีสถานะความจุ ไม่งั้นหน้าจอกรงเปิดมาว่างเปล่า (ดู Support/CageTypes.cs)
+        CageTypes.Apply(ref artifact);
         _artifacts.Add(artifact.EntityId, artifact);
     }
 

@@ -16,8 +16,10 @@ namespace Durango.Online;
 /// ⇒ ถ้าไม่คิดสูตรก็ต้องเดาตัวเลขเอา ซึ่งผิดกฎของโปรเจกต์ (ทุกค่าต้องอิงต้นฉบับ)
 ///
 /// ไวยากรณ์ที่รองรับ — สำรวจจากไฟล์จริงแล้วว่าใช้แค่นี้:
-/// ตัวเลข · ตัวแปรที่ผู้เรียกส่งเข้ามา · <c>+ - * / **</c> · วงเล็บ · เครื่องหมายลบหน้าตัว · <c>int(...)</c>
-/// (สำรวจ animal.json ทั้งไฟล์: เจอแค่ <c>* + **</c> · ไฟล์ performance.json เพิ่ม <c>- / int()</c>)
+/// ตัวเลข · ตัวแปรที่ผู้เรียกส่งเข้ามา · <c>+ - * / **</c> · วงเล็บ · เครื่องหมายลบหน้าตัว
+/// · ฟังก์ชัน <c>int() abs() round()</c> และ <c>min(a,b) max(a,b)</c>
+/// (สำรวจไฟล์จริง: animal.json ใช้แค่ <c>* + **</c> · performance.json เพิ่ม <c>- / int()</c>
+///  และสูตรขนาดกรงใช้ <c>min(150, 60 + 15 * int(level/10))</c>)
 ///
 /// <c>**</c> เป็นการยกกำลังแบบ Python (ข้อมูลชุดนี้ถอดมาจากฝั่ง Python ของ NEXON) และ
 /// **ผูกขวา** เหมือน Python คือ <c>2 ** 3 ** 2</c> = 512 ไม่ใช่ 64
@@ -155,15 +157,34 @@ public static class StatFormula
             if (i < s.Length && s[i] == '(')                            // เรียกฟังก์ชัน
             {
                 i++;
-                double arg = Additive(s, ref i, vars);
+                var args = new List<double>();
                 Skip(s, ref i);
-                if (i >= s.Length || s[i] != ')') throw new FormatException();
-                i++;
+                if (i < s.Length && s[i] == ')')
+                {
+                    i++;                                                // ฟังก์ชันไม่มีอาร์กิวเมนต์
+                }
+                else
+                {
+                    while (true)
+                    {
+                        args.Add(Additive(s, ref i, vars));
+                        Skip(s, ref i);
+                        if (i < s.Length && s[i] == ',') { i++; continue; }
+                        if (i >= s.Length || s[i] != ')') throw new FormatException();
+                        i++;
+                        break;
+                    }
+                }
+
                 return name switch
                 {
-                    "int" => Math.Truncate(arg),                        // int() ของ Python ตัดเศษเข้าหาศูนย์
-                    "abs" => Math.Abs(arg),
-                    "round" => Math.Round(arg, MidpointRounding.AwayFromZero),
+                    // int() ของ Python ตัดเศษเข้าหาศูนย์
+                    "int" when args.Count == 1 => Math.Truncate(args[0]),
+                    "abs" when args.Count == 1 => Math.Abs(args[0]),
+                    "round" when args.Count == 1 => Math.Round(args[0], MidpointRounding.AwayFromZero),
+                    // min/max สองตัว — ใช้ในสูตรขนาดกรง เช่น "min(150, 60 + 15 * int(level/10))"
+                    "min" when args.Count == 2 => Math.Min(args[0], args[1]),
+                    "max" when args.Count == 2 => Math.Max(args[0], args[1]),
                     _ => throw new FormatException()                    // ฟังก์ชันที่ไม่รู้จัก = ไม่เดา
                 };
             }
