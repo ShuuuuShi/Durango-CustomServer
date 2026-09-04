@@ -21,7 +21,11 @@ namespace Durango.Online;
 // พอร์ตจาก nexonSRC/Durango.Online/Player.cs (handler 39 ตัวของเซิร์ฟแท้)
 // จุดที่ต้นฉบับดึงข้อมูลจากระบบฝั่ง client ใน process เดียวกัน (RecipeSystem/SocialSystem/
 // GameManager.ClusterMode) เปลี่ยนเป็น BlueprintStore / DataStore.Emotions / Host.ClusterMode
-public class Player
+// [5 ก.ย. 2026] แยกเป็น partial class — handler ของแต่ละระบบอยู่คนละไฟล์ (Player.<ระบบ>.cs)
+// เหตุผล: ไฟล์นี้โตขึ้นเรื่อย ๆ ตามจำนวน handler และเวลาทำหลายระบบพร้อมกันจะแก้ชนกันตลอด
+// ไฟล์นี้เก็บแกน (ต่อ/ปิด/เดิน/แตะ/chunk) ส่วนระบบใหม่ให้เพิ่มไฟล์ของตัวเองแล้วลงทะเบียนใน
+// RegisterSystemHandlers() ด้านล่าง
+public partial class Player
 {
     private const string EpicCategory = "sunset";
 
@@ -515,6 +519,7 @@ public class Player
             _survival.Freeze(Gauge.CurrentTime);
             Closed?.Invoke();
         };
+        RegisterSystemHandlers();
         _context.PlayerInfo.DisconnectedAt = Times.UnixTimeNow();
         SendStatistics();
         SendInventory();
