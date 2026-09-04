@@ -17,6 +17,9 @@ public class TerrainData
 
     public TerrainInfoJson Info;
 
+    /// <summary>จุดสำคัญที่มากับเกาะ (pois.yml) — ท่าเรือ/รูวาร์ป · null ได้ถ้าเกาะไม่มีไฟล์นี้</summary>
+    public TerrainPois Pois;
+
     public int Width;
 
     public int Height;

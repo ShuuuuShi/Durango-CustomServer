@@ -52,6 +52,7 @@ public static class TerrainLoader
         data.Rivers = null;
         data.Landmarks = null;
         data.Garden = null;
+        data.Pois = null;
         string path = ResolvePath(terrainId);
         if (path == null) return;
         try
@@ -66,6 +67,9 @@ public static class TerrainLoader
                 else if (CheckEntry(entry, "whole.landmarks")) data.Landmarks = LoadEntry(entry);
                 else if (CheckEntry(entry, "whole.garden")) data.Garden = LoadEntry(entry);
                 else if (CheckEntry(entry, "info.yml")) data.Info = Json.Read<TerrainInfoJson>(LoadEntry(entry));
+                // [5 ก.ย. 2026] pois.yml บอกตำแหน่งท่าเรือ/รูวาร์ปที่มากับเกาะ — เซิร์ฟเป็นคนวางลงโลก
+                // (เกมเป็น client ล้วน ไม่ได้วางเอง) เกาะที่ generate เองบางลูกไม่มีไฟล์นี้ ⇒ Pois = null
+                else if (CheckEntry(entry, "pois.yml")) data.Pois = TerrainPois.Parse(LoadEntry(entry));
             }
         }
         catch (Exception e)

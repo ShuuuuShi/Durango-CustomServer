@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Durango.Terrain;
+using Shared.Building;
 using Messages;
 using UnityEngine;
 
@@ -65,6 +66,9 @@ public class World
 
     public TerrainInfoJson TerrainInfo => _terrainData.Info;
 
+    /// <summary>ชื่อ terrain ของโลกนี้ (= RegionId ในสารบัญเกาะ ดู RegionCatalog)</summary>
+    public string TerrainId => _context.TerrainId;
+
     public byte[] Biomes => _terrainData.Biomes;
 
     public string Weather { get; private set; }
@@ -96,6 +100,82 @@ public class World
         NumChunksY = _terrainData.Height / 16;
         _chunkData = new ChunkData[NumChunksX, NumChunksY];
         AssignChunkData();
+        PlaceTerrainPois();
+    }
+
+    /// <summary>
+    /// วางสิ่งปลูกสร้างประจำเกาะตามพิกัดใน pois.yml — ท่าเรือ/รูวาร์ป
+    ///
+    /// ทำไมเซิร์ฟต้องวาง: เกมของ NEXON เป็น client ล้วน มันรอรับ AppearArtifact จากเซิร์ฟ
+    /// ไม่ได้อ่าน pois.yml เอง (ยืนยันแล้วว่าไม่มีจุดไหนในซอร์สเกมแตะไฟล์นี้)
+    /// ถ้าไม่วาง ผู้เล่นจะไม่เจอท่าเรือ ⇒ กดล่องเรือไม่ได้เลยทั้งเกาะ
+    ///
+    /// ⚠️ id ต้อง **คงที่ผูกกับลำดับในไฟล์** (poi_port_0, poi_port_1, …) ห้ามไล่เลขตอนวาง
+    /// ไม่งั้นเปิดเซิร์ฟรอบสองจะไม่รู้ว่าของเดิมคืออันไหน แล้ววางซ้อนเพิ่มทุกรอบ
+    /// </summary>
+    private void PlaceTerrainPois()
+    {
+        TerrainPois pois = _terrainData.Pois;
+        if (pois == null)
+        {
+            return;
+        }
+
+        // (id, blueprint, entity type, ขนาด footprint) — ชนิดจาก data/assets/entity_types/artifact.json
+        var wanted = new List<(string Id, ushort Type, Point2 Size, Point2 Tile)>();
+        for (int i = 0; i < pois.PortPoints.Count; i++)
+        {
+            wanted.Add(($"poi_port_{i}", (ushort)7001, new Point2(3, 3), pois.PortPoints[i]));   // dock 항구
+        }
+        for (int i = 0; i < pois.Warpholes.Count; i++)
+        {
+            wanted.Add(($"poi_warphole_{i}", (ushort)9450, new Point2(6, 6), pois.Warpholes[i])); // neutral_warphole
+        }
+        for (int i = 0; i < pois.Rifts.Count; i++)
+        {
+            wanted.Add(($"poi_rift_{i}", (ushort)6282, new Point2(4, 4), pois.Rifts[i]));        // warp_accelerator
+        }
+
+        int placed = 0;
+        foreach ((string id, ushort type, Point2 size, Point2 tile) in wanted)
+        {
+            if (ArtifactManager.Get(id).HasValue)
+            {
+                continue;   // มีอยู่แล้วจากรอบก่อน — ไม่วางซ้ำ
+            }
+
+            // ใช้ตัวสร้างเดียวกับ cheat "prop" ของต้นฉบับ (Cheats.MakeAppearArtifact) แทนที่จะประกอบ
+            // struct เอง เพราะมันเติมของที่ client ต้องใช้เรนเดอร์ให้ครบ:
+            //   Display.Parts["common"] = blueprint.DefaultLook   ← ไม่มีอันนี้ = ไม่มีโมเดล มองไม่เห็น
+            //   States.BuildingState = Completed · States.Durability = เต็มหลอด
+            //   Stories/AddOns ตาม component ของ blueprint
+            AppearArtifact? made = Cheats.MakeAppearArtifact(
+                new[] { "prop", type.ToString(), $"position:{tile.x},{tile.y}", $"size:{size.x},{size.y}" },
+                out AddOns? addons);
+            if (!made.HasValue)
+            {
+                Console.WriteLine($"[world] ⚠️ ไม่รู้จัก blueprint {type} — ข้าม {id}");
+                continue;
+            }
+
+            AppearArtifact artifact = made.Value;
+            // id ต้องเป็นของเรา (คงที่ตามลำดับในไฟล์) ไม่ใช่ Guid สุ่มที่ตัวสร้างแจกมา
+            artifact.EntityId = id;
+            artifact.Display.EntityId = id;
+            artifact.IsAlive = true;
+            ArtifactManager.AddArtifact(artifact);
+            if (addons.HasValue)
+            {
+                ArtifactManager.PlaceAddOns(id, addons.Value._AddOns);
+            }
+            placed++;
+        }
+
+        if (placed > 0)
+        {
+            Save();
+            Console.WriteLine($"[world] วางจุดสำคัญของเกาะ {placed} จุด (ท่าเรือ {pois.PortPoints.Count})");
+        }
     }
 
     public void Process()

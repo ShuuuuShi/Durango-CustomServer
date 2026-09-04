@@ -97,6 +97,9 @@ internal static class Program
         // ---- game data (เทียบเท่า Loader ของ client) ----
         DataStore.Load(dataDir);
 
+        // สารบัญเกาะ — ระบบล่องเรือใช้ตอบว่าจากท่าเรือนี้ไปไหนได้บ้าง (ต้องหลัง TerrainLoader.TerrainDir)
+        RegionCatalog.Load();
+
         // ---- host + saves ----
         // AppData (เซฟ .player/.world) อยู่ข้าง ๆ data เหมือนเกมเก็บ AppData ของมันเอง
         AppData.BasePath = Path.GetFullPath(Path.Combine(dataDir, "..", "AppData-nx"));

@@ -10,6 +10,7 @@ using Durango.Utils.Extensions;
 using Messages;
 using Shared.Ability;
 using Shared.Item;
+using Shared.Region;
 using Shared.Teleport;
 using UnityEngine;
 using Yaml;
@@ -154,6 +155,18 @@ public class Player
         _connection.Recv(delegate(GetRecipes msg, PacketHeader header)
         {
             Send(default(Recipes), header.Seq);
+        });
+        // ── ระบบล่องเรือ (5 ก.ย. 2026) ──────────────────────────────────────────────
+        // ผู้เล่นแตะท่าเรือ → เกมเปิดหน้า "เส้นทางเดินเรือ" แล้วยิง GetRoutes มาถามว่าไปไหนได้บ้าง
+        // (client/Durango.UI/ExploreGroup.cs:233 Open → ExploreSystem.cs:371 RequestRoutes)
+        // จากนั้นเกมขอรายละเอียดของแต่ละปลายทางต่อด้วย GetRegion (client/MapSystem.cs:642)
+        _connection.Recv(delegate(GetRoutes msg, PacketHeader header)
+        {
+            HandleGetRoutesMsg(header.Seq);
+        });
+        _connection.Recv(delegate(GetRegion msg, PacketHeader header)
+        {
+            HandleGetRegionMsg(msg, header.Seq);
         });
         _connection.Recv(delegate(GetArtifactBlueprints msg, PacketHeader header)
         {
@@ -654,6 +667,11 @@ public class Player
                 if (flag) list.Add(Shared.System.Interaction.DestructArtifact);
                 if (blueprint.Components.Contains("Washable")) list.Add(Shared.System.Interaction.Wash);
                 if (blueprint.Components.Contains("Shelter")) list.Add(Shared.System.Interaction.Rest);
+                // [5 ก.ย. 2026] ท่าเรือ — เมนู "เส้นทางเดินเรือ" ของเกมผูกกับ interaction นี้
+                // (client/Durango.UI/ExploreGroup.cs:259 AddInteractionHandler(Interaction.SailingRoutes)
+                //  → Open(entityId, tile, RouteType.Normal) → ยิง GetRoutes มาที่เซิร์ฟ)
+                // เกมไม่ได้ดู components เอง มันเชื่อรายการที่เซิร์ฟส่งมาใน Touched.Interactions ล้วน ๆ
+                if (blueprint.Components.Contains("Port")) list.Add(Shared.System.Interaction.SailingRoutes);
                 if (blueprint.Components.Contains("Growable") && flag) list.Add(Shared.System.Interaction.Plant);
                 if (blueprint.Components.Contains("Modular") && flag)
                 {
@@ -1014,6 +1032,67 @@ public class Player
     public void Stop()
     {
         _connection.Close();
+    }
+
+    /// <summary>
+    /// ตอบว่า "จากท่าเรือนี้ล่องเรือไปเกาะไหนได้บ้าง" — Routes (2032)
+    ///
+    /// รูปแบบที่เกมต้องการ: <c>Dictionary&lt;Role, Dictionary&lt;templateId, Route[]&gt;&gt;</c>
+    /// เกมวนอ่านทีละ template แล้วเช็คกับตารางในตัวเอง
+    /// (client/ExploreSystem.cs:307 — <c>SingletonDict&lt;string, RegionTemplate&gt;.Get(templateId)</c>
+    /// ถ้าไม่รู้จัก template นั้นจะข้ามทิ้งทั้งกลุ่ม) ⇒ TemplateId ต้องมีใน
+    /// data/assets/region_templates.json เท่านั้น เกาะที่ generate เองต้องตั้งให้ตรงด้วย
+    ///
+    /// ราคา: <c>Route.Price = null</c> = ฟรี (client/Durango.UI/ExploreGroup.cs:222
+    /// ตีความ null เป็น Money.ForFree แล้วข้ามหน้าจ่ายเงินไปเลย) — ค่าเดินเรือเป็นเรื่องของ
+    /// ระบบเศรษฐกิจซึ่งยังไม่ได้ทำ จึงให้ฟรีไปก่อนแทนที่จะตั้งตัวเลขเดาเอง
+    /// </summary>
+    private void HandleGetRoutesMsg(uint seq)
+    {
+        var byTemplate = new Dictionary<string, List<Route>>();
+        foreach (Messages.Region region in RegionCatalog.Others(_world.TerrainId))
+        {
+            if (string.IsNullOrEmpty(region.TemplateId))
+            {
+                continue;
+            }
+            if (!byTemplate.TryGetValue(region.TemplateId, out List<Route> list))
+            {
+                list = new List<Route>();
+                byTemplate[region.TemplateId] = list;
+            }
+            list.Add(new Route { RegionId = region.Id, Price = null });
+        }
+
+        var routes = new Routes
+        {
+            _Routes = new Dictionary<Role, Dictionary<string, Route[]>>
+            {
+                // Rural = เกาะทั่วไป ตรงกับ Role ที่ส่งใน Welcome (GameServer.SendWelcome)
+                [Role.Rural] = byTemplate.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray())
+            },
+            // หมู่เกาะ (Archipelago) ยังไม่ได้ทำ — ส่ง array ว่างไม่ใช่ null เพราะเกมวน
+            // routes.ArchipelagoRoutes ตรง ๆ โดยไม่เช็ค null (client/ExploreSystem.cs:320)
+            ArchipelagoRoutes = Array.Empty<ArchipelagoRoute>()
+        };
+        Console.WriteLine($"[sail] ส่งเส้นทางจาก {_world.TerrainId}: {byTemplate.Values.Sum(v => v.Count)} เกาะ");
+        Send(routes, seq);
+    }
+
+    /// <summary>
+    /// ตอบรายละเอียดเกาะปลายทาง — Region (2041) ตอบ GetRegion (2120)
+    /// เกมถามทีละ id หลังได้ Routes มาแล้ว เพื่อเอาไปโชว์ชื่อ/ประเภทในหน้าเลือกเส้นทาง
+    /// </summary>
+    private void HandleGetRegionMsg(GetRegion msg, uint seq)
+    {
+        if (RegionCatalog.TryGet(msg.RegionId, out Messages.Region region))
+        {
+            Send(region, seq);
+            return;
+        }
+        // เกาะที่เราไม่รู้จัก — ตอบ Error ให้เกมเลิกรอ (client/MapSystem.cs:650 มี .On<Error> รออยู่)
+        Console.WriteLine($"[sail] ไม่รู้จักเกาะ '{msg.RegionId}'");
+        Send(default(Error), seq);
     }
 
     public void Send<T>(T msg, uint replyOf = 0u)
