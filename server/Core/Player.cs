@@ -168,6 +168,10 @@ public class Player
         {
             HandleGetRegionMsg(msg, header.Seq);
         });
+        _connection.Recv(delegate(GetArchipelago msg, PacketHeader header)
+        {
+            HandleGetArchipelagoMsg(msg, header.Seq);
+        });
         _connection.Recv(delegate(TravelByRegion msg, PacketHeader header)
         {
             HandleTravelMsg(msg.RegionId, header.Seq);
@@ -184,6 +188,99 @@ public class Player
         _connection.Recv(delegate(GetSailingBackCost msg, PacketHeader header)
         {
             Send(new SailingBackCost { Cost = 0L }, header.Seq);
+        });
+        // ⚠️ ขาดตัวนี้แล้วหน้าเลือกเส้นทางจะว่างเปล่า ทั้งที่ Routes ส่งไปครบแล้ว
+        // client/Durango.UI/WorldRoutesViewer.cs:263-272 ซ้อน callback ไว้ 2 ชั้น:
+        //   GetEstateLicenses → GetPersonalRegionInfo → RefreshRegionPoint()
+        // RefreshRegionPoint คือตัววาดจุดเกาะที่กดได้ ⇒ ไม่ตอบตัวใดตัวหนึ่ง = ไม่มีปุ่มให้กด
+        // ทั้งสองฟิลด์เป็น nullable — ยังไม่มีระบบที่ดิน จึงตอบว่างไปก่อน (เกมรับได้)
+        _connection.Recv(delegate(GetPersonalRegionInfo msg, PacketHeader header)
+        {
+            Send(default(PersonalRegionInfo), header.Seq);
+        });
+        // ── สถานะตัวละคร ────────────────────────────────────────────────────────────
+        // ⚠️ ตัวนี้กระทบระบบล่องเรือโดยตรง: client/StatisticsSystem.cs:33
+        //   Level => Statistics.HasValue ? Statistics.Value.Level : -1
+        // และ client/Durango.UI/WorldRoutesUnstableArea.cs:191 เทียบ
+        //   StatisticsSystem.Level < Template.AvailableLevel  ⇒ เกาะกดไม่ได้
+        // ไม่ตอบ = Level เป็น -1 = **ทุกเกาะกดไม่ได้ทั้งกระดาน** โดยไม่มี error ให้เห็น
+        //
+        // เซิร์ฟส่ง Statistics ให้ครั้งหนึ่งแล้วตอน Player ถูกสร้าง แต่ client ยิงถามซ้ำอีกรอบ
+        // หลังพร้อม (StatisticsSystem.cs:101-105 ใน AddOnReady) — ของที่ส่งไปก่อนหน้าอาจถึง
+        // ก่อน client subscribe (On<Statistics> ที่ :89) จึงต้องตอบตอนถูกถามด้วย
+        _connection.Recv(delegate(GetStatistics msg, PacketHeader header)
+        {
+            SendStatistics();
+        });
+        _connection.Recv(delegate(GetTitles msg, PacketHeader header)
+        {
+            Send(new Titles { TitleIds = Array.Empty<string>() }, header.Seq);
+        });
+        _connection.Recv(delegate(GetStatusEffects msg, PacketHeader header)
+        {
+            Send(new StatusEffects { EntityId = EntityId, _StatusEffects = Array.Empty<StatusEffect>() }, header.Seq);
+        });
+        // ระดับการบุกเบิก — client/ArchipelagoRouteExtension.cs:37
+        //   IsPioneerGradeSatisfied = CurrentAccessLevel >= ArchipelagoRoute.UnstableFactor
+        // ไม่ตอบ ⇒ CurrentAccessLevel = 0 ⇒ เกาะทุกลูกไม่ผ่านเงื่อนไข แสดงเป็นก้อนเปล่า (SetEmpty)
+        // ยังไม่มีระบบบุกเบิก จึงเปิดสูงสุดไว้ก่อน ให้เดินทางได้ทุกเส้นทาง
+        _connection.Recv(delegate(GetPioneerGradeInfo msg, PacketHeader header)
+        {
+            Send(new PioneerGradeInfo
+            {
+                EntityId = EntityId,
+                Grade = 9,
+                CurrentAccessLevel = 9,
+                CurrentMaximumEstateSize = 30,
+                DailyExchangedPoints = new Dictionary<float, float>()
+            }, header.Seq);
+        });
+        // จำนวนจุดสำคัญของเกาะ + จุดที่สำรวจแล้ว — client/Durango.UI/RouteInfoTooltip.cs:78-79
+        // ⚠️ Tooltip.Show() ถูกเรียกจาก callback ของสองตัวนี้เท่านั้น (RouteInfoTooltip.cs:147-152)
+        // ไม่ตอบ = tooltip ไม่โผล่ = ไม่มีปุ่ม "ออกเรือ" ให้กด = เดินทางไม่ได้เลย โดยไม่มี error
+        _connection.Recv(delegate(GetPOICount msg, PacketHeader header)
+        {
+            // นับจากไฟล์ terrain ตรง ๆ ไม่ต้องเปิดโลกของเกาะนั้น (เปลืองหน่วยความจำโดยใช่เหตุ
+            // เพราะ tooltip แค่ขอตัวเลขไปโชว์) — pois.yml คือแหล่งเดียวกับที่ World ใช้วางจริง
+            TerrainPois pois = null;
+            try
+            {
+                pois = TerrainLoader.Load(string.IsNullOrEmpty(msg.RegionId) ? _world.TerrainId : msg.RegionId)?.Pois;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"[sail] อ่าน POI ของ {msg.RegionId} ไม่ได้: {e.Message}");
+            }
+            Send(new POICount
+            {
+                PortCount = (byte)(pois?.PortPoints.Count ?? 0),
+                WarpholeCount = (byte)(pois?.Warpholes.Count ?? 0),
+                RiftCount = (byte)(pois?.Rifts.Count ?? 0),
+                CraterCount = 0
+            }, header.Seq);
+        });
+        _connection.Recv(delegate(GetExploredPOIs msg, PacketHeader header)
+        {
+            // ⚠️ ต้องตอบแบบ ReplyOf ตรง seq เท่านั้น — ถ้าส่ง ReplyOf=0 จะตกไป global handler
+            // (client/MapSystem.cs:166,247-256) แล้วไปวาด indicator ของเกาะปลายทางทับแผนที่เกาะปัจจุบัน
+            Send(new ExploredPOIs
+            {
+                POIs = Array.Empty<PointOfInterest>(),
+                FullCountRewarded = false,
+                IsOpenedMap = false
+            }, header.Seq);
+        });
+        // ข้อมูลสิ่งที่ค้นพบบนเกาะ — client/Durango.UI/ArchipelagoDiscoveryInfos.cs:75-113
+        // ⚠️ ไม่มี .On<Error> fallback ⇒ ไม่ตอบ = ไอคอนโหลดหมุนค้างถาวร
+        // ⚠️ TemplateId ต้อง echo กลับให้ตรงกับที่ขอ เพราะ client ใช้เป็น cache key (MapSystem.cs:670-674)
+        _connection.Recv(delegate(GetDiscoveryInfo msg, PacketHeader header)
+        {
+            Send(new DiscoveryInfo
+            {
+                TemplateId = msg.TemplateId,
+                BiocomNames = Array.Empty<Pair<string, bool>>(),
+                AnimalTypes = Array.Empty<Pair<ushort, bool>>()
+            }, header.Seq);
         });
         _connection.Recv(delegate(GetArtifactBlueprints msg, PacketHeader header)
         {
@@ -1066,34 +1163,103 @@ public class Player
     /// </summary>
     private void HandleGetRoutesMsg(uint seq)
     {
-        var byTemplate = new Dictionary<string, List<Route>>();
+        // จัดเกาะเข้ากลุ่มตาม Role ของ template จริง ไม่ใช่ Role เดียวทั้งหมด —
+        // client/Durango.UI/WorldRoutesUnstableArea.cs:236 จับคู่โซนด้วย Role+Level+MajorBiome
+        // ของ template ⇒ ส่ง Role ที่ไม่ตรง เกาะจะไม่ไปโผล่ในโซนไหนเลย
+        var byRole = new Dictionary<Role, Dictionary<string, List<Route>>>();
+        var byArchipelago = new Dictionary<string, (RegionCatalog.TemplateInfo Template, List<Route> Routes)>();
+
         foreach (Messages.Region region in RegionCatalog.Others(_world.TerrainId))
         {
-            if (string.IsNullOrEmpty(region.TemplateId))
+            RegionCatalog.TemplateInfo template = RegionCatalog.GetTemplate(region.TemplateId);
+            if (template == null)
             {
                 continue;
+            }
+            var route = new Route { RegionId = region.Id, Price = null };   // null = ฟรี (ยังไม่มีระบบเงิน)
+
+            if (!byRole.TryGetValue(template.Role, out Dictionary<string, List<Route>> byTemplate))
+            {
+                byTemplate = new Dictionary<string, List<Route>>();
+                byRole[template.Role] = byTemplate;
             }
             if (!byTemplate.TryGetValue(region.TemplateId, out List<Route> list))
             {
                 list = new List<Route>();
                 byTemplate[region.TemplateId] = list;
             }
-            list.Add(new Route { RegionId = region.Id, Price = null });
+            list.Add(route);
+
+            // หมู่เกาะ = กลุ่มของเกาะที่ระดับ+ไบโอมเดียวกัน
+            // เกาะแบบ Risky ต้องมี ArchipelagoRoute ที่ Level/Biome ตรงกับ template ไม่งั้นขึ้นเป็น
+            // "ดินแดนที่ยังไม่รู้จัก" กดเข้าไม่ได้ (client/ExploreSystem.cs:123-126 GetArchipelagoRoutes)
+            string archId = RegionCatalog.ArchipelagoIdOf(template);
+            if (!byArchipelago.TryGetValue(archId, out var bucket))
+            {
+                bucket = (template, new List<Route>());
+                byArchipelago[archId] = bucket;
+            }
+            bucket.Routes.Add(route);
         }
 
         var routes = new Routes
         {
-            _Routes = new Dictionary<Role, Dictionary<string, Route[]>>
+            _Routes = byRole.ToDictionary(
+                kv => kv.Key,
+                kv => kv.Value.ToDictionary(t => t.Key, t => t.Value.ToArray())),
+            ArchipelagoRoutes = byArchipelago.Select(kv => new ArchipelagoRoute
             {
-                // Rural = เกาะทั่วไป ตรงกับ Role ที่ส่งใน Welcome (GameServer.SendWelcome)
-                [Role.Rural] = byTemplate.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray())
-            },
-            // หมู่เกาะ (Archipelago) ยังไม่ได้ทำ — ส่ง array ว่างไม่ใช่ null เพราะเกมวน
-            // routes.ArchipelagoRoutes ตรง ๆ โดยไม่เช็ค null (client/ExploreSystem.cs:320)
-            ArchipelagoRoutes = Array.Empty<ArchipelagoRoute>()
+                ArchipelagoId = kv.Key,
+                Level = kv.Value.Template.Level,
+                Biome = kv.Value.Template.Biome,
+                // UnstableFactor = 1 ⇒ ผ่านเงื่อนไขด้วย PioneerGradeInfo.CurrentAccessLevel >= 1
+                // และไม่ต้องพึ่ง ClearedUnstableFactors (บังคับเฉพาะ UF >= 2)
+                // client/ArchipelagoRouteExtension.cs:8-47
+                UnstableFactor = 1,
+                IncludedRoutes = kv.Value.Routes.ToArray(),
+                PrerequisiteQuest = null,   // null = ไม่มีเควสบังคับ (ยังไม่มีระบบเควส)
+                IsEpic = false
+            }).ToArray()
         };
-        Console.WriteLine($"[sail] ส่งเส้นทางจาก {_world.TerrainId}: {byTemplate.Values.Sum(v => v.Count)} เกาะ");
+        Console.WriteLine($"[sail] ส่งเส้นทางจาก {_world.TerrainId}: " +
+                          string.Join(" · ", byRole.Select(r => $"{r.Key} {r.Value.Sum(t => t.Value.Count)} เกาะ")) +
+                          $" · หมู่เกาะ {byArchipelago.Count}");
         Send(routes, seq);
+    }
+
+    /// <summary>
+    /// รายละเอียดหมู่เกาะ — Archipelago (2053) ตอบ GetArchipelago (2121)
+    ///
+    /// ⚠️ ต้องตอบทุกครั้ง ไม่งั้นบล็อกทั้งสาย: client/ExploreSystem.cs:332 รอ callback ชุดนี้
+    /// ก่อนจะไปขอ GetRegion ต่อ แล้วค่อยยิง RoutesUpdated ⇒ ไม่ตอบ = หน้าจอว่างแบบเงียบ ๆ
+    /// Progess = 100 ทุกเกาะ เพราะยังไม่มีระบบภารกิจประจำหมู่เกาะ — ถ้าน้อยกว่านั้น เกาะถัดไป
+    /// จะถูกล็อก (client/Durango.UI/Archipelago.cs:150-164 เช็คความคืบหน้าของเกาะก่อนหน้า)
+    /// </summary>
+    private void HandleGetArchipelagoMsg(GetArchipelago msg, uint seq)
+    {
+        var included = new List<ArchipelagoRegionInfo>();
+        foreach (Messages.Region region in RegionCatalog.All)
+        {
+            RegionCatalog.TemplateInfo template = RegionCatalog.GetTemplate(region.TemplateId);
+            if (template != null && RegionCatalog.ArchipelagoIdOf(template) == msg.ArchipelagoId)
+            {
+                included.Add(new ArchipelagoRegionInfo
+                {
+                    Id = region.Id,
+                    Progess = 100,
+                    CoOpList = Array.Empty<RegionCoOpTodo>()
+                });
+            }
+        }
+        Send(new Archipelago
+        {
+            Id = msg.ArchipelagoId,
+            TemplateId = null,          // ไม่ผูกกับ ArchipelagoMission ที่ยังไม่ได้ทำ
+            UnstableFactor = 1,
+            Name = null,
+            ExpiresAt = 0.0,            // client ไม่ได้ใช้ฟิลด์นี้เลย
+            IncludedRegions = included.ToArray()
+        }, seq);
     }
 
     /// <summary>

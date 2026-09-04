@@ -59,18 +59,10 @@ public class WorldContext
     [CanBeNull]
     public static WorldContext Load(string path)
     {
-        WorldContext worldContext = null;
-        try
-        {
-            byte[] data = File.ReadAllBytes(path);
-            worldContext = Json.Read<WorldContext>(data);
-            if (worldContext == null) return null;
-            worldContext.Initialize(path);
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine("[world-context] " + e.Message);
-        }
+        // อ่านไฟล์หลักก่อน ถ้าพังถอยไป .bak — เดิมคืน null เฉย ๆ แล้วผู้เรียกสร้างโลกใหม่ทับ
+        // ⇒ ไฟล์เสียครั้งเดียวเกาะหายถาวรโดยไม่มีใครรู้
+        WorldContext worldContext = SafeSave.ReadWithBackup(path, "world-context", data => Json.Read<WorldContext>(data));
+        worldContext?.Initialize(path);
         return worldContext;
     }
 
@@ -78,14 +70,8 @@ public class WorldContext
     {
         if (Persistent && !persistent) return;
         if (persistent) Persistent = true;
-        try
-        {
-            File.WriteAllBytes(Path, Json.WriteToBytes(this, indented: true));
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine("[world-context] เซฟไม่สำเร็จ: " + e.Message);
-        }
+        // เขียนแบบสลับเข้าที่ + เก็บ .bak — ปิดเซิร์ฟกลางเซฟแล้วไฟล์ยังอยู่ครบ (ดู SafeSave)
+        SafeSave.WriteAtomic(Path, Json.WriteToBytes(this, indented: false), "world-context");
     }
 
     public static string MakePath(int slot, string clusterKey)

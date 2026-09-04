@@ -21,12 +21,44 @@ internal static class Program
 {
     private static int _ticksPerSecond = 120;
 
+    /// <summary>host ที่กำลังรัน — ให้ตัวจัดการปิดเครื่องเซฟได้ก่อนออก</summary>
+    private static Host _host;
+
+    private static int _shutdownDone;
+
+    /// <summary>เซฟทุกอย่างแล้วปิดให้เรียบร้อย — เรียกซ้ำได้ (ทำจริงครั้งเดียว)</summary>
+    private static void ShutdownSafely(string reason)
+    {
+        if (System.Threading.Interlocked.Exchange(ref _shutdownDone, 1) != 0) return;
+        try
+        {
+            Console.WriteLine($"[boot] ปิดเซิร์ฟ ({reason}) — เซฟก่อน...");
+            _host?.SaveAll();
+            _host?.Close();
+            Console.WriteLine("[boot] เซฟเรียบร้อย");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("[boot] ⚠️ เซฟตอนปิดไม่สำเร็จ: " + e.Message);
+        }
+    }
+
     private static int Main(string[] args)
     {
+        // [5 ก.ย. 2026] เดิม Ctrl+C เรียก Environment.Exit(0) ทันทีโดยไม่เซฟ และ Host.Close()
+        // (ตัวที่เซฟโลกก่อนปิด) ไม่เคยถูกเรียกจากที่ไหนเลย ⇒ **รีสตาร์ทเซิร์ฟทุกครั้ง ของหายได้ถึง 60 วิ**
+        // (รอบ autosave) ตอนนี้เซฟก่อนออกเสมอ ทั้งทาง Ctrl+C, ปิด process ปกติ และ crash
         Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
+            ShutdownSafely("Ctrl+C");
             Environment.Exit(0);
+        };
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => ShutdownSafely("ปิดโปรเซส");
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            Console.WriteLine("[boot] ❌ exception ที่ไม่มีใครรับ: " + (args.ExceptionObject as Exception)?.Message);
+            ShutdownSafely("crash");
         };
         try
         {
@@ -98,12 +130,13 @@ internal static class Program
         DataStore.Load(dataDir);
 
         // สารบัญเกาะ — ระบบล่องเรือใช้ตอบว่าจากท่าเรือนี้ไปไหนได้บ้าง (ต้องหลัง TerrainLoader.TerrainDir)
-        RegionCatalog.Load();
+        RegionCatalog.Load(Path.Combine(dataDir, "assets"));
 
         // ---- host + saves ----
         // AppData (เซฟ .player/.world) อยู่ข้าง ๆ data เหมือนเกมเก็บ AppData ของมันเอง
         AppData.BasePath = Path.GetFullPath(Path.Combine(dataDir, "..", "AppData-nx"));
         var host = new Host(name);
+        _host = host;
         host.Load();
 
         try
@@ -126,9 +159,25 @@ internal static class Program
         // ---- main loop (ต้นฉบับ: GameManager.Update → Server.Process ทุกเฟรม; เซิร์ฟรันคงที่ 120 TPS) ----
         int frameMs = 1000 / _ticksPerSecond;
         long lastSave = 0;
+        int loopErrors = 0;
         while (true)
         {
-            host.Process();
+            try
+            {
+                host.Process();
+            }
+            catch (Exception e)
+            {
+                // ต้องดังพอให้เห็น ไม่ใช่กลืนเงียบ ๆ — และถ้าพังรัว ๆ ให้ยอมตายเพื่อไม่ให้วนเสียหาย
+                loopErrors++;
+                Console.WriteLine($"[loop] ⚠️ ข้อผิดพลาดรอบที่ {loopErrors}: {e}");
+                if (loopErrors >= 100)
+                {
+                    Console.WriteLine("[loop] ❌ ผิดพลาดถี่เกินไป — ปิดเซิร์ฟ");
+                    ShutdownSafely("ข้อผิดพลาดถี่เกินไป");
+                    return 1;
+                }
+            }
             Thread.Sleep(frameMs);
 
             // เซฟโลกทุก 60 วิ (ต้นฉบับเซฟทันทีทุก event — เพิ่มเข็มขัดนิรภัยเหมือนเซิร์ฟเดิม)

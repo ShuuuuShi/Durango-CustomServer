@@ -110,32 +110,15 @@ public class PlayerContext
     [CanBeNull]
     public static PlayerContext Load(string path)
     {
-        PlayerContext playerContext = null;
-        try
-        {
-            byte[] data = File.ReadAllBytes(path);
-            playerContext = Json.Read<PlayerContext>(data);
-            if (playerContext == null) return null;
-            playerContext.Initialize(path);
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine("[player-context] " + e.Message);
-        }
+        PlayerContext playerContext = SafeSave.ReadWithBackup(path, "player-context", data => Json.Read<PlayerContext>(data));
+        playerContext?.Initialize(path);
         return playerContext;
     }
 
     public void Save()
     {
         if (string.IsNullOrEmpty(Path)) return;
-        try
-        {
-            File.WriteAllBytes(Path, Json.WriteToBytes(this, indented: true));
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine("[player-context] เซฟไม่สำเร็จ: " + e.Message);
-        }
+        SafeSave.WriteAtomic(Path, Json.WriteToBytes(this, indented: false), "player-context");
     }
 
     public static string MakePath(int slot, string clusterKey)
