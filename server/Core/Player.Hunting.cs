@@ -97,9 +97,17 @@ public partial class Player
         string label = info?.DisplayName ?? info?.Name;
         if (label != null) msg.EntityName = new Gettext(label);
 
-        msg.Interactions = animal.IsAlive
-            ? new[] { (int)Shared.System.Interaction.Attack }
-            : System.Array.Empty<int>();
+        if (animal.IsAlive)
+        {
+            msg.Interactions = new[] { (int)Shared.System.Interaction.Attack };
+            return true;
+        }
+
+        // ซากสัตว์ — ชำแหละด้วยทางเดียวกับเก็บของธรรมชาติทุกประการ
+        // (Collect 506 + Touched.Collectible) ต่างแค่ collectible id มาจาก animal.json → drop_item
+        // ดู Player.Gathering.CollectibleIdOf ที่เป็นจุดเชื่อม
+        msg.Collectible = BuildCollectibleFor(animal.EntityId, animal.EntityType, animal.Tile);
+        msg.Interactions = new[] { (int)Shared.System.Interaction.Collect };
         return true;
     }
 

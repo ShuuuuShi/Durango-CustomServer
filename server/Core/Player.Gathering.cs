@@ -177,7 +177,17 @@ public partial class Player
 
     private void HandleCollectMsg(Collect msg, uint seq)
     {
-        if (!_touchedNaturals.TryGetValue(msg.Tile, out ushort entityType))
+        // ซากสัตว์: ฝั่งเกมส่ง Tile มาเป็น (-1,-1) เพราะสัตว์ไม่ได้อยู่กลางช่องเหมือนต้นไม้
+        // ⇒ ถ้าหาด้วย tile ไม่เจอ ให้ลองหาด้วย EntityId (สัตว์มี id จริง ต่างจากของธรรมชาติ)
+        AnimalManager.Animal carcass = _world.AnimalManager?.Get(msg.EntityId);
+        if (carcass != null && carcass.IsAlive) carcass = null;         // ยังไม่ตาย = ชำแหละไม่ได้
+
+        ushort entityType;
+        if (carcass != null)
+        {
+            entityType = carcass.EntityType;
+        }
+        else if (!_touchedNaturals.TryGetValue(msg.Tile, out entityType))
         {
             // ไม่เคยแตะ = ไม่รู้ว่ามันคืออะไร (หรือเก็บไปแล้วเมื่อกี้) — ยกเลิกสะอาด
             RejectCollect(seq, "ไม่รู้จักของธรรมชาติชิ้นนี้", msg);
@@ -185,7 +195,7 @@ public partial class Player
         }
 
         // ระยะ: client เดินไปถึงก่อนยิงอยู่แล้ว ตรงนี้แค่กันการยิงข้ามแมพ
-        if (!IsWithinCollectRange(msg.Tile))
+        if (!IsWithinCollectRange(carcass?.Tile ?? msg.Tile))
         {
             RejectCollect(seq, "อยู่ไกลเกินไป", msg);
             return;
@@ -251,10 +261,13 @@ public partial class Player
         AddItems(items);
         Send(new InventoryUpdated { EntityId = EntityId, Items = items.ToArray() });
 
-        // ของชิ้นนี้หมดแล้ว — ลบออกจากโลก (broadcast DisappearEntityOnTile ให้ทุกคนเอง
-        // ผ่าน World.NaturalDestroyed ที่ Core/Player.cs:94-97)
-        _world.DestroyNatural(msg.Tile);
-        _touchedNaturals.Remove(msg.Tile);
+        if (carcass == null)
+        {
+            // ของชิ้นนี้หมดแล้ว — ลบออกจากโลก (broadcast DisappearEntityOnTile ให้ทุกคนเอง
+            // ผ่าน World.NaturalDestroyed ที่ Core/Player.cs:94-97)
+            _world.DestroyNatural(msg.Tile);
+            _touchedNaturals.Remove(msg.Tile);
+        }
 
         var collected = new Collected
         {
@@ -270,7 +283,8 @@ public partial class Player
                 RelatedAbility = Shared.Ability.Derived.Invalid,
                 SuccessRatio = 1f
             },
-            RanOut = true
+            // ซากสัตว์ชำแหละได้หลายส่วน (เนื้อ หนัง กระดูก ไขมัน) ⇒ ยังไม่หมดในครั้งเดียว
+            RanOut = carcass == null
         };
         Console.WriteLine($"[gather] {EntityId[..Math.Min(8, EntityId.Length)]} เก็บ {spec.Id} x{items.Count} " +
                           $"จาก {spec.CollectibleId} ที่ ({msg.Tile.x},{msg.Tile.y}) — {spec.Duration:0.#} วิ");
@@ -535,6 +549,13 @@ internal static class CollectibleTable
     /// <summary>collectible_id ของ entity type — จาก data/assets/entity_types/natural.json (ข้อมูลจริง)</summary>
     private static string CollectibleIdOf(ushort entityType)
     {
+        // [5 ก.ย. 2026] ซากสัตว์ใช้ทางเดียวกับของธรรมชาติ — ต่างแค่ที่มาของ collectible id
+        // animal.json → drop_item เป็น collectible id จริง ๆ: เอาไปหาใน recipes.json
+        // (source_info type=2) แล้วได้ generator เป็น meat / leather_raw / bone_leg / fat
+        // ⇒ เสียบตรงนี้จุดเดียว ระบบเก็บทั้งชุด (เครื่องมือ แรง เวลา ของที่ได้) ใช้ต่อได้เลย
+        AnimalTypes.Info animal = AnimalTypes.Get(entityType);
+        if (animal?.DropItem != null) return animal.DropItem;
+
         BiomeSpriteInfo info = DataHelper.GetBiomeSpriteInfo(entityType);
         return info?.CollectibleId;
     }
