@@ -76,3 +76,29 @@ public class Motion
 {
     [JsonProperty("id")] public string Id;
 }
+
+// จาก /assets/statistics/player — ตารางเลเวล/เพดาน exp ของผู้เล่น
+// ต้นฉบับฝั่ง client (nexonSRC/Yaml/PlayerStatistics.cs) มีแค่ 2 ฟิลด์แรก เพราะ
+// resistance_exp_grown_caps เป็นข้อมูลของฝั่งเซิร์ฟล้วน — client ไม่เคยอ่านไฟล์ส่วนนี้
+// มันรอรับผลสำเร็จรูปทาง message ResistanceExpCaps อย่างเดียว (StatisticsSystem.cs:93,113)
+// ⇒ ฟิลด์ ResistanceExpGrownCaps + คลาส ResistanceExpGrownCap เป็นของที่เราเพิ่มเอง
+//    (ชื่อ property ตาม key ในไฟล์ ไม่ได้ก๊อปชื่อคลาสมาจากต้นฉบับ)
+public class PlayerStatistics : Singleton<PlayerStatistics>
+{
+    [JsonProperty("level_thresholds")] public int[] LevelThresholds;
+
+    // ชื่อฟิลด์ตามต้นฉบับ client: JsonProperty เป็น resistance_level_thresholds แต่ตัวแปรชื่อ ResistanceExpTable
+    [JsonProperty("resistance_level_thresholds")] public int[] ResistanceExpTable;
+
+    // key = เลเวลต้านทาน (มี 1..50 ตรงกับจำนวนช่องของ resistance_level_thresholds)
+    // value = ขั้นเพดานของเลเวลนั้น เรียงจากเรตสูงไปต่ำ ขั้นสุดท้าย cap_amount = null (ไม่มีเพดาน)
+    [JsonProperty("resistance_exp_grown_caps")] public Dictionary<int, List<ResistanceExpGrownCap>> ResistanceExpGrownCaps;
+}
+
+public class ResistanceExpGrownCap
+{
+    // null = ขั้นสุดท้าย ได้ exp ต่อไม่จำกัดที่เรตนี้
+    [JsonProperty("cap_amount")] public int? CapAmount;
+
+    [JsonProperty("exp_rate")] public float ExpRate;
+}

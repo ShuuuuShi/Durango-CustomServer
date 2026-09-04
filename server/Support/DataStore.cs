@@ -17,7 +17,7 @@ public static class DataStore
     public static void Load(string dataDir)
     {
         Json.DataDir = dataDir;
-        var counts = new (string name, int count)[8];
+        var counts = new (string name, int count)[10];
 
         // ลำดับ/ไฟล์ = ชุดย่อยของ Loader ต้นฉบับที่เซิร์ฟแท้ใช้จริง
         var prototypes = Json.ReadFromFile<Dictionary<string, List<Prototype>>>("item/prototype_data");
@@ -25,6 +25,15 @@ public static class DataStore
 
         var constants = Json.ReadFromFile<Constants>("constants");
         constants?.Initialize(constants);
+
+        // ตารางเพดาน exp ต้านทาน — ใช้ตอนตอบ GetResistanceExpCaps (Player.cs)
+        var playerStats = Json.ReadFromFile<PlayerStatistics>("statistics/player");
+        playerStats?.Initialize(playerStats);
+
+        // ค่าสมดุลของตัวผู้เล่น (หลอด life/stamina/fatigue/groggy/energy/health + online_momenta)
+        // — SurvivalState เอาไปสร้างหลอดจริง ดู Core/SurvivalState.cs
+        var playerTypes = Json.ReadFromFile<Dictionary<string, PlayerType>>("entity_types/players");
+        new PlayerTypes().Initialize(playerTypes);
 
         var naturals = Json.ReadFromFile<Dictionary<int, Natural>>("entity_types/natural");
         if (naturals != null) DataHelper.Initialize(naturals);
@@ -56,6 +65,8 @@ public static class DataStore
         Report("quests/epics_for_client", stories, counts, 5);
         Report("item/recipes", recipes, counts, 6);
         Report("emotions", new Dictionary<string, int> { { "ok", Emotions != null ? 1 : 0 } }, counts, 7);
+        Report("statistics/player", playerStats?.ResistanceExpGrownCaps, counts, 8);
+        Report("entity_types/players", playerTypes, counts, 9);
 
         Console.WriteLine("[data] โหลด game data จาก " + dataDir + "/assets เสร็จ:");
         foreach (var (name, count) in counts)

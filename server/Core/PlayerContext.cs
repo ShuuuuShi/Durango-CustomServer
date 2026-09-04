@@ -82,17 +82,6 @@ public class PlayerContext
             AppearPlayer.Member.RoleId = -1;
             AppearPlayer.Move.EntityId = text;
             AppearPlayer.Survival.EntityId = text;
-            var gauge = new Gauge(100f, 0f, new[]
-            {
-                new GaugeNode { Time = 0.0, Value = 100f }
-            });
-            AppearPlayer.Survival.Life = gauge;
-            AppearPlayer.Survival.Gauges = new Dictionary<string, Gauge> { { "stamina", gauge } };
-            var fatigue = new Gauge(100f, 0f, new[]
-            {
-                new GaugeNode { Time = 0.0, Value = 0f }
-            });
-            AppearPlayer.Survival.Gauges.Add("fatigue", fatigue);
             AppearPlayer.Display.Body = "Models/PC/Male/Body/m_body_nothing.FBX";
             AppearPlayer.Display.DefaultBody = AppearPlayer.Display.Body;
             AppearPlayer.Display.DefaultInner = "Models/PC/Male/Inner/m_inner_basic.FBX";
@@ -101,6 +90,15 @@ public class PlayerContext
         }
         InventoryItems ??= new List<Item>();
         EquippedItems ??= new Dictionary<string, string>();
+        // [5 ก.ย. 2026] สร้าง/ซ่อมหลอดสถานะจากข้อมูลจริงทุกครั้งที่เปิด context ไม่ใช่แค่ตอนสร้างใหม่
+        //
+        // ทำไมต้องทำตอนโหลดด้วย: GaugeConverter ย่อ Gauge เป็น {min,max,cur} ตอนเขียนไฟล์เซฟ
+        // (Support/GaugeConverter.cs:13-20) ⇒ เส้นแนวโน้มหายหมด เหลือ node เดียวที่ Time = 0
+        // ถ้าไม่สร้างใหม่ หลอดจะค้างนิ่งตลอดเกม · SurvivalState หยิบค่า cur ที่เซฟไว้ไปตั้งต้นให้เอง
+        //
+        // ⚠️ ของเดิมเอา Gauge ก้อนเดียวใส่ทั้ง Survival.Life และ Gauges["stamina"] ⇒ HP กับ
+        // ความอึดเดินพร้อมกันเป๊ะ · ตอนนี้แยกก้อนตามนิยามจริงใน entity_types/players.json
+        SurvivalState.Reset(this);
         if (KUtility.GetSize(Storage) != 0) return;
         Storage = new Dictionary<string, byte[]>();
         var data = MemoStorageDefaults.Empty();

@@ -39,6 +39,17 @@ public class Player
 
     private readonly HashSet<string> _artifactSet = new();
 
+    /// <summary>[5 ก.ย. 2026] หลอดสถานะที่เดินตามเวลาจริง — ดู Core/SurvivalState.cs</summary>
+    private readonly SurvivalState _survival;
+
+    /// <summary>เวลาล่าสุดที่ Move ทำให้ตำแหน่งเปลี่ยนจริง (ใช้เดาว่ายังเดินอยู่ไหม)</summary>
+    private double _lastMovedAt;
+
+    // สถานะที่ client เป็นคนสั่งเปิด/ปิดเอง (ToggleStatusEffect) → เวลาที่เริ่มติดสถานะนั้น
+    // เก็บในหน่วยความจำต่อ connection พอ เพราะ data ของ away_from_keyboard ติดแท็ก
+    // "clear_on_connect" ไว้ (data/assets/survival/status_effects.json) = ต่อใหม่ต้องหลุดอยู่แล้ว
+    private readonly Dictionary<string, double> _toggledStatusEffects = new();
+
     public string EntityId { get; }
 
     public bool IsLocalPlayer { get; }
@@ -63,6 +74,9 @@ public class Player
         _centerX = _world.NumChunksX / 2;
         _centerY = _world.NumChunksY / 2;
         _chunkVisited = new World.ChunkVisit[_world.NumChunksX, _world.NumChunksY];
+        // ต้องสร้างก่อน Send(_context.AppearPlayer) ท้าย ctor เพราะ AppearPlayer พก Survival (182)
+        // ไปด้วยเป็นลำดับที่ 11 ⇒ เส้นแนวโน้มต้องถูกสร้างใหม่ตามเวลาปัจจุบันก่อนถูกส่ง
+        _survival = new SurvivalState(_context);
         _world.ArtifactAppeared += World_ArtifactAppeared;
         _world.ArtifactDisappeared += World_ArtifactDisappeared;
         _world.PlayerAppeared += World_PlayerAppeared;
@@ -101,6 +115,11 @@ public class Player
         _connection.Recv(delegate(RestOn msg, PacketHeader header)
         {
             Send(default(OK), header.Seq);
+            // นั่งพัก = ความชันของ fatigue/life/health เปลี่ยน ⇒ ต้องส่งเส้นชุดใหม่ทันที
+            // ไม่ใช่รอรอบตรวจ (ค่าจาก status_effects.json → "rest" ดู SurvivalTuning)
+            // เลิกพักเองตอนขยับ ตามแท็ก "clear_on_move" ของสถานะนั้น — ดู HandleMoveMsg
+            _survival.SetResting(true);
+            FlushSurvival();
             OnContextChanged();
         });
         _connection.Recv(delegate(Wash msg, PacketHeader header)
@@ -218,7 +237,75 @@ public class Player
         });
         _connection.Recv(delegate(GetStatusEffects msg, PacketHeader header)
         {
-            Send(new StatusEffects { EntityId = EntityId, _StatusEffects = Array.Empty<StatusEffect>() }, header.Seq);
+            SendStatusEffects(header.Seq);
+        });
+        // เปิด/ปิดสถานะที่ "client เป็นคนตัดสินใจเอง" — ตอนนี้เกมส่งมาตัวเดียวคือ away_from_keyboard
+        // (client/SleepChecker.cs:169-187 Sleep()/WakeUp() ส่ง Toggle=true/false)
+        // ⚠️ client ไม่ได้รอ reply ที่ seq นี้เลย (Send เฉย ๆ ไม่มี .On) — ตัวที่มันฟังคือ
+        //    StatusEffects แบบ push (client/StatusEffectSystem.cs:29 → :111-115 เข้า SetStatusEffects
+        //    ทันทีถ้า EntityId ตรงกับตัวเอง) ⇒ "ตอบ" ที่ถูกต้องคือ push StatusEffects ชุดใหม่ทั้งชุด
+        //    ไม่ใช่ OK เพราะ client/Durango.Logic/StatusEffects.cs:36-72 แทนที่ list ทั้งก้อนทุกครั้ง
+        _connection.Recv(delegate(ToggleStatusEffect msg, PacketHeader header)
+        {
+            if (string.IsNullOrEmpty(msg.Id))
+            {
+                return;
+            }
+            if (msg.Toggle)
+            {
+                _toggledStatusEffects.TryAdd(msg.Id, Times.UnixTimeNow());
+            }
+            else
+            {
+                _toggledStatusEffects.Remove(msg.Id);
+            }
+            SendStatusEffects();
+        });
+        // เพดาน exp ต้านทานรายวัน — client/StatisticsSystem.cs:113-115 ยิงถามตอนเข้าเกม (AddOnReady)
+        // ⚠️ ต้องตอบตรง header.Seq: callback ที่มีตรรกะนัดถามซ้ำอยู่ใน .On() ของ seq นั้น
+        //    (StatisticsSystem.cs:116-129) ถ้า push เฉย ๆ จะตกไป global handler ที่ :93 ซึ่งเซ็ตค่า
+        //    ให้เหมือนกันแต่ไม่มีตัวนัดเวลารีเซ็ต — ตอบตรง seq ครอบคลุมทั้งสองทาง เพราะ
+        //    client/Durango.Network/Connection.cs:883-887 fallback ไป global handler ให้เองอยู่แล้ว
+        _connection.Recv(delegate(GetResistanceExpCaps msg, PacketHeader header)
+        {
+            Send(new ResistanceExpCaps { Caps = BuildResistanceExpCaps() }, header.Seq);
+        });
+        // รายการสกิล — client/Durango.Logic/SkillSystem.cs:102-105 ยิงถามตอนเข้าเกม
+        // ⚠️ SkillSystem.OnReceiveSkillMsg เป็นตัวเดียวที่ปลดล็อก _isInitSkills (ผ่าน RaiseSkillEvent
+        //    ที่ :271-278) ⇒ ไม่ตอบ = ระบบสกิลไม่เคย init เลย และ :229 วน foreach(msg.Categories)
+        //    ตรง ๆ ไม่เช็ค null
+        // ยังไม่มีระบบสกิลจริง จึงตอบชุดว่างครบทุกฟิลด์ (array/dict ว่าง ไม่ใช่ null)
+        // client จะตั้งเลเวลสกิลทุกตัวเป็น 0 (:210-228) ซึ่งตรงกับสภาพจริงของเซิร์ฟตอนนี้
+        _connection.Recv(delegate(GetSkills msg, PacketHeader header)
+        {
+            Send(new Skills
+            {
+                SkillList = Array.Empty<SkillBundle>(),
+                SkillPoint = 0,
+                Categories = new Dictionary<Shared.Skill.Category, SkillCategory>(),
+                UntrainedCount = 0,
+                AdvisedSkills = Array.Empty<Messages.Skill>(),
+                AdvisedSkillCategories = new Dictionary<Shared.Skill.Category, int>()
+            }, header.Seq);
+        });
+        // "วิชาที่กำลังเรียน" ของระบบไกด์ — client/Durango.Logic/LearningGuideSystem.cs:51-55
+        // ส่งสองตัวนี้ติดกันตอนเข้าเกม
+        // AdvisorTargetsReceived (:247-253) วน msg.Titles และเรียก msg.RemainingRewards.Contains()
+        // ⇒ ต้องเป็น dict/array ว่าง ไม่ใช่ null
+        _connection.Recv(delegate(GetAdvisorTargets msg, PacketHeader header)
+        {
+            Send(new AdvisorTargets
+            {
+                Titles = new Dictionary<string, float>(),
+                RemainingRewards = Array.Empty<string>()
+            }, header.Seq);
+        });
+        // TitleId = null คือ "ยังไม่ได้เลือกวิชา" — TargetTitleReceived (:270-273) ส่งต่อเข้า
+        // StatisticsSystem.GetAdvice(null) ซึ่งคืน null ได้อย่างปลอดภัย (StatisticsSystem.cs:277-283)
+        // และ TargetTitle.Pack รองรับ null ตรง ๆ (PackNull) จึงไม่ต้องแปลงเป็นสตริงว่าง
+        _connection.Recv(delegate(GetTargetTitle msg, PacketHeader header)
+        {
+            Send(new TargetTitle { TitleId = null }, header.Seq);
         });
         // ระดับการบุกเบิก — client/ArchipelagoRouteExtension.cs:37
         //   IsPioneerGradeSatisfied = CurrentAccessLevel >= ArchipelagoRoute.UnstableFactor
@@ -491,10 +578,83 @@ public class Player
     {
         Statistics msg = default;
         msg.DerivedsAbilities = new Dictionary<Derived, float> { { Derived.Swimming, 100f } };
+        // ⚠️ ขาด FatigueCaution(4)/FatigueDanger(5) แล้วหลอดความเหนื่อยจะไม่มีขั้น "เหนื่อย/หมดแรง"
+        // เลย เพราะ client/Durango.Logic/FatigueSystem.cs:124-125 อ่านไม่เจอแล้วได้ -1
+        // ซึ่ง Fatigue.SetGauge fallback ทั้งคู่เป็น Max ⇒ ต้องหลอดเต็มถึงจะนับว่าเหนื่อย
+        SurvivalState.FillDeriveds(msg.DerivedsAbilities);
         msg.BasicAbilities = new Dictionary<Basic, int>();
         msg.Level = _context.AppearPlayer.Level;
         msg.Exp = 3532536;
         Send(msg);
+    }
+
+    // ส่งสถานะทั้งชุดของผู้เล่นคนนี้ (client แทนที่ list ทั้งก้อนทุกครั้งที่ได้รับ)
+    // replyOf = 0 คือ push (ใช้ตอน ToggleStatusEffect), ใส่ seq ตอนตอบ GetStatusEffects
+    // Level = 1 เอามาจาก data จริง: away_from_keyboard มี min_level/max_level = 1
+    //   (data/assets/survival/status_effects.json) และ client หา template ด้วยช่วง
+    //   MinLevel <= level <= MaxLevel (client/Yaml/StatusEffectTemplateYaml.cs:15)
+    //   ⇒ ส่งเลเวลผิดช่วง = client หา template ไม่เจอแล้วทิ้งสถานะนั้นเงียบ ๆ
+    //   (client/Durango.Logic/StatusEffects.cs:52-58)
+    // Until = 0 เพราะสถานะกลุ่มนี้ไม่มีอายุ — มันจบเมื่อ client ส่ง Toggle=false เท่านั้น
+    //   client แสดงเวลาที่เหลือแบบ clamp ที่ 0 อยู่แล้ว (Durango.Logic/StatusEffect.cs:87)
+    // Stacked = 0 ตรงกับ stack_size = 0 ในไฟล์ data (ไม่ซ้อนชั้น)
+    private void SendStatusEffects(uint replyOf = 0u)
+    {
+        Send(new StatusEffects
+        {
+            EntityId = EntityId,
+            _StatusEffects = _toggledStatusEffects
+                .Select(effect => new StatusEffect
+                {
+                    Id = effect.Key,
+                    EffectId = effect.Key,
+                    Level = 1,
+                    Since = effect.Value,
+                    Until = 0.0,
+                    Stacked = 0,
+                    DurationHidden = true,
+                    Effects = Array.Empty<EffectDetail>()
+                })
+                .ToArray()
+        }, replyOf);
+    }
+
+    // สร้างเพดาน exp ต้านทานจากตารางจริงใน data/assets/statistics/player.json
+    // key ของตารางคือ "เลเวลต้านทาน" — เซิร์ฟยังไม่ส่ง Statistics.ResistanceLevels (SendStatistics
+    // ข้างบนไม่ได้เซ็ตฟิลด์นั้น) client จึงถือว่าทุกชนิดเป็นเลเวล 1 (StatisticsSystem.cs:55
+    // ResistanceLevels.Get(type, 1)) ⇒ ใช้แถวเลเวล 1 ให้ตรงกับที่ client เชื่อ
+    // CapIndex = 0 คือยังไม่ชนเพดานขั้นไหน (เซิร์ฟยังไม่นับ exp ที่ได้ต่อวัน) ⇒ ได้เรตของขั้นแรก
+    // ExpLimits = cap_amount ของทุกขั้นที่มีเพดาน (ขั้นสุดท้าย cap_amount = null แปลว่าไม่จำกัด
+    //   จึงตัดทิ้ง — ฟิลด์เป็น int[] ใส่ null ไม่ได้) client ไม่เคยอ่านฟิลด์นี้ ส่งไปเพื่อความครบเท่านั้น
+    //   ⇒ ความหมายของลำดับในอาเรย์นี้ยืนยันจากโค้ดเกมไม่ได้ ถ้าจะทำระบบเพดานจริงต้องเช็คซ้ำ
+    // ExpiresAt = 0 เป็นค่าของเรา ไม่ใช่ของต้นฉบับ: ยังไม่มีระบบรีเซ็ตเพดานรายวัน
+    //   ⚠️ ห้ามใส่ค่า > 0 มั่ว ๆ เพราะ client จะนัดถามซ้ำที่เวลานั้น (StatisticsSystem.cs:118-122)
+    private static Dictionary<Derived, ResistanceExpCap> BuildResistanceExpCaps()
+    {
+        var caps = new Dictionary<Derived, ResistanceExpCap>();
+        Dictionary<Biome, Derived> typeByBiome = Singleton<Constants>.Instance?.Resistance.TypeByBiome;
+        Dictionary<int, List<ResistanceExpGrownCap>> table =
+            Singleton<PlayerStatistics>.Instance?.ResistanceExpGrownCaps;
+        if (typeByBiome == null || table == null ||
+            !table.TryGetValue(1, out List<ResistanceExpGrownCap> tiers) || tiers == null || tiers.Count == 0)
+        {
+            // ไม่มี data = ตอบ dict ว่าง ดีกว่าเดาเลข — client รับ dict ว่างได้ และจะไม่นัดถามซ้ำ
+            // (FirstOrDefault(ExpiresAt > 0) คืน default ⇒ เวลาที่ได้ติดลบ ⇒ ไม่ตั้ง DelayedCall)
+            Console.WriteLine("[stat] ไม่มีตาราง resistance_exp_grown_caps — ตอบ ResistanceExpCaps ว่าง");
+            return caps;
+        }
+        var cap = new ResistanceExpCap
+        {
+            CapIndex = 0,
+            ExpLimits = tiers.Where(tier => tier.CapAmount.HasValue).Select(tier => tier.CapAmount.Value).ToArray(),
+            ExpRate = tiers[0].ExpRate,
+            ExpiresAt = 0.0
+        };
+        foreach (Derived type in typeByBiome.Values)
+        {
+            caps[type] = cap;
+        }
+        return caps;
     }
 
     private void SetCenterChunks(int x, int y)
@@ -558,12 +718,23 @@ public class Player
         int num = movements.Length - 1;
         if (num >= 0)
         {
+            WorldPosition before = _context.AppearPlayer.Move.Movements[0].Path[0].Position;
             Movement movement = movements[num];
             _context.AppearPlayer.Move.Movements[0] = movement;
             int num2 = movement.Path.Length - 1;
             if (num2 >= 0)
             {
                 _context.AppearPlayer.Move.Movements[0].Path[0].Position = movement.Path[num2].Position;
+            }
+            // [5 ก.ย. 2026] จับว่า "ขยับจริง" ไหม — เกมส่ง Move ตอนเปลี่ยนท่าทางด้วย ไม่ใช่แค่ตอนเดิน
+            // (client/MoveMsgGenerator.cs:104-110 MotionChanged ก็ตั้ง SendMoveRequired) ⇒ ดูตำแหน่ง
+            // ไม่ใช่ดูว่ามี message มา · ไม่มี message "หยุดเดิน" จึงเก็บเวลาไว้แล้วให้ Process ตัดสิน
+            WorldPosition after = _context.AppearPlayer.Move.Movements[0].Path[0].Position;
+            if (!Mathf.Approximately(before.x, after.x) || !Mathf.Approximately(before.y, after.y))
+            {
+                _lastMovedAt = Gauge.CurrentTime;
+                // สถานะ "rest" ติดแท็ก clear_on_move ในไฟล์ data (survival/status_effects.json)
+                _survival.SetResting(false);
             }
         }
     }
@@ -1141,6 +1312,29 @@ public class Player
     public void Process()
     {
         _connection.Process();
+        UpdateSurvival();
+    }
+
+    /// <summary>
+    /// [5 ก.ย. 2026] รอบตรวจหลอดสถานะ — ถูกเรียกทุกเฟรม (120 ครั้ง/วินาที ดู Program.cs:159-181)
+    /// แต่แทบไม่ส่งอะไรออกไป เพราะ Gauge เป็นเส้นแนวโน้มที่ client เดินเองอยู่แล้ว
+    /// SurvivalState.Tick จะคืน true เฉพาะตอนความชันเปลี่ยนหรือเส้นเดิมใกล้หมด
+    /// </summary>
+    private void UpdateSurvival()
+    {
+        double now = Gauge.CurrentTime;
+        // เกมไม่มี message "หยุดเดิน" ⇒ ถือว่าหยุดเมื่อไม่ขยับนานเกิน MoveIdleTimeout
+        _survival.SetMoving(now - _lastMovedAt < SurvivalTuning.MoveIdleTimeout);
+        if (_survival.Tick(now, out SurvivalUpdated msg))
+        {
+            Send(msg);
+        }
+    }
+
+    /// <summary>ส่งเส้นหลอดชุดใหม่เดี๋ยวนี้ — ใช้ตอนค่า/ความชันกระโดดแบบไม่ต่อเนื่อง (พัก/กิน/โดนตี)</summary>
+    private void FlushSurvival()
+    {
+        Send(_survival.Flush(Gauge.CurrentTime));
     }
 
     public void Stop()
