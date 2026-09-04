@@ -166,6 +166,10 @@ public class CombatConstantsData
 public class WeaponPerformanceData
 {
     public string attack_type;                                       // sword/axe/blunt/spear/arrow/stone/bare_hands
+
+    // [5 ก.ย. 2026] ค่าโจมตีของอาวุธ — เป็น "สูตรตามเลเวล" เช่น "72.02 + (level * 1.3)"
+    // เดิมข้ามไปเพราะโปรเจกต์ยังไม่มีตัวประเมินสูตร ตอนนี้มีแล้ว (Support/StatFormula.cs)
+    public string attack;
 }
 
 public class WeaponPerformanceRoot
@@ -187,6 +191,7 @@ public static class BattleDataStore
     private static PlayerBattleStats _stats;
     private static CombatConstantsData _constants;
     private static Dictionary<string, string> _weaponAttackTypes;
+    private static Dictionary<string, string> _weaponAttackFormulas;
 
     private static void EnsureLoaded()
     {
@@ -203,6 +208,7 @@ public static class BattleDataStore
             _constants = Json.ReadFromFile<CombatConstantsData>("constants") ?? new CombatConstantsData();
 
             _weaponAttackTypes = new Dictionary<string, string>();
+            _weaponAttackFormulas = new Dictionary<string, string>();
             var performance = Json.ReadFromFile<WeaponPerformanceRoot>("performance");
             if (performance?.Weapon != null)
             {
@@ -214,6 +220,10 @@ public static class BattleDataStore
                         if (!string.IsNullOrEmpty(byLevel.Value?.attack_type))
                         {
                             _weaponAttackTypes[pair.Key] = byLevel.Value.attack_type;
+                            if (!string.IsNullOrEmpty(byLevel.Value.attack))
+                            {
+                                _weaponAttackFormulas[pair.Key] = byLevel.Value.attack;
+                            }
                             break;
                         }
                     }
@@ -256,6 +266,19 @@ public static class BattleDataStore
     {
         EnsureLoaded();
         return string.IsNullOrEmpty(prototypeId) ? null : _weaponAttackTypes.GetValueOrDefault(prototypeId);
+    }
+
+    /// <summary>
+    /// ค่าโจมตีของอาวุธชิ้นนั้นที่เลเวลของมัน — คิดจากสูตรจริงใน performance.json
+    /// คืน 0 ถ้าไม่ใช่อาวุธหรืออ่านสูตรไม่ออก (ผู้เรียกจะได้ใช้ค่าฐานของตัวละครอย่างเดียว)
+    /// </summary>
+    public static float WeaponAttack(string prototypeId, int level)
+    {
+        EnsureLoaded();
+        if (string.IsNullOrEmpty(prototypeId)) return 0f;
+        string formula = _weaponAttackFormulas.GetValueOrDefault(prototypeId);
+        if (formula == null) return 0f;
+        return StatFormula.TryEval(formula, "level", level, out double value) ? (float)Math.Max(0.0, value) : 0f;
     }
 }
 
@@ -491,7 +514,7 @@ public partial class Player
         }
 
         float bonus = attack.damage_bonus > 0f ? attack.damage_bonus : 1f;
-        float raw = stats.attack * bonus;
+        float raw = attacker.CurrentAttackPower() * bonus;
         float defense = stats.defense * defenseRatio * (1f - Math.Clamp(attack.armor_penetration, 0f, 1f));
         int value = Math.Max(CombatTuning.MinDamage, (int)Math.Round((raw - defense) * directionRatio));
 
@@ -547,6 +570,29 @@ public partial class Player
     /// ชนิดอาวุธที่ถืออยู่ — performance.json → weapon → &lt;prototype&gt; → attack_type
     /// ไม่มีอาวุธ ⇒ ใช้ players.json → player.bare_hands.attack_type ("bare_hands")
     /// </summary>
+    /// <summary>
+    /// ค่าโจมตีรวมของตัวละครตอนนี้ = ค่าฐาน + ค่าของอาวุธที่ถืออยู่
+    ///
+    /// [5 ก.ย. 2026] เดิมใช้ค่าฐานอย่างเดียว (40) เพราะค่าอาวุธในไฟล์เป็นสูตรข้อความ
+    /// (<c>performance.json → weapon.attack = "72.02 + (level * 1.3)"</c>) แล้วยังไม่มีตัวคิดสูตร
+    /// ผลคือถืออะไรก็ดาเมจเท่ากัน และตีสัตว์เลเวลกลาง ๆ ไม่เข้าเลย
+    /// (สัตว์ lv25 มีเกราะ 125 &gt; ค่าฐาน 40 ⇒ ทุกครั้งได้ดาเมจขั้นต่ำ 1 ⇒ ต้องตี 1,800 ครั้ง)
+    /// ตอนนี้คิดสูตรได้แล้วด้วย <see cref="StatFormula"/> ⇒ อาวุธมีความหมายจริง
+    /// </summary>
+    private float CurrentAttackPower()
+    {
+        float best = 0f;
+        foreach (var pair in _context.EquippedItems)
+        {
+            int index = _context.InventoryItems.FindIndex(item => item.Id == pair.Value);
+            if (index < 0) continue;
+            Item item2 = _context.InventoryItems[index];
+            float attack = BattleDataStore.WeaponAttack(item2.Prototype, item2.Level);
+            if (attack > best) best = attack;      // ถือได้หลายช่อง เอาชิ้นที่แรงสุด
+        }
+        return BattleDataStore.Stats.attack + best;
+    }
+
     private AttackType CurrentAttackType()
     {
         foreach (var pair in _context.EquippedItems)

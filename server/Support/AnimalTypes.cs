@@ -22,6 +22,7 @@ public static class AnimalTypes
     {
         public ushort EntityType;
         public string Name;            // ชื่อภายในของ NEXON เช่น "iguanodon"
+        public string DisplayName;     // ชื่อที่โชว์ในเกม — คีย์แรกของ name (ข้อมูลเป็นเกาหลี)
         public string LifeMax;         // สูตร
         public string Attack;          // สูตร
         public string Defense;         // สูตร
@@ -78,6 +79,12 @@ public static class AnimalTypes
                 DropItem = (string)o["drop_item"],
                 Kind = (string)o["type"]
             };
+
+            // "name": {"이구아노돈": null} — ฟอร์แมต gettext ของ NEXON: คีย์คือข้อความต้นทาง
+            if (o["name"] is JObject nameNode)
+            {
+                foreach (JProperty prop in nameNode.Properties()) { info.DisplayName = prop.Name; break; }
+            }
 
             if (o["combat_level_ranges"] is JArray range && range.Count == 2)
             {

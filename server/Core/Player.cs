@@ -968,6 +968,18 @@ public partial class Player
         // ต้นฉบับ: GameManager.ClusterMode == Mode.Editable — โหมดสร้างสรรค์ (Creative Island)
         // เซิร์ฟนี้เป็น Offline เสมอตามค่า config (Host.ClusterMode) ⇒ อินเทอร์แอกชัน Editable ถูกซ่อนตามแท้
         bool flag = Host.ClusterMode == Mode.Editable;
+
+        // [5 ก.ย. 2026] สัตว์ป่า — ต้องเช็คก่อนสาขาสิ่งปลูกสร้าง เพราะชนิดสัตว์เป็นเลข 2000-2999
+        // ซึ่งเข้าเงื่อนไข "< 10000" เหมือนกัน แล้วไปหา blueprint ไม่เจอ ⇒ ได้เมนูเปล่า
+        // (อาการ: แตะสัตว์แล้วไม่มีปุ่มอะไรขึ้นเลย ตีไม่ได้)
+        // รายละเอียดระบบอยู่ที่ Core/Player.Hunting.cs
+        if (TryTouchAnimal(touch, ref msg))
+        {
+            Send(msg, seq);
+            OnContextChanged();
+            return;
+        }
+
         if (touch.EntityType < 10000)
         {
             MergedBlueprint blueprint = BlueprintStore.GetBlueprint(touch.EntityType);

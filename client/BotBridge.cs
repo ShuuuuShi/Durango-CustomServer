@@ -254,6 +254,13 @@ public static class BotBridge
     {
         try
         {
+            // "cheat ..." ต้องเอาทั้งบรรทัดที่เหลือไปเป็นคำสั่งเดียว (เช่น "cheat m 115 116")
+            // ถ้าปล่อยให้ตัดด้วยช่องว่างตามคำสั่งอื่น พารามิเตอร์จะหายหมด
+            if (line.StartsWith("cheat ", StringComparison.Ordinal))
+            {
+                return CmdCheat(line.Substring("cheat ".Length).Trim());
+            }
+
             string[] parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length == 0) return Err("empty");
             string cmd = parts[0];
@@ -278,6 +285,7 @@ public static class BotBridge
                 case "menu": return CmdMenu(args);
                 case "use": return CmdUse(args);
                 case "log": return CmdLog(args);
+                case "equip": return CmdEquip(args);
                 default: return Err("unknown cmd: " + cmd);
             }
         }
@@ -404,6 +412,30 @@ public static class BotBridge
             if (d < bestDist) { bestDist = d; best = go; }
         }
         if (best == null) return Err("no target near");
+
+        // [5 ก.ย. 2026] เดิมเดินทาง UI: Touch → รอเมนู → กด "Attack"
+        // ใช้ไม่ได้เวลาบังคับจากนอกเกม เพราะ handler ของเมนู Attack ถูกลงทะเบียนโดย
+        // หน้าจอต่อสู้ (client/Durango.UI/CombatGroup.cs:546) ⇒ ถ้าหน้าจอนั้นยังไม่เปิด
+        // กดเมนูแล้วไม่มีอะไรเกิดขึ้นเลย (เงียบสนิท ไม่มี error)
+        // ⇒ ทำแบบเดียวกับที่ handler นั้นทำ: เลือกเป้า แล้วสั่งใช้ท่าโจมตีตรง ๆ
+        string targetId = ObjectIdentifier.GetEntityId(best);
+        if (!string.IsNullOrEmpty(targetId) && GameSystem<CombatSystem>.HasInstance())
+        {
+            var combat = GameSystem<CombatSystem>.Instance();
+            combat.SelectTarget(targetId);
+            foreach (BattleAction a in combat.GetCurrentBattleActions())
+            {
+                if (!IsUsable(a)) continue;
+                var t = a.Data.Meta.BattleActionType;
+                if (t == BattleActionType.Melee || t == BattleActionType.Range)
+                {
+                    combat.UseBattleAction(a.Data.Id);
+                    return Ok();
+                }
+            }
+            return Err("no usable battle action (ท่าต่อสู้ยังไม่มา — เซิร์ฟตอบ Actions(315) แล้วหรือยัง)");
+        }
+
         StartInteraction(best, "Attack");
         return Ok();
     }
@@ -505,6 +537,49 @@ public static class BotBridge
     }
 
     // ---------------------------------------------------------------- use item
+
+    /// <summary>
+    /// ส่งคำสั่งโกงไปให้เซิร์ฟตรง ๆ — ทางเดียวกับคอนโซลในตัวเกม
+    /// (client/Durango.Development/Commands.cs:193 ก็ยิง Cheat แบบนี้)
+    ///
+    /// ใช้ทดสอบเป็นหลัก คำสั่งที่มีประโยชน์ที่สุดคือวาร์ปตัวเอง เพราะเดินไปหาสัตว์/โต๊ะ
+    /// ที่อยู่ไกลบางทีติดหน้าผาแล้วไปไม่ถึง:
+    ///     cheat m 115 116        วาร์ปไปช่อง (115,116)
+    ///     cheat it wood_log 10   เสกไอเทม
+    /// </summary>
+    private static string CmdCheat(string cheat)
+    {
+        if (string.IsNullOrEmpty(cheat)) return Err("cheat needs a command");
+        Durango.Network.Connections.Frontend.Send(new Messages.Cheat { _Cheat = cheat });
+        return Ok();
+    }
+
+    /// <summary>
+    /// สวมของจากกระเป๋า — <c>equip proto=axe_onehand_stone_01 slot=main</c>
+    ///
+    /// ส่ง Equip(10) ตรง ๆ แบบเดียวกับที่หน้าจอสวมใส่ทำ เพราะการกดผ่าน UI ต้องเปิดหน้าต่าง
+    /// กระเป๋าก่อน ซึ่งเปราะกว่าเวลาสั่งจากนอกเกม · ช่องของอาวุธดูได้จาก
+    /// performance.json → weapon → &lt;prototype&gt; → slot (ขวานมือเดียว = "main")
+    /// </summary>
+    private static string CmdEquip(Dictionary<string, string> args)
+    {
+        if (!args.TryGetValue("proto", out string proto) || proto.Length == 0) return Err("equip needs proto=");
+        if (!args.TryGetValue("slot", out string slot) || slot.Length == 0) slot = "main";
+        if (!GameSystem<InventorySystem>.HasInstance()) return Err("no inventory system");
+
+        foreach (ItemData it in GameSystem<InventorySystem>.Instance().PlayerItemList)
+        {
+            if (it == null || it.PrototypeId != proto) continue;
+            Durango.Network.Connections.Frontend.Send(new Messages.Equip
+            {
+                SlotName = slot,
+                ItemId = it.Id,
+                Action = "equip"
+            });
+            return Ok();
+        }
+        return Err("ไม่มี " + proto + " ในกระเป๋า");
+    }
 
     private static string CmdUse(Dictionary<string, string> args)
     {

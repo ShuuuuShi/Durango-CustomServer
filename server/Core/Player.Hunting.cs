@@ -79,6 +79,31 @@ public partial class Player
     private const double AnimalSyncIntervalSeconds = 0.5;
 
     /// <summary>
+    /// เติมเมนูให้ตอนผู้เล่นแตะสัตว์ — คืน true ถ้า entity ที่แตะเป็นสัตว์ (ผู้เรียกจะได้หยุดตรงนั้น)
+    ///
+    /// ฝั่งเกมไม่ได้ตัดสินใจเองว่าแตะอะไรแล้วทำอะไรได้ — มันเชื่อรายการใน <c>Touched.Interactions</c>
+    /// ที่เซิร์ฟส่งมาล้วน ๆ (เหมือนกรณีท่าเรือกับของธรรมชาติ) ⇒ ไม่ส่ง = ไม่มีปุ่มให้กด
+    ///
+    /// ยังไม่ใส่เมนู "ชำแหละ" ให้ซากสัตว์ เพราะระบบของที่ได้จากซากยังไม่มี
+    /// (<c>animal.json → drop_item</c> ชี้ไปที่ชุดของที่ยังไม่มีตารางบอกว่าได้อะไรกี่ชิ้น)
+    /// ⇒ ใส่ปุ่มไปก่อนแล้วกดไม่ได้อะไร แย่กว่าไม่มีปุ่ม
+    /// </summary>
+    private bool TryTouchAnimal(Messages.Touch touch, ref Touched msg)
+    {
+        AnimalManager.Animal animal = _world.AnimalManager?.Get(touch.EntityId);
+        if (animal == null) return false;
+
+        AnimalTypes.Info info = AnimalTypes.Get(animal.EntityType);
+        string label = info?.DisplayName ?? info?.Name;
+        if (label != null) msg.EntityName = new Gettext(label);
+
+        msg.Interactions = animal.IsAlive
+            ? new[] { (int)Shared.System.Interaction.Attack }
+            : System.Array.Empty<int>();
+        return true;
+    }
+
+    /// <summary>
     /// ตีสัตว์ป่า — คืน true ถ้า entity ที่เล็งเป็นสัตว์ที่ยังไม่ตายบนเกาะนี้
     ///
     /// สูตรความเสียหายใช้ชุดเดียวกับตีผู้เล่น (ดูคำอธิบายเต็มที่ Player.Combat.ReceiveAttack)
@@ -91,15 +116,18 @@ public partial class Player
         AnimalManager.Animal animal = _world.AnimalManager?.Get(entityId);
         if (animal == null || !animal.IsAlive) return false;
 
-        PlayerBattleStats stats = BattleDataStore.Stats;
         float bonus = attack.damage_bonus > 0f ? attack.damage_bonus : 1f;
-        float raw = stats.attack * bonus;
+        float raw = CurrentAttackPower() * bonus;
 
         // เจาะเกราะจากท่า — ฟิลด์เดียวกับที่ใช้ตอนตีผู้เล่น (attack_info[0].armor_penetration)
         float defense = animal.Defense * (1f - Math.Clamp(attack.armor_penetration, 0f, 1f));
         int value = Math.Max(CombatTuning.MinDamage, (int)Math.Round(raw - defense));
 
         animal.Life = Math.Max(0f, animal.Life - value);
+
+        AnimalTypes.Info hit = AnimalTypes.Get(animal.EntityType);
+        Console.WriteLine($"[ล่าสัตว์] ตี {hit?.Name ?? animal.EntityType.ToString()} lv{animal.CombatLevel} " +
+                          $"−{value} เลือดเหลือ {animal.Life:F0}/{animal.LifeMax:F0}");
 
         _world.BroadCast(new Damaged
         {
@@ -123,9 +151,8 @@ public partial class Player
             animal.DiedAt = Times.UnixTimeNow();
             _world.BroadCast(new EntityDied { EntityId = animal.EntityId, At = animal.DiedAt });
 
-            AnimalTypes.Info info = AnimalTypes.Get(animal.EntityType);
             Console.WriteLine($"[ล่าสัตว์] {EntityId[..Math.Min(8, EntityId.Length)]} ล้ม " +
-                              $"{info?.Name ?? animal.EntityType.ToString()} lv{animal.CombatLevel} " +
+                              $"{hit?.Name ?? animal.EntityType.ToString()} lv{animal.CombatLevel} " +
                               $"ที่ [{animal.Tile.x},{animal.Tile.y}]");
         }
 
