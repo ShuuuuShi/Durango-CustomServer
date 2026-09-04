@@ -32,6 +32,13 @@ public class Clusters
 
 		[JsonProperty(PropertyName = "engagement_url")]
 		public string EngagementUrl;
+
+		// [แก้เอง 5 ก.ย. 2026] ฟื้นฟิลด์ที่ JSON ต้นฉบับมีอยู่จริงแต่โค้ดไม่ได้อ่าน
+		// TextAsset "offline/clusters" ใน resources.assets ของเกมลงท้ายด้วย  "offline" : true
+		// แต่ ClusterSet ไม่มีฟิลด์นี้ และ Clusters.Offline ถูก hardcode เป็น true แทน
+		// (NEXON แก้ตอน build ตัว offline) — ใส่กลับเพื่อให้ไฟล์เป็นคนกำหนดเหมือนที่ออกแบบไว้เดิม
+		[JsonProperty(PropertyName = "offline")]
+		public bool Offline = true;
 	}
 
 	public const string FallbackLocale = "en_US";
@@ -52,13 +59,20 @@ public class Clusters
 
 	public int Count => _clusters.Count;
 
-	public static bool Offline => true;
+	// [แก้เอง 5 ก.ย. 2026] เดิมเป็น `=> true` ตายตัว ⇒ LoadFromJson ลบ cluster ทุกตัวทิ้งแล้วใส่แต่
+	// เซิร์ฟในตัวเครื่อง (Servers.GetServers) ⇒ ต่อเซิร์ฟจริงไม่ได้เลย
+	// ตอนนี้อ่านจากฟิลด์ "offline" ของไฟล์ cluster ตามที่ JSON ต้นฉบับมีมาแต่แรก
+	// ค่าตั้งต้นยังเป็น true ⇒ ไฟล์เดิมของ NEXON ให้ผลเหมือนเดิมทุกอย่าง
+	private static bool _offline = true;
+
+	public static bool Offline => _offline;
 
 	public void LoadFromJson(string jsonString)
 	{
 		ClusterSet clusterSet = Json.Read<ClusterSet>(jsonString);
 		if (clusterSet != null)
 		{
+			_offline = clusterSet.Offline;
 			_clusters.Clear();
 			if (clusterSet.Clusters != null)
 			{
@@ -121,13 +135,17 @@ public class Clusters
 			_clusters.Add(clusterKey, GameManager.ConnectCluster);
 			GameManager.SetCluster(clusterKey, GameManager.ConnectCluster.GatewayUrlRoot, GameManager.ConnectCluster.Mode);
 		}
-		else
+		else if (Offline)
 		{
+			// [แก้เอง 5 ก.ย. 2026] ทั้งบล็อกนี้ทำเฉพาะตอน offline เท่านั้น
+			// เดิมทำเสมอ ⇒ ถึงจะมี cluster ออนไลน์อยู่ ก็ยังมี "เกาะสร้างสรรค์" (Servers.GetServers
+			// yield "free" เสมอ) โผล่มาด้วย และตัวนั้นมี OnConfirm ที่เรียก Server.BeginServer()
+			// เปิดเซิร์ฟในตัวที่พอร์ต 8190/8191 ทับเซิร์ฟจริง (เจอจริง: Listener.Accept →
+			// "You must call the Bind method before performing this operation")
+			// โหมดออนไลน์จึงต้องไม่แตะ Servers.GetServers เลย แล้วใช้ cluster จากไฟล์ตรง ๆ
+			// ซึ่ง OnConfirm/OnRequestAccount เป็น null ⇒ เกมไปทาง HTTP /accounts ของ gateway เอง
 			Server[] array = Servers.GetServers(_clusters).ToArray();
-			if (Offline)
-			{
-				_clusters.Clear();
-			}
+			_clusters.Clear();
 			Server[] array2 = array;
 			foreach (Server server in array2)
 			{

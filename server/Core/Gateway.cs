@@ -41,6 +41,17 @@ public class Gateway
 
     public string AssetBundleAndroidDir { get; set; }
 
+    /// <summary>
+    /// [5 ก.ย. 2026] โฟลเดอร์ JSON ที่เสิร์ฟให้ /assets/* (ปกติ &lt;data&gt;/assets)
+    ///
+    /// ทำไมต้องมี: ตัวเกมโหลดตารางข้อมูลคนละทางตาม ClusterMode — ดู client/Yaml.Util/Loader.cs:164
+    ///   Mode.Online  → HTTP GameManager.GatewayUrl + "/assets/&lt;ชื่อ&gt;"  (มาที่นี่)
+    ///   โหมดอื่น     → Resources ในตัวเกม "offline/assets/&lt;ชื่อ&gt;"
+    /// เซิร์ฟในตัวของเกมไม่มีเส้นนี้เพราะมันไม่เคยรันเป็น Online ⇒ พอเปิด Online แล้วต้องมี
+    /// ไม่งั้นเกมค้างที่ CheckDataLoaded (Loader รีทราย 5 รอบต่อไฟล์ แล้วไม่ไปต่อ)
+    /// </summary>
+    public string AssetsDir { get; set; }
+
     private string _bundleIndexAndroidCache;
 
     public Gateway(Host host, GameServer gameServer, WorldContext worldCtx, PlayerContext playerCtx)
@@ -129,6 +140,17 @@ public class Gateway
 
         _webServer.GetRoute["/entry"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
         {
+            // [5 ก.ย. 2026] ตัวเกมบอกที่นี่ว่าจะเล่นตัวละครไหน — /entry?entity_id=…&platform=…
+            // (client/Durango.UI/TitleMenuGroup.cs:1039-1046) และยิงมาแบบ auth:true คือมี header
+            // Authorization = session token ⇒ ย้าย token ให้ชี้ตัวละครนั้น ไม่งั้น Auth ฝั่ง TCP
+            // จะปฏิเสธ เพราะ /sessions ออก token ให้ context ชั่วคราวไปก่อน (โหมด Online ไม่ส่ง "player")
+            string entryEntity = request?.QueryString?["entity_id"];
+            string entryToken = request?.Headers?["Authorization"];
+            if (!string.IsNullOrEmpty(entryEntity) && _gameServer.BindSessionToEntity(entryToken, entryEntity))
+            {
+                Console.WriteLine($"[gateway] /entry ผูก session เข้ากับตัวละคร {entryEntity}");
+            }
+
             string tcpHost = !string.IsNullOrEmpty(PublicHost)
                 ? PublicHost
                 : (request.UserHostName?.Split(':').FirstOrDefault() ?? "127.0.0.1");
@@ -268,6 +290,49 @@ public class Gateway
 
     private WebServer.RouteFunction UnhandledUrl(string url)
     {
+        // [5 ก.ย. 2026] ตารางข้อมูลเกมสำหรับโหมด Online — client/Yaml.Util/Loader.cs:155-185
+        // ยิง GET <gateway>/assets/<ชื่อ> (ไม่มีนามสกุล) แล้ว Json.Read<T> ผลลัพธ์ตรง ๆ
+        // ไฟล์จริงอยู่ที่ <AssetsDir>/<ชื่อ>.json — เกมขอ 71 เส้นทาง เรามีครบใน data/assets
+        if (url.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase))
+        {
+            string assetsDir = AssetsDir;
+            if (string.IsNullOrEmpty(assetsDir) || !Directory.Exists(assetsDir))
+            {
+                return null;
+            }
+            string relative = url.Substring("/assets/".Length);
+            int qIdx = relative.IndexOf('?');
+            if (qIdx != -1)
+            {
+                relative = relative.Substring(0, qIdx);
+            }
+            // กัน path traversal — client ขอแค่ <โฟลเดอร์>/<ชื่อ> ธรรมดา ไม่มี .. และไม่ใช่ path เต็ม
+            if (relative.Length == 0 || relative.Contains("..") || Path.IsPathRooted(relative))
+            {
+                return (HttpListenerRequest _, Dictionary<string, string> __) => new WebServer.BadRequestResponse();
+            }
+            string assetPath = Path.GetFullPath(Path.Combine(assetsDir, relative.Replace('/', Path.DirectorySeparatorChar) + ".json"));
+            string rootFull = Path.GetFullPath(assetsDir);
+            if (!assetPath.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+            {
+                return (HttpListenerRequest _, Dictionary<string, string> __) => new WebServer.BadRequestResponse();
+            }
+            return (HttpListenerRequest _, Dictionary<string, string> __) =>
+            {
+                if (!File.Exists(assetPath))
+                {
+                    // ⚠️ ขาดไฟล์ไหน เกมจะรีทราย 5 รอบแล้วค้างหน้าโหลด — ต้องดังพอให้เห็นใน log ทันที
+                    Console.WriteLine($"[assets] 404 {relative}");
+                    return new WebServer.NotFountResponse();
+                }
+                return new WebServer.BinaryReponse
+                {
+                    Content = File.ReadAllBytes(assetPath),
+                    ContentType = "application/json"
+                };
+            };
+        }
+
         // client ประกอบ URL ตามรูปแบบ CDN เดิม: /{live|release}/{platform}/<ไฟล์> (จาก /knock URLs)
         if (url.StartsWith("/live/", StringComparison.OrdinalIgnoreCase) ||
             url.StartsWith("/release/", StringComparison.OrdinalIgnoreCase))

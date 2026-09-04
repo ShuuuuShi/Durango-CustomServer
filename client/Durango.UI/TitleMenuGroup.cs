@@ -180,8 +180,16 @@ public class TitleMenuGroup : MonoBehaviour
 				break;
 			case State.GetClusterList:
 			{
-				TextAsset textAsset = Resources.Load("offline/clusters") as TextAsset;
-				state = ((!(textAsset != null) || !UserControl.TryUpdateClusters(textAsset.text)) ? State.Error : State.SelectCluster);
+				// [แก้เอง 5 ก.ย. 2026] อ่าน clusters.json ที่วางไว้ข้างตัวเกมก่อน ถ้าไม่มีค่อยใช้
+				// TextAsset ในเกมเหมือนเดิม — ทำให้เปลี่ยนที่อยู่เซิร์ฟได้โดยไม่ต้อง build DLL ใหม่
+				// (ฟอร์แมตเดียวกับ TextAsset ต้นฉบับเป๊ะ รวมฟิลด์ "offline")
+				string clusterJson = ReadLocalClusterJson();
+				if (string.IsNullOrEmpty(clusterJson))
+				{
+					TextAsset textAsset = Resources.Load("offline/clusters") as TextAsset;
+					clusterJson = ((textAsset != null) ? textAsset.text : null);
+				}
+				state = ((string.IsNullOrEmpty(clusterJson) || !UserControl.TryUpdateClusters(clusterJson)) ? State.Error : State.SelectCluster);
 				break;
 			}
 			case State.SelectCluster:
@@ -904,6 +912,40 @@ public class TitleMenuGroup : MonoBehaviour
 			CurState = State.TryConnect;
 			break;
 		}
+		}
+	}
+
+	/// <summary>
+	/// [เพิ่มเอง 5 ก.ย. 2026] อ่าน clusters.json ที่วางไว้ข้างตัวเกม (ถ้ามี)
+	/// ตำแหน่งไฟล์ใช้กติกาเดียวกับ Durango.Utils.AppData.BasePath ของต้นฉบับ:
+	///   PC     — โฟลเดอร์เดียวกับ Durango.exe  (Path.GetDirectoryName(Application.dataPath))
+	///   มือถือ — Application.persistentDataPath
+	/// คืน null เมื่อไม่มีไฟล์/อ่านไม่ได้ ⇒ ผู้เรียกใช้ TextAsset ในเกมต่อเหมือนเดิม
+	/// </summary>
+	private static string ReadLocalClusterJson()
+	{
+		try
+		{
+			string dir = ((Application.platform == RuntimePlatform.Android || Application.platform == RuntimePlatform.IPhonePlayer)
+				? Application.persistentDataPath
+				: global::System.IO.Path.GetDirectoryName(Application.dataPath));
+			if (string.IsNullOrEmpty(dir))
+			{
+				return null;
+			}
+			string path = global::System.IO.Path.Combine(dir, "clusters.json");
+			if (!global::System.IO.File.Exists(path))
+			{
+				return null;
+			}
+			string text = global::System.IO.File.ReadAllText(path);
+			UnityEngine.Debug.Log("[durango] ใช้ cluster จากไฟล์ " + path);
+			return text;
+		}
+		catch (Exception ex)
+		{
+			UnityEngine.Debug.LogWarning("[durango] อ่าน clusters.json ไม่ได้: " + ex.Message);
+			return null;
 		}
 	}
 

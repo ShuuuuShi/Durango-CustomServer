@@ -14,9 +14,15 @@ namespace Durango.Online;
 //  - รูปร่างไฟล์เซฟ .player/.world คงต้นฉบับ (AppData/offline/{cluster}/)
 public class Host
 {
-    /// <summary>cluster_mode ที่ /knock+/entry ตอบ — Mobile ใช้ Offline (เกมแท้ parse "SingleMode"
-    /// ไม่ได้จึง fallback เป็น Offline อยู่แล้ว — เมนูโชว์ครบตาม MenuSystem.ShowInOffline)</summary>
-    public static Mode ClusterMode = Mode.Offline;
+    /// <summary>cluster_mode ที่ /knock+/entry ตอบ
+    ///
+    /// [5 ก.ย. 2026] เปลี่ยนค่าตั้งต้นจาก Offline เป็น **Online** — โปรเจกต์นี้ทำเวอร์ชันออนไลน์เท่านั้น
+    /// ค่านี้ถึง client 2 ทาง: (1) /entry → TitleMenuGroup.cs:895 อ่านเมื่อมาทาง Server.ConnectTo
+    /// (2) cluster ที่เลือกบนหน้า Title → TitleMenuUserControlBase.cs:148 (Mode ของ cluster เอง)
+    /// ⚠️ Mode ที่ client รู้จักมี 5 ค่า (Online/Offline/Editable/SingleMode/MultiMode ดู
+    /// client/Durango.Online/GameServer.cs:159-160) แต่ enum ฝั่งนี้พอร์ตมาแค่ 3 ตามที่ต้นฉบับ
+    /// ของเซิร์ฟใช้จริง — ส่งค่าที่ไม่มีใน enum ของ client จะถูก fallback ทิ้ง</summary>
+    public static Mode ClusterMode = Mode.Online;
 
     private readonly string _clusterKey;
 
@@ -103,7 +109,7 @@ public class Host
         Console.WriteLine($"[host] cluster '{_clusterKey}': ผู้เล่น {_contexts.Count} สล็อต โหลดจาก {AppData.CombinePath(basePath)}");
     }
 
-    public void Start(int gamePort, int gatewayPort, string publicHost, string androidBundlesDir)
+    public void Start(int gamePort, int gatewayPort, string publicHost, string androidBundlesDir, string assetsDir)
     {
         GameServer = new GameServer(_worldCtx, _fallbackPlayer);
         GameServer.Start(gamePort);
@@ -114,7 +120,8 @@ public class Host
         Gateway = new Gateway(this, GameServer, _worldCtx, _fallbackPlayer)
         {
             PublicHost = publicHost,
-            AssetBundleAndroidDir = androidBundlesDir
+            AssetBundleAndroidDir = androidBundlesDir,
+            AssetsDir = assetsDir
         };
         Gateway.Start(gatewayPort);
     }

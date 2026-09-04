@@ -97,6 +97,29 @@ public class GameServer
         return _sessionTokens.TryGetValue(token ?? "", out entityId);
     }
 
+    /// <summary>
+    /// [5 ก.ย. 2026] ย้าย session token ที่ออกไว้แล้ว ให้ชี้ตัวละครที่ผู้เล่นเลือกบนหน้า Title
+    ///
+    /// ทำไมต้องมี: ในโหมด Online ตัวเกม **ไม่ส่ง** ฟิลด์ "player" มากับ /sessions
+    /// (client/Durango.UI/TitleMenuGroup.cs:334-340 ใส่ "player" เฉพาะตอน GameManager.ConnectCluster != null
+    /// คือทาง LAN/ConnectTo เท่านั้น) ⇒ ตอนออก token เซิร์ฟยังไม่รู้ว่าจะเล่นตัวไหน
+    /// ตัวละครที่เลือกถูกบอกทีหลังที่ /entry?entity_id=… ซึ่งยิงมาแบบ auth:true
+    /// (client/Durango.UI/TitleMenuGroup.cs:1046 RquestEntry → Http.cs:36 ใส่ header Authorization)
+    /// ⇒ ผูกที่นี่ได้อย่างปลอดภัย เพราะต้องถือ token ที่เซิร์ฟออกให้เท่านั้นถึงจะย้ายได้
+    ///
+    /// คืน false เมื่อ token ไม่รู้จัก — ผู้เรียกไม่ต้องทำอะไรต่อ (Auth จะปฏิเสธเองอยู่แล้ว)
+    /// </summary>
+    public bool BindSessionToEntity(string token, string entityId)
+    {
+        if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(entityId)
+            || !_sessionTokens.ContainsKey(token))
+        {
+            return false;
+        }
+        _sessionTokens[token] = entityId;
+        return true;
+    }
+
     public PlayerContext GetPlayerContext(string entityId)
     {
         PlayerContext playerContext = _playerContexts.Get(entityId);

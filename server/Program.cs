@@ -105,7 +105,9 @@ internal static class Program
 
         try
         {
-            host.Start(gamePort, gatewayPort, publicHost, androidBundles);
+            // assets = ตารางข้อมูลเกมที่ client โหลดผ่าน HTTP เมื่อ cluster_mode = Online
+            // (client/Yaml.Util/Loader.cs:164 — โหมดอื่นมันอ่านจาก Resources ในตัวเกมแทน)
+            host.Start(gamePort, gatewayPort, publicHost, androidBundles, Path.Combine(dataDir, "assets"));
         }
         catch (Exception e)
         {
