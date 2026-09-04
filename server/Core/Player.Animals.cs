@@ -84,6 +84,18 @@ public partial class Player
         public const int PlayerInventoryMaxSize = 200;
 
         /// <summary>
+        /// **ค่าของเรา** — เลี้ยงสัตว์ได้สูงสุดกี่ตัว (Statistics → Derived.MaxTamingPet 303)
+        ///
+        /// ค้นทั้ง /assets แล้วไม่มีค่าฐาน มีแต่โมดิฟายเออร์ <c>max_taming_pet_plus</c> ที่ default 0
+        /// (แปลว่าฐานอยู่บนเซิร์ฟจริงของ NEXON) ⇒ ตั้ง 10 ไว้ก่อน = สองเท่าของ
+        /// <c>constants.pet.default_grazable_count</c> (5) ซึ่งเป็นค่าจริงตัวเดียวที่ใกล้เคียงเรื่องนี้
+        ///
+        /// ⚠️ **ไม่ส่งค่านี้ = ป้ายนับสัตว์โชว์ "N / 0" และปุ่มเอาสัตว์ออกจากทุ่งเด้งหน้าต่าง
+        /// "สลับตัว" ตลอด** (client/Durango.UI/PetGroup.cs:375,416)
+        /// </summary>
+        public const int MaxTamingPet = 10;
+
+        /// <summary>
         /// **ค่าของเรา** — อายุขัยสัตว์เลี้ยง (วัน) ก่อนเข้าสถานะ "แก่" (PetStats.IsOld)
         ///
         /// ค้นข้อมูลทั้งชุดแล้วไม่พบตัวเลขอายุขัยฐานเลย (มีแค่แท็ก life_span_plus_5 ใน tags.json

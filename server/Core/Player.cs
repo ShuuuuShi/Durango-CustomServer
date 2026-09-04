@@ -366,12 +366,7 @@ public partial class Player
         // ⚠️ TemplateId ต้อง echo กลับให้ตรงกับที่ขอ เพราะ client ใช้เป็น cache key (MapSystem.cs:670-674)
         _connection.Recv(delegate(GetDiscoveryInfo msg, PacketHeader header)
         {
-            Send(new DiscoveryInfo
-            {
-                TemplateId = msg.TemplateId,
-                BiocomNames = Array.Empty<Pair<string, bool>>(),
-                AnimalTypes = Array.Empty<Pair<ushort, bool>>()
-            }, header.Seq);
+            Send(BuildDiscoveryInfo(msg.TemplateId), header.Seq);
         });
         _connection.Recv(delegate(GetArtifactBlueprints msg, PacketHeader header)
         {
@@ -585,18 +580,59 @@ public partial class Player
 
     private void OnContextChanged() => ContextChanged?.Invoke();
 
-    private void SendStatistics()
+    /// <summary>
+    /// [5 ก.ย. 2026] ส่งต่อให้ระบบสกิลจัดการทั้งชุด (Core/Player.Skills.cs)
+    ///
+    /// ของเดิมส่งแค่ Swimming + เลเวล + Exp ที่ hard-code ไว้ 3,532,536 ซึ่งพอมีระบบสกิลจริงแล้ว
+    /// กลายเป็นตัวส่งข้อมูลผิดทับของถูก: constructor เรียกตัวนี้ (บรรทัด 524) หลังระบบสกิล
+    /// ตั้งค่าเสร็จ ⇒ เลเวลกับ exp ที่ผู้เล่นเห็นตอนเข้าเกมเป็นของปลอมจนกว่าจะยิง GetStatistics
+    ///
+    /// ⚠️ ค่า Derived ที่ขาดแล้วพังเงียบ: FatigueCaution(4)/FatigueDanger(5) ไม่มี ⇒ หลอดความ
+    /// เหนื่อยไม่มีขั้น "เหนื่อย/หมดแรง" (client/Durango.Logic/FatigueSystem.cs:124-125 ได้ -1
+    /// แล้ว fallback เป็น Max) · MaxTamingPet(303) ไม่มี ⇒ ป้ายนับสัตว์โชว์ "N / 0"
+    /// ทั้งสองอย่างอยู่ใน SendFullStatistics แล้ว
+    /// </summary>
+    private void SendStatistics() => SendFullStatistics();
+
+    /// <summary>
+    /// รายชื่อสิ่งมีชีวิตที่ "ควรเจอได้" บนเกาะแบบนี้ + เจอแล้วหรือยัง
+    ///
+    /// ⚠️ ส่งชุดว่างไป = ระบบค้นพบตายสนิทแบบเงียบ ๆ: <c>client/Durango.Logic.Map/DiscoverInfo.cs:47-60</c>
+    /// นับว่า "เจอครบแล้ว" ทันทีเมื่อรายการว่าง (num == size ตอนที่ทั้งคู่เป็น 0) แล้ว return
+    /// ⇒ เกมไม่เคยยิง <c>DiscoverAnimal</c> ออกมาเลย สารานุกรมจึงไม่มีวันปลด
+    ///
+    /// รายชื่อสัตว์เอามาจากฝูงที่แม่แบบของเกาะนั้นสั่งไว้จริง (region_templates.json → herds → spawns)
+    /// ⇒ ตรงกับสัตว์ที่เกิดจริงบนเกาะ ไม่ใช่รายชื่อทั้งเกม
+    ///
+    /// <c>BiocomNames</c> ยังส่งชุดว่าง — ยังไม่ได้ทำระบบ biocom (แหล่งแร่/หลุม) และยังไม่รู้แน่ชัด
+    /// ว่าฝั่งเกมคาดหวังชื่ออะไร (ในแม่แบบเป็นคีย์ scoops/cracks/commons/craters) ⇒ ไม่เดา
+    /// </summary>
+    private DiscoveryInfo BuildDiscoveryInfo(string templateId)
     {
-        Statistics msg = default;
-        msg.DerivedsAbilities = new Dictionary<Derived, float> { { Derived.Swimming, 100f } };
-        // ⚠️ ขาด FatigueCaution(4)/FatigueDanger(5) แล้วหลอดความเหนื่อยจะไม่มีขั้น "เหนื่อย/หมดแรง"
-        // เลย เพราะ client/Durango.Logic/FatigueSystem.cs:124-125 อ่านไม่เจอแล้วได้ -1
-        // ซึ่ง Fatigue.SetGauge fallback ทั้งคู่เป็น Max ⇒ ต้องหลอดเต็มถึงจะนับว่าเหนื่อย
-        SurvivalState.FillDeriveds(msg.DerivedsAbilities);
-        msg.BasicAbilities = new Dictionary<Basic, int>();
-        msg.Level = _context.AppearPlayer.Level;
-        msg.Exp = 3532536;
-        Send(msg);
+        var animals = new List<Pair<ushort, bool>>();
+        RegionCatalog.TemplateInfo template = RegionCatalog.GetTemplate(templateId)
+                                              ?? RegionCatalog.GetTemplate(_world.TerrainInfo?.region_template);
+        if (template != null)
+        {
+            var seen = new HashSet<ushort>();
+            foreach (var group in template.Herds)
+            {
+                foreach (RegionCatalog.HerdSpawn spawn in group.Value)
+                {
+                    // ยังไม่มีที่เก็บ "เจอชนิดไหนไปแล้วบ้าง" ต่อผู้เล่น (PlayerContext ไม่มีช่อง)
+                    // ⇒ ส่ง false ไว้ก่อน ผลคือเกมพยายามค้นหาสัตว์รอบตัวทุกครั้งที่เข้าเกาะ
+                    // ซึ่งถูกต้องกว่าบอกว่าเจอครบแล้วทั้งที่ยังไม่เคยเจอ
+                    if (seen.Add(spawn.EntityType)) animals.Add(new Pair<ushort, bool>(spawn.EntityType, false));
+                }
+            }
+        }
+
+        return new DiscoveryInfo
+        {
+            TemplateId = templateId,
+            BiocomNames = Array.Empty<Pair<string, bool>>(),
+            AnimalTypes = animals.ToArray()
+        };
     }
 
     // ส่งสถานะทั้งชุดของผู้เล่นคนนี้ (client แทนที่ list ทั้งก้อนทุกครั้งที่ได้รับ)

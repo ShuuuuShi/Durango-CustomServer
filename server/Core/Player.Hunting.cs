@@ -25,6 +25,25 @@ namespace Durango.Online;
 
 public partial class Player
 {
+    /// <summary>
+    /// ตายอยู่ตอนเข้าเกม ⇒ ให้ฟื้นทันที — กันตัวละครค้างตายถาวร
+    ///
+    /// สถานะตายถูกเซฟลงไฟล์ (<c>appear_player.IsAlive = false</c>) ⇒ ตายแล้วปิดเกม
+    /// เปิดใหม่ก็ยังตายอยู่ และทางเดียวที่จะฟื้นคือกดปุ่มบนหน้าจอตาย ซึ่งถ้าด้วยเหตุใดก็ตาม
+    /// หน้าจอนั้นไม่ขึ้น (เข้าเกมมาแล้วเป็นศพเดินได้) ตัวละครจะติดถาวรโดยไม่มีทางแก้ในเกม
+    /// ⇒ เข้ามาเมื่อไรก็ฟื้นให้เลย ตามกติกาบทลงโทษเดิมทุกอย่าง (หลอดลดตามจำนวนครั้งที่ตาย)
+    ///
+    /// ใช้ <c>HandleReviveMsg</c> ตัวเดียวกับตอนผู้เล่นกดฟื้นเอง จะได้ไม่มีตรรกะสองชุด
+    /// เรียกจาก <c>RegisterSystemHandlers</c> (constructor) — ตอนนั้น client ยังไม่ subscribe
+    /// แต่ไม่เป็นไร เพราะสิ่งที่สำคัญคือค่าใน <c>AppearPlayer</c> ซึ่งถูกส่งไปกับตัวละครอยู่แล้ว
+    /// </summary>
+    private void ReviveIfDeadOnLogin()
+    {
+        if (_context.AppearPlayer.IsAlive) return;
+        Console.WriteLine($"[combat] {EntityId[..Math.Min(8, EntityId.Length)]} เข้าเกมมาในสภาพตาย — ฟื้นให้ที่จุดเข้าเกาะ");
+        HandleReviveMsg(normal: true);
+    }
+
     /// <summary>สัตว์ที่ผู้เล่นคนนี้ "เห็นอยู่ตอนนี้" — กันส่ง AppearAnimal ซ้ำทุกรอบ</summary>
     private readonly HashSet<string> _animalSet = new(StringComparer.Ordinal);
 

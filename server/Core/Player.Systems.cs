@@ -25,5 +25,8 @@ public partial class Player
         RegisterAnimalHandlers();      // Player.Animals.cs   — สัตว์/สัตว์เลี้ยง/กรง/ทำให้เชื่อง
         RegisterSkillHandlers();       // Player.Skills.cs    — สกิล/เลเวล/exp (ทับ GetStatistics+GetSkills ของ Player.cs)
         RegisterGatheringHandlers();   // Player.Gathering.cs — เก็บเกี่ยวของธรรมชาติ (ตัดไม้/เก็บพืช/ทุบหิน)
+
+        // ── หลังทุกระบบพร้อมแล้ว ─────────────────────────────────────────────────
+        ReviveIfDeadOnLogin();         // Player.Hunting.cs   — กันตัวละครค้างตายถาวร
     }
 }

@@ -1124,6 +1124,8 @@ public partial class Player
             { Derived.Swimming, 100f }
         };
         PlayerBaseStatsJson b = SkillDataStore.BaseStats;
+        // เพดานจำนวนสัตว์เลี้ยง — ไม่ส่ง ป้ายนับสัตว์จะโชว์ "N / 0" (ดู PetTuning.MaxTamingPet)
+        deriveds[Derived.MaxTamingPet] = PetTuning.MaxTamingPet;
         deriveds[Derived.Attack] = b.Attack;
         deriveds[Derived.Accuracy] = b.Accuracy;
         deriveds[Derived.Critical] = b.Critical;
