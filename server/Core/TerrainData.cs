@@ -20,6 +20,9 @@ public class TerrainData
     /// <summary>จุดสำคัญที่มากับเกาะ (pois.yml) — ท่าเรือ/รูวาร์ป · null ได้ถ้าเกาะไม่มีไฟล์นี้</summary>
     public TerrainPois Pois;
 
+    /// <summary>จุดเกิดฝูงสัตว์ที่มากับเกาะ (herds.yml) · null ได้ถ้าเกาะไม่มีไฟล์นี้</summary>
+    public TerrainHerds Herds;
+
     public int Width;
 
     public int Height;

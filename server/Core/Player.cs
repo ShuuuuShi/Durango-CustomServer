@@ -1035,11 +1035,22 @@ public partial class Player
             {
                 msg.EntityName = biomeSpriteInfo.Name;
             }
+            // [5 ก.ย. 2026] ระบบเก็บเกี่ยว — ดู Core/Player.Gathering.cs (จุดเดียวที่ระบบนั้นแตะไฟล์นี้)
+            // ⚠️ ตัวที่ทำให้ "กดเก็บได้จริง" คือ msg.Collectible ไม่ใช่ 506:
+            //    client/InteractionSystem.cs:628 ส่ง Touched.Collectible เข้า GatheringSystem.SetCollectible
+            //    ซึ่ง **ลบเมนู Collect ทุกตัวทิ้งก่อน** แล้วเติมใหม่หนึ่งปุ่มต่อหนึ่ง Generator
+            //    (client/GatheringSystem.cs:237-249) ⇒ ส่ง 506 เปล่า ๆ = ไม่มีปุ่มให้กด
+            // 506 ยังต้องส่งตามความหมายเดิมของ protocol เผื่อ SetCollectible return ก่อนเพราะ
+            // target ไม่ตรง (client/GatheringSystem.cs:202) — กดแล้วไม่มีอะไรเกิดขึ้นแทนที่จะพัง
+            // (client/InteractionSystem.cs:486 Gathering(menu.Id) → FindGatheringData(null) → null)
+            msg.Collectible = BuildCollectibleFor(touch.EntityId, touch.EntityType, touch.Tile);
+            var naturalInteractions = new List<int> { (int)Shared.System.Interaction.Collect };
             if (flag)
             {
                 // 10268 = Interaction.RemoveNatural (GameCode enum ไม่มีตัวนี้ — ค่าจาก InteractionData ต้นฉบับ)
-                msg.Interactions = new[] { 10268 };
+                naturalInteractions.Add(10268);
             }
+            msg.Interactions = naturalInteractions.ToArray();
         }
         Send(msg, seq);
         OnContextChanged();

@@ -53,6 +53,7 @@ public static class TerrainLoader
         data.Landmarks = null;
         data.Garden = null;
         data.Pois = null;
+        data.Herds = null;
         string path = ResolvePath(terrainId);
         if (path == null) return;
         try
@@ -70,6 +71,8 @@ public static class TerrainLoader
                 // [5 ก.ย. 2026] pois.yml บอกตำแหน่งท่าเรือ/รูวาร์ปที่มากับเกาะ — เซิร์ฟเป็นคนวางลงโลก
                 // (เกมเป็น client ล้วน ไม่ได้วางเอง) เกาะที่ generate เองบางลูกไม่มีไฟล์นี้ ⇒ Pois = null
                 else if (CheckEntry(entry, "pois.yml")) data.Pois = TerrainPois.Parse(LoadEntry(entry));
+                // [5 ก.ย. 2026] herds.yml บอกจุดที่ฝูงสัตว์เกิด — คู่กับ region_templates.json ที่บอกชนิด
+                else if (CheckEntry(entry, "herds.yml")) data.Herds = TerrainHerds.Parse(LoadEntry(entry));
             }
         }
         catch (Exception e)

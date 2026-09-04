@@ -24,6 +24,11 @@ public static class PerformanceYaml
 
         [JsonProperty("reins")]
         public Dictionary<string, Dictionary<string, Rein>> ReinsDict;
+
+        // อาหารสัตว์ — ฝั่งเกมกรองไอเทมที่ป้อนสัตว์ได้ด้วยหมวดนี้ (client/Durango.UI/PetUtil.cs:128-133)
+        // ไม่แนบไป หน้าต่างเลือกอาหารสัตว์จะว่างเปล่าทั้งที่มีอาหารอยู่ในกระเป๋า
+        [JsonProperty("pet_food")]
+        public Dictionary<string, Dictionary<string, PetFood>> PetFoodDict;
     }
 
     public class AddOn
@@ -63,6 +68,12 @@ public static class PerformanceYaml
     {
         [JsonProperty("timbre")]
         public string Timbre;
+    }
+
+    public class PetFood
+    {
+        [JsonProperty("vigor")]
+        public float Vigor;
     }
 
     public class Rein
@@ -123,6 +134,17 @@ public static class PerformanceYaml
     {
         if (string.IsNullOrEmpty(prototypeId) || Performances?.InstrumentDict == null) return null;
         if (Performances.InstrumentDict.TryGetValue(prototypeId, out var value))
+        {
+            using var enumerator = value.GetEnumerator();
+            if (enumerator.MoveNext()) return enumerator.Current.Value;
+        }
+        return null;
+    }
+
+    public static PetFood GetPetFood(string prototypeId)
+    {
+        if (string.IsNullOrEmpty(prototypeId) || Performances?.PetFoodDict == null) return null;
+        if (Performances.PetFoodDict.TryGetValue(prototypeId, out var value))
         {
             using var enumerator = value.GetEnumerator();
             if (enumerator.MoveNext()) return enumerator.Current.Value;

@@ -134,6 +134,7 @@ internal static class Program
         DataStore.Load(dataDir);
 
         // สารบัญเกาะ — ระบบล่องเรือใช้ตอบว่าจากท่าเรือนี้ไปไหนได้บ้าง (ต้องหลัง TerrainLoader.TerrainDir)
+        WorkbenchTags.AssetsDir = Path.Combine(dataDir, "assets");
         RegionCatalog.Load(Path.Combine(dataDir, "assets"));
 
         // ---- host + saves ----

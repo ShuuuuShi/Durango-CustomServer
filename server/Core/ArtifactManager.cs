@@ -31,9 +31,30 @@ public class ArtifactManager
         _artifacts = artifacts;
         _addOns = addons;
         _mannequins = mannequins;
+
+        // โลกที่โหลดจากไฟล์เซฟมีสิ่งปลูกสร้างเก่าที่ยังไม่มีแท็ก (เซฟก่อนหน้านี้ไม่เคยเก็บ)
+        // ⇒ เติมให้ตอนเปิดโลก ไม่งั้นโต๊ะที่สร้างไว้ก่อนจะคราฟต์ไม่ได้ตลอดไป
+        if (_artifacts != null && _artifacts.Count > 0)
+        {
+            var keys = new List<string>(_artifacts.Keys);
+            int patched = 0;
+            foreach (string key in keys)
+            {
+                AppearArtifact artifact = _artifacts[key];
+                if (!WorkbenchTags.Apply(ref artifact)) continue;
+                _artifacts[key] = artifact;
+                patched++;
+            }
+            if (patched > 0) Console.WriteLine($"[โต๊ะคราฟต์] เติมแท็กให้สิ่งปลูกสร้างเดิม {patched} หลัง");
+        }
     }
 
-    public void AddArtifact(AppearArtifact artifact) => _artifacts.Add(artifact.EntityId, artifact);
+    public void AddArtifact(AppearArtifact artifact)
+    {
+        // โต๊ะคราฟต์ต้องมีแท็กติดไปด้วย ไม่งั้นฝั่งเกมถือว่า "ไม่มีโต๊ะ" (ดู Support/WorkbenchTags.cs)
+        WorkbenchTags.Apply(ref artifact);
+        _artifacts.Add(artifact.EntityId, artifact);
+    }
 
     public AppearArtifact? Get(string entityId)
     {

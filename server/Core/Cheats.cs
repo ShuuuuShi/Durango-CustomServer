@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Durango.UI.Control;
 using Durango.Utils.Extensions;
@@ -102,6 +103,31 @@ public static class Cheats
                 Strs = new Dictionary<string, string> { { "timbre", instrument.Timbre } }
             });
         }
+        // อาหารสัตว์ — ฝั่งเกมคัดไอเทมที่ป้อนสัตว์ได้จากหมวดนี้ (client/Durango.UI/PetUtil.cs:128-133)
+        // ไม่แนบ ⇒ หน้าต่าง "เลือกอาหาร" ว่างเปล่าทั้งที่มีอาหารอยู่ในกระเป๋า
+        PerformanceYaml.PetFood petFood = PerformanceYaml.GetPetFood(prototypeId);
+        if (petFood != null)
+        {
+            list2.Add(new Performance
+            {
+                Id = "pet_food",
+                Nums = new Dictionary<string, float> { { "vigor", petFood.Vigor } }
+            });
+        }
+
+        // บังเหียน — ถ้าไม่มี pet_entity_type ฝั่งเกมไม่ถือว่าไอเทมนี้ "เป็นสัตว์"
+        // (client/Durango.Logic.Item/Util.cs:298-306) ⇒ ร้านค้าไม่ยิง GetPreviewPet มาเลย
+        PerformanceYaml.Rein rein = PerformanceYaml.GetRein(prototypeId);
+        if (rein != null)
+        {
+            list2.Add(new Performance
+            {
+                Id = "reins",
+                Nums = new Dictionary<string, float> { { "pet_entity_type", rein.PetEntityType } },
+                Strs = new Dictionary<string, string> { { "playback_rate", rein.PlaybackRate.ToString(CultureInfo.InvariantCulture) } }
+            });
+        }
+
         value.Performance = list2.ToArray();
         return value;
     }

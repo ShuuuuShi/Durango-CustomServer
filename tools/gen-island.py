@@ -3,6 +3,7 @@
 
 ทำไมต้องมี: ตัวเจนเกาะเดิม (tools/mapgen/map_core.py) ออกไฟล์มาไม่ครบสำหรับเซิร์ฟนี้
   - ไม่เขียน pois.yml ⇒ เกาะไม่มีท่าเรือ ⇒ ล่องเรือออกจากเกาะไม่ได้
+  - ไม่เขียน herds.yml ⇒ เกาะไม่มีสัตว์เลยสักตัว (เรียก add-herds.py ต่อให้แล้ว)
   - ตั้ง region_template เป็น "gen<seed>" ซึ่งเกมไม่รู้จัก ⇒ client ข้ามเกาะทิ้งทั้งกลุ่ม
     (client/ExploreSystem.cs:307)
   - ออกเป็นโฟลเดอร์ แต่ TerrainLoader อ่านเฉพาะ .zip (server/Core/TerrainLoader.cs)
@@ -121,6 +122,10 @@ def main():
         subprocess.check_call([sys.executable, os.path.join(HERE, 'add-region-template.py'),
                                '--id', template_id, '--from', args.tpl_from,
                                '--level', str(args.level), '--role', str(args.role)])
+        # ต้องทำหลังลงทะเบียน template เพราะ add-herds อ่านว่าแม่แบบสั่งฝูงอะไรไว้กี่ฝูง
+        print('')
+        subprocess.check_call([sys.executable, os.path.join(HERE, 'add-herds.py'),
+                               '--id', args.id, '--force'])
     else:
         print('')
         print('⚠️ ไม่ได้ระบุ --template-from ⇒ เกมจะยังไม่รู้จักเกาะนี้')

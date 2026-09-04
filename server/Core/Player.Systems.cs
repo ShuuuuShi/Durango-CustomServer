@@ -19,6 +19,11 @@ public partial class Player
 {
     private void RegisterSystemHandlers()
     {
-        // ยังไม่มีระบบที่แยกไฟล์ — เพิ่มการเรียกที่นี่เมื่อสร้างไฟล์ Player.<ระบบ>.cs
+        RegisterInventoryHandlers();   // Player.Inventory.cs — ของ/กระเป๋า/คลัง/ใช้ของ
+        RegisterCraftingHandlers();    // Player.Crafting.cs  — คราฟต์/สูตร/โต๊ะคราฟต์
+        RegisterCombatHandlers();      // Player.Combat.cs    — ท่าต่อสู้/ความเสียหาย/ตาย-เกิดใหม่
+        RegisterAnimalHandlers();      // Player.Animals.cs   — สัตว์/สัตว์เลี้ยง/กรง/ทำให้เชื่อง
+        RegisterSkillHandlers();       // Player.Skills.cs    — สกิล/เลเวล/exp (ทับ GetStatistics+GetSkills ของ Player.cs)
+        RegisterGatheringHandlers();   // Player.Gathering.cs — เก็บเกี่ยวของธรรมชาติ (ตัดไม้/เก็บพืช/ทุบหิน)
     }
 }

@@ -31,6 +31,9 @@ public class World
 
     public readonly MarketManager MarketManager;
 
+    /// <summary>สัตว์ป่าบนเกาะนี้ — เกิดจาก herds.yml + แม่แบบภูมิภาค (ดู AnimalManager)</summary>
+    public readonly AnimalManager AnimalManager;
+
     private readonly TerrainData _terrainData;
 
     private readonly ChunkData[,] _chunkData;
@@ -101,6 +104,8 @@ public class World
         _chunkData = new ChunkData[NumChunksX, NumChunksY];
         AssignChunkData();
         PlaceTerrainPois();
+        // สัตว์ป่า — เกิดหลังจากรู้ข้อมูลเกาะแล้ว เพราะต้องใช้ทั้ง herds.yml และแม่แบบของเกาะนี้
+        AnimalManager = new AnimalManager(_terrainData, RegionCatalog.GetTemplate(_terrainData.Info?.region_template));
     }
 
     /// <summary>
@@ -180,7 +185,13 @@ public class World
 
     public void Process()
     {
-        for (int num = _players.Count - 1; num >= 0; num--) _players[num].Process();
+        for (int num = _players.Count - 1; num >= 0; num--)
+        {
+            _players[num].Process();
+            // สัตว์รอบตัว — ตัวเกมทำลายสัตว์ที่อยู่ไกลทิ้งเอง เซิร์ฟจึงต้องส่งใหม่ตอนเดินกลับเข้าระยะ
+            // (ตัวมันเองหน่วงเวลาอยู่แล้ว ไม่ได้ทำงานจริงทุกเฟรม — ดู Player.Hunting.cs)
+            _players[num].SyncAnimalVisibility();
+        }
     }
 
     public void Stop()

@@ -42,6 +42,11 @@ public class WorldContext
     [JsonProperty("persistent")]
     public bool Persistent;
 
+    // ของในตู้/คลังของสิ่งปลูกสร้างบนเกาะนี้ (ดู Player.WarehouseStore)
+    // เดิมอยู่ในหน่วยความจำอย่างเดียว รีสตาร์ตแล้วของหายเกลี้ยง
+    [JsonProperty("warehouses", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, Player.WarehouseStore.Box> Warehouses;
+
     [JsonIgnore]
     public string Path { get; private set; }
 
@@ -54,6 +59,7 @@ public class WorldContext
         RemovedNatural ??= new List<Point2>();
         GrazedPetList ??= new List<Pet>();
         Path = path;
+        Player.WarehouseStore.Import(Warehouses);
     }
 
     [CanBeNull]
@@ -70,6 +76,8 @@ public class WorldContext
     {
         if (Persistent && !persistent) return;
         if (persistent) Persistent = true;
+        // เก็บของในตู้ของสิ่งปลูกสร้างบนเกาะนี้ลงไปด้วย (กรองด้วยรายชื่อ artifact ของเกาะเอง)
+        Warehouses = Player.WarehouseStore.Export(Artifacts?.Keys);
         // เขียนแบบสลับเข้าที่ + เก็บ .bak — ปิดเซิร์ฟกลางเซฟแล้วไฟล์ยังอยู่ครบ (ดู SafeSave)
         SafeSave.WriteAtomic(Path, Json.WriteToBytes(this, indented: false), "world-context");
     }

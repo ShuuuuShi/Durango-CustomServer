@@ -31,6 +31,37 @@ public static class RegionCatalog
         public int Level;
         public Role Role = Role.Rural;
         public Biome Biome = Biome.Invalid;
+
+        /// <summary>ฝูงสัตว์ที่เกิดบนเกาะแบบนี้ · ชื่อกลุ่ม (land/beach/…) → รายการฝูง</summary>
+        public Dictionary<string, List<HerdSpawn>> Herds = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// ฝูงหนึ่งฝูงที่แม่แบบสั่งให้เกิด — ถอดจากตัวเลขก้อนเดียวใน <c>region_templates.json</c>
+    ///
+    /// ในไฟล์ <c>herds.land.spawns</c> เป็นลิสต์ของเลข 6 หลัก เช่น <c>204220</c> โดย
+    /// **จำนวนสมาชิกในลิสต์เท่ากับ <c>total_count</c> เป๊ะทั้ง 310 กลุ่มในไฟล์** ⇒ หนึ่งเลข = หนึ่งฝูง
+    ///
+    /// การถอดเลข <c>204220</c> → ชนิดสัตว์ <c>2042</c> + เลเวลต่อสู้ <c>20</c> ยืนยันด้วยข้อมูลจริง:
+    /// • <c>เลข/100</c> เป็นชนิดที่มีจริงใน <c>entity_types/animal.json</c> **10,606 จาก 10,616 ครั้ง**
+    ///   (ชนิดสัตว์มี 214 ตัวกระจายในช่วง 2000-2999 ⇒ ถ้าถอดผิดจะพลาดเกือบหมด ไม่ใช่ 99.9%)
+    /// • <c>เลข%100</c> ตกอยู่ในช่วง <c>combat_level_ranges</c> ของสัตว์ชนิดนั้นเอง **127 จาก 136 คู่**
+    /// • และมันไม่ใช่เลเวลของเกาะ (เกาะ lv5 มีสัตว์ lv10/20 · เกาะ lv40 มีตั้งแต่ lv1 ถึง 21)
+    ///
+    /// ⚠️ ที่เหลือ ~7% ถอดแล้วหลุดช่วง — เราหนีบเข้าช่วงของสัตว์ตัวนั้นแทนที่จะทิ้ง (ดู AnimalManager)
+    /// </summary>
+    public readonly struct HerdSpawn
+    {
+        public readonly ushort EntityType;
+        public readonly int CombatLevel;
+
+        public HerdSpawn(ushort entityType, int combatLevel)
+        {
+            EntityType = entityType;
+            CombatLevel = combatLevel;
+        }
+
+        public static HerdSpawn FromPacked(int packed) => new((ushort)(packed / 100), packed % 100);
     }
 
     private static readonly List<Region> _regions = new();
@@ -75,6 +106,19 @@ public static class RegionCatalog
                     if (o["biome_effects"] is JObject effects)
                     {
                         info.Biome = ParseBiome(effects.Properties().FirstOrDefault()?.Name);
+                    }
+                    if (o["herds"] is JObject herds)
+                    {
+                        foreach (JProperty group in herds.Properties())
+                        {
+                            if (group.Value["spawns"] is not JArray spawns || spawns.Count == 0) continue;
+                            var list = new List<HerdSpawn>(spawns.Count);
+                            foreach (JToken packed in spawns)
+                            {
+                                if ((int?)packed is { } value) list.Add(HerdSpawn.FromPacked(value));
+                            }
+                            if (list.Count > 0) info.Herds[group.Name] = list;
+                        }
                     }
                 }
                 _templates[kv.Key] = info;
