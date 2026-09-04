@@ -103,6 +103,14 @@ public sealed class SurvivalState
     /// <summary>แหล่ง → (คีย์หลอด → ความชันที่บวกเพิ่ม)</summary>
     private readonly Dictionary<string, Dictionary<string, float>> _momenta = new();
 
+    /// <summary>
+    /// คีย์ที่เพิ่งถูกตั้งค่าตรง ๆ และยังไม่ได้เอาไปสร้างเส้น
+    ///
+    /// จำเป็นเพราะ <see cref="Rebuild"/> เริ่มด้วย <see cref="Harvest"/> ที่อ่านค่ากลับจาก
+    /// หลอดชุดเดิม — ถ้าไม่กันไว้ ค่าที่ Set มาก่อนหน้าจะถูกค่าเก่าทับทันที
+    /// </summary>
+    private readonly HashSet<string> _pendingSets = new();
+
     private double _builtAt;
     private double _nextTickAt;
     private bool _dirty;
@@ -204,6 +212,7 @@ public sealed class SurvivalState
     {
         if (string.IsNullOrEmpty(key)) return false;
         _values[key] = value;
+        _pendingSets.Add(key);
         _dirty = true;
         return true;
     }
@@ -322,6 +331,7 @@ public sealed class SurvivalState
         _builtAt = now;
         _nextTickAt = now + SurvivalTuning.TickInterval;
         _dirty = false;
+        _pendingSets.Clear();
     }
 
     /// <summary>อ่านค่าปัจจุบันจากหลอดชุดเดิมก่อนทิ้ง (รวมถึงชุดที่เพิ่งโหลดจากไฟล์เซฟ)</summary>
@@ -341,6 +351,7 @@ public sealed class SurvivalState
             // ย่อ Gauge เป็น {min,max,cur} ตอนเขียน JSON (Support/GaugeConverter.cs:13-20)
             // ⇒ Get(now) คืน cur ที่เซฟไว้ ซึ่งคือสิ่งที่เราต้องการพอดี (ยังไม่ทำ offline progression)
             if (g?.Determination == null || g.Determination.Length == 0) return;
+            if (_pendingSets.Contains(key)) return;   // ค่าที่ Set มาใหม่ชนะค่าบนเส้นเดิมเสมอ
             _values[key] = g.Get(now);
         }
     }
