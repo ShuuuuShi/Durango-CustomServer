@@ -76,7 +76,7 @@ public class Player
         _chunkVisited = new World.ChunkVisit[_world.NumChunksX, _world.NumChunksY];
         // ต้องสร้างก่อน Send(_context.AppearPlayer) ท้าย ctor เพราะ AppearPlayer พก Survival (182)
         // ไปด้วยเป็นลำดับที่ 11 ⇒ เส้นแนวโน้มต้องถูกสร้างใหม่ตามเวลาปัจจุบันก่อนถูกส่ง
-        _survival = new SurvivalState(_context);
+        _survival = new SurvivalState(_context, live: true);
         _world.ArtifactAppeared += World_ArtifactAppeared;
         _world.ArtifactDisappeared += World_ArtifactDisappeared;
         _world.PlayerAppeared += World_PlayerAppeared;
@@ -508,7 +508,13 @@ public class Player
                 }, header.Seq);
             }
         });
-        _connection.ConnetionClosed += delegate { Closed?.Invoke(); };
+        _connection.ConnetionClosed += delegate
+        {
+            // แช่หลอดไว้ที่ค่าปัจจุบันก่อนปล่อย context — ไม่งั้นเส้นแนวโน้มที่ส่งไปแล้วจะเดินต่อ
+            // อีกจนสุด horizon แล้วรอบเซฟอัตโนมัติจะเขียนค่าที่เดินไปแล้วลงไฟล์ (ดู SurvivalState._live)
+            _survival.Freeze(Gauge.CurrentTime);
+            Closed?.Invoke();
+        };
         _context.PlayerInfo.DisconnectedAt = Times.UnixTimeNow();
         SendStatistics();
         SendInventory();
@@ -860,6 +866,21 @@ public class Player
                     int y = array[2].ToInt();
                     int num3 = array[3].ToInt();
                     _world.AddNatural(new Point2(x, y), (ushort)num3);
+                }
+                break;
+            }
+            // [5 ก.ย. 2026] "sv <หลอด> <ค่า>" — ตั้งค่าหลอดสถานะตรง ๆ เพื่อทดสอบเส้นทาง
+            // SurvivalUpdated (183) แบบ "ค่ากระโดด" ให้เห็นบนจอจริง เช่น  sv fatigue 70
+            // หลอดที่ใช้ได้: life / stamina / energy / health / fatigue / groggy
+            case "sv":
+            {
+                if (array.Length >= 3 && float.TryParse(array[2],
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float target))
+                {
+                    _survival.Set(array[1], target);
+                    FlushSurvival();
+                    Send(new Info { Text = $"{array[1]} = {target}" }, seq);
                 }
                 break;
             }

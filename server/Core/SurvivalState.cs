@@ -107,9 +107,21 @@ public sealed class SurvivalState
     private double _nextTickAt;
     private bool _dirty;
 
-    public SurvivalState(PlayerContext context)
+    /// <summary>
+    /// มีผู้เล่นต่ออยู่จริงไหม — ถ้าไม่ velocity ทุกหลอดถูกบังคับเป็น 0 (เส้นแบน ค่าค้างไว้)
+    ///
+    /// ทำไมต้องมี: context ถูกสร้าง/โหลดตอนบูต (Host.Load) ซึ่งอาจก่อนคนต่อเข้ามาเป็นชั่วโมง
+    /// ถ้าปล่อยให้เส้นเดินตั้งแต่ตอนนั้น รอบเซฟอัตโนมัติ (Program.cs:185 ทุก 60 วิ) จะเขียนค่าที่
+    /// "เดินไปแล้ว" ลงไฟล์ ⇒ กลายเป็น offline progression แบบครึ่ง ๆ กลาง ๆ โดยไม่ได้ตั้งใจ
+    /// (เช่น life velocity 1/วิ = เลือดเต็มเองภายใน 5 นาทีทั้งที่ผู้เล่นไม่ได้ออนไลน์)
+    /// ⇒ หลอดเดินเฉพาะตอนออนไลน์ ซึ่งตรงกับความหมายของ online_momenta ในไฟล์ data อยู่แล้ว
+    /// </summary>
+    private bool _live;
+
+    public SurvivalState(PlayerContext context, bool live)
     {
         _context = context;
+        _live = live;
         // online_momenta = แรงที่ติดตัวตลอดเวลาที่ออนไลน์ — ของ player มีแค่ fatigue +0.083333
         // ซึ่งหักล้างกับ velocity ฐาน -0.083333 พอดี ⇒ อยู่เฉย ๆ ความเหนื่อยนิ่ง (ตามที่ข้อมูลออกแบบ)
         PlayerType type = PlayerTypes.Player;
@@ -122,11 +134,18 @@ public sealed class SurvivalState
 
     /// <summary>
     /// สร้างหลอดชุดใหม่ให้ context หนึ่งครั้งแล้วทิ้ง — ใช้ตอนโหลด/สร้าง PlayerContext
-    /// (ตอนนั้นยังไม่มี Player จึงยังไม่ต้องมีตัวที่คอยเดินเวลาให้)
+    /// ตอนนั้นยังไม่มีใครต่ออยู่ จึงสร้างแบบแช่ไว้ (ดู <see cref="_live"/>)
     /// </summary>
     public static void Reset(PlayerContext context)
     {
-        if (context != null) _ = new SurvivalState(context);
+        if (context != null) _ = new SurvivalState(context, live: false);
+    }
+
+    /// <summary>แช่หลอดไว้ที่ค่าปัจจุบัน — เรียกตอนผู้เล่นหลุดการเชื่อมต่อ</summary>
+    public void Freeze(double now)
+    {
+        _live = false;
+        Rebuild(now);
     }
 
     // ── การเปลี่ยนความชัน (velocity) ────────────────────────────────────────────────
@@ -344,7 +363,8 @@ public sealed class SurvivalState
         maxEnd = Mathf.Max(maxEnd, min);
 
         float cur = _values.TryGetValue(key, out float v) ? v : def.Value ?? maxNow;
-        float velocity = def.Velocity + MomentumOf(key);
+        // ไม่มีใครต่ออยู่ = เส้นแบน ค่าค้างไว้เฉย ๆ (ยังไม่ทำ offline progression — ดู _live)
+        float velocity = _live ? def.Velocity + MomentumOf(key) : 0f;
 
         GaugeNode[] nodes = MakeLine(now, cur, velocity, min, maxNow, maxEnd, SurvivalTuning.DeterminationHorizon);
         _values[key] = nodes[0].Value;
