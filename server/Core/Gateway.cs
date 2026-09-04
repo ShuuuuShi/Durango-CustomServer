@@ -206,15 +206,75 @@ public class Gateway
         _webServer.PostRoute["/accounts"] = (HttpListenerRequest request, Dictionary<string, string> _) =>
             new WebServer.JsonResponse(Json.Write(_host.BuildAccount()));
 
-        _webServer.GetRoute["/terrains/1"] = delegate
-        {
-            string content = Json.Write(_gameServer.World.TerrainInfo);
-            return new WebServer.JsonResponse(content);
-        };
-        _webServer.GetRoute["/terrains/1/whole_biomes"] = (HttpListenerRequest request, Dictionary<string, string> _) =>
-            new WebServer.BinaryReponse { Content = _gameServer.World.Biomes };
+        // /terrains/* ทั้งหมดจัดการใน UnhandledUrl เพราะชื่อเกาะเป็นตัวแปร (ดู TerrainRoute)
 
         _webServer.UnhandledUrl += UnhandledUrl;
+    }
+
+    /// <summary>
+    /// [5 ก.ย. 2026] แผนที่ของเกาะ — <c>/terrains/&lt;ชื่อเกาะ&gt;</c> และ chunk ใต้เส้นนั้น
+    ///
+    /// ต้นฉบับจดเส้นทางเป็น "/terrains/1" ตายตัวได้เพราะมีโลกเดียว แต่ตัวเกมประกอบ URL จาก
+    /// <c>Region.TerrainId</c> ที่เซิร์ฟส่งไปกับ Welcome ตรง ๆ โดยไม่ตรวจอะไร
+    /// (client/Durango.Terrain/TerrainMeta.cs:130 · TerrainBase.cs:337 · MapSystem.cs:752)
+    /// ⇒ พอส่งชื่อเกาะจริงไป เส้นทางก็กลายเป็น /terrains/ri35te/… ตามนั้น
+    ///
+    /// ⚠️ ต้องอ่านชื่อเกาะจาก URL ไม่ใช่จาก session token: chunk กับ terrain info ถูกขอแบบ
+    /// **ไม่มี header Authorization** (มีเฉพาะ /whole_biomes) จึงระบุตัวผู้ขอไม่ได้
+    /// ⚠️ และชื่อต้องต่างกันต่อเกาะจริง ๆ เพราะ chunk ขอด้วย disableCache:false
+    /// (TerrainBase.cs:332) ⇒ ถ้าใช้ชื่อซ้ำ เกาะใหม่จะได้แผนที่เกาะเก่าจากแคชของ client
+    ///
+    /// รูปแบบ:  /terrains/&lt;id&gt;            → info.yml (TerrainInfoJson)
+    ///          /terrains/&lt;id&gt;/whole_biomes → biome ทั้งแผ่น
+    ///          /terrains/&lt;id&gt;/ocean|rivers/&lt;x&gt;,&lt;y&gt; → chunk เฉพาะชั้น
+    ///          /terrains/&lt;id&gt;/&lt;x&gt;,&lt;y&gt;      → chunk รวม (biome+ocean+river+landmark)
+    /// </summary>
+    private WebServer.RouteFunction TerrainRoute(string url)
+    {
+        string rest = url.Substring("/terrains/".Length).Split('?')[0];
+        int slash = rest.IndexOf('/');
+        string regionId = slash < 0 ? rest : rest.Substring(0, slash);
+        string tail = slash < 0 ? "" : rest.Substring(slash + 1);
+
+        World world = _gameServer.Worlds?.GetOrCreate(regionId) ?? _gameServer.World;
+
+        if (tail.Length == 0)
+        {
+            return (HttpListenerRequest _, Dictionary<string, string> __) =>
+                new WebServer.JsonResponse(Json.Write(world.TerrainInfo));
+        }
+        if (tail.StartsWith("whole_biomes", StringComparison.OrdinalIgnoreCase))
+        {
+            return (HttpListenerRequest _, Dictionary<string, string> __) =>
+                new WebServer.BinaryReponse { Content = world.Biomes };
+        }
+        if (tail.StartsWith("ocean", StringComparison.OrdinalIgnoreCase))
+        {
+            return (HttpListenerRequest _, Dictionary<string, string> __) =>
+                new WebServer.BinaryReponse { Content = world.GetChunkOcean(GetPoint2FromUrl(url)) };
+        }
+        if (tail.StartsWith("rivers", StringComparison.OrdinalIgnoreCase))
+        {
+            return (HttpListenerRequest _, Dictionary<string, string> __) =>
+                new WebServer.BinaryReponse { Content = world.GetChunkRiver(GetPoint2FromUrl(url)) };
+        }
+        return (HttpListenerRequest _, Dictionary<string, string> __) =>
+        {
+            Point2 chunk = GetPoint2FromUrl(url);
+            byte[] biomes = world.GetChunkBiomes(chunk);
+            byte[] ocean = world.GetChunkOcean(chunk);
+            byte[] river = world.GetChunkRiver(chunk);
+            byte[] landmark = world.GetChunkLandmark(chunk);
+            var ms = new MemoryStream();
+            ms.Write(biomes, 0, biomes.Length);
+            ms.Write(ocean, 0, ocean.Length);
+            ms.Write(river, 0, river.Length);
+            if (landmark != null)
+            {
+                ms.Write(landmark, 0, landmark.Length);
+            }
+            return new WebServer.BinaryReponse { Content = ms.ToArray() };
+        };
     }
 
     /// <summary>หา context จาก Authorization header (session token — client ใส่ทุก request แบบ auth)</summary>
@@ -379,36 +439,46 @@ public class Gateway
             };
         }
 
-        if (url.StartsWith("/terrains/1/"))
+        if (url.StartsWith("/terrains/", StringComparison.OrdinalIgnoreCase))
         {
-            if (url.StartsWith("/terrains/1/ocean"))
+            return TerrainRoute(url);
+        }
+
+        if (url.StartsWith("/assetbundles/android/"))
+        {
+            if (string.IsNullOrEmpty(AssetBundleAndroidDir) || !Directory.Exists(AssetBundleAndroidDir))
             {
-                return (HttpListenerRequest request, Dictionary<string, string> postData) =>
-                    new WebServer.BinaryReponse { Content = _gameServer.World.GetChunkOcean(GetPoint2FromUrl(url)) };
+                return null;
             }
-            if (url.StartsWith("/terrains/1/rivers"))
+            string aName = Path.GetFileName(url.Substring("/assetbundles/android/".Length).Split('?')[0]);
+            if (string.IsNullOrEmpty(aName) || aName.Contains(".."))
             {
-                return (HttpListenerRequest request, Dictionary<string, string> postData) =>
-                    new WebServer.BinaryReponse { Content = _gameServer.World.GetChunkRiver(GetPoint2FromUrl(url)) };
+                return (HttpListenerRequest request, Dictionary<string, string> postData) => new WebServer.BadRequestResponse();
             }
-            return delegate
+            string aPath = Path.Combine(AssetBundleAndroidDir, aName);
+            return (HttpListenerRequest request, Dictionary<string, string> postData) =>
             {
-                Point2 point2FromUrl = GetPoint2FromUrl(url);
-                byte[] chunkBiomes = _gameServer.World.GetChunkBiomes(point2FromUrl);
-                byte[] chunkOcean = _gameServer.World.GetChunkOcean(point2FromUrl);
-                byte[] chunkRiver = _gameServer.World.GetChunkRiver(point2FromUrl);
-                byte[] chunkLandmark = _gameServer.World.GetChunkLandmark(point2FromUrl);
-                var memoryStream = new MemoryStream();
-                memoryStream.Write(chunkBiomes, 0, chunkBiomes.Length);
-                memoryStream.Write(chunkOcean, 0, chunkOcean.Length);
-                memoryStream.Write(chunkRiver, 0, chunkRiver.Length);
-                if (chunkLandmark != null)
+                if (File.Exists(aPath))
                 {
-                    memoryStream.Write(chunkLandmark, 0, chunkLandmark.Length);
+                    return new WebServer.BinaryReponse { Content = File.ReadAllBytes(aPath) };
                 }
-                return new WebServer.BinaryReponse { Content = memoryStream.ToArray() };
+                string resolvedA = ResolveBundleIgnoringHash(aName, AssetBundleAndroidDir);
+                if (resolvedA != null)
+                {
+                    return new WebServer.BinaryReponse { Content = File.ReadAllBytes(resolvedA) };
+                }
+                // soundbank พากย์เสียงแยกภาษา: ชุด Android มีแค่ en_us — เสิร์ฟ en_us แทนทุกภาษา
+                string fallbackA = ResolveVoiceBankFallback(aName, AssetBundleAndroidDir);
+                if (fallbackA != null)
+                {
+                    Console.WriteLine("[assetbundle-android] {0} ไม่มี ⇒ เสิร์ฟ en_us แทน", aName);
+                    return new WebServer.BinaryReponse { Content = File.ReadAllBytes(fallbackA) };
+                }
+                Console.WriteLine("[assetbundle-android] 404 {0}", aName);
+                return new WebServer.NotFountResponse();
             };
         }
+
         return (HttpListenerRequest request, Dictionary<string, string> _) => new WebServer.BadRequestResponse();
     }
 

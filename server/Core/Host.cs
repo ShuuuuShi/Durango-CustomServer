@@ -32,6 +32,9 @@ public class Host
 
     private PlayerContext _fallbackPlayer;
 
+    /// <summary>โลกของทุกเกาะ (ระบบล่องเรือ) — สร้างหลัง GameServer ใน Start()</summary>
+    public WorldRegistry Worlds { get; private set; }
+
     public GameServer GameServer { get; private set; }
 
     public Gateway Gateway { get; private set; }
@@ -112,6 +115,9 @@ public class Host
     public void Start(int gamePort, int gatewayPort, string publicHost, string androidBundlesDir, string assetsDir)
     {
         GameServer = new GameServer(_worldCtx, _fallbackPlayer);
+        // โลกของเกาะตั้งต้น (ไฟล์ 0.world ของต้นฉบับ) ใช้ต่อเป็นเกาะแรกของสารบัญ
+        Worlds = new WorldRegistry(_clusterKey, GameServer.World, _worldCtx?.TerrainId);
+        GameServer.Worlds = Worlds;
         GameServer.Start(gamePort);
         foreach (Context context in _contexts)
         {
@@ -143,6 +149,7 @@ public class Host
     public void SaveAll()
     {
         _worldCtx?.Save(persistent: false);
+        Worlds?.SaveAll();
         foreach (Context context in _contexts)
         {
             context.Player.Save();

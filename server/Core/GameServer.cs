@@ -32,6 +32,16 @@ public class GameServer
 
     public World World { get; }
 
+    /// <summary>
+    /// [5 ก.ย. 2026] โลกของทุกเกาะ — Host ตั้งให้หลังสร้าง GameServer
+    /// ผู้เล่นแต่ละคนเข้าโลกตาม PlayerContext.RegionId ไม่ใช่โลกเดียวร่วมกันแบบต้นฉบับ
+    /// </summary>
+    public WorldRegistry Worlds { get; set; }
+
+    /// <summary>โลกที่ผู้เล่นคนนี้อยู่ — ตกไปที่โลกตั้งต้นถ้ายังไม่มีระบบหลายเกาะ</summary>
+    public World WorldOf(PlayerContext context) =>
+        Worlds == null ? World : Worlds.GetOrCreate(context?.RegionId);
+
     public int Port { get; private set; }
 
     public GameServer(WorldContext worldCtx, PlayerContext playerCtx)
@@ -59,7 +69,7 @@ public class GameServer
                 _connections[num].Close();
             }
             _connections.Clear();
-            World.Stop();
+            if (Worlds != null) Worlds.StopAll(); else World.Stop();
         }
         catch (Exception)
         {
@@ -73,7 +83,7 @@ public class GameServer
         {
             _connections[num].Process();
         }
-        World.Process();
+        if (Worlds != null) Worlds.ProcessAll(); else World.Process();
     }
 
     /// <summary>ลงทะเบียน context (สล็อตจริงหรือชั่วคราว) — /sessions เรียก</summary>
@@ -169,7 +179,8 @@ public class GameServer
                 connection.Send(default(OK), readyHeader.Seq);
                 PlayerContext playerContext = GetPlayerContext(text);
                 bool flag = playerContext.EntityId == text;
-                Player player = new(text, connection, World, playerContext, flag);
+                World playerWorld = WorldOf(playerContext);
+                Player player = new(text, connection, playerWorld, playerContext, flag);
                 if (flag)
                 {
                     player.ContextChanged += delegate
@@ -182,7 +193,7 @@ public class GameServer
                         }
                     };
                 }
-                World.AddPlayer(player);
+                playerWorld.AddPlayer(player);
             }
             _connections.Remove(connection);
             _connectionDict.Remove(connection);
@@ -205,11 +216,20 @@ public class GameServer
         };
         PlayerContext playerContext = GetPlayerContext(entityId);
         msg.Storage.Data = playerContext.Storage;
+        // [5 ก.ย. 2026] บอกเกาะที่ผู้เล่นอยู่จริง — ต้นฉบับ hardcode "1" ได้เพราะมีโลกเดียว
+        // Id ใช้ระบุเกาะในระบบล่องเรือ (ตรงกับ RegionCatalog) ส่วน TerrainId ยังเป็น "1" เพราะ
+        // ตัวเกมเอาค่านี้ไปประกอบ URL ขอแผนที่ /terrains/<TerrainId>/… ซึ่ง Gateway เสิร์ฟที่เส้น
+        // "/terrains/1" ให้ตามโลกของผู้เล่นที่ขออยู่แล้ว ⇒ ไม่ต้องแตะฝั่ง client
+        World playerWorld = WorldOf(playerContext);
         msg.Region.CreatedAt = 0.0;
-        msg.Region.Id = "1";
+        msg.Region.Id = playerWorld.TerrainId ?? "1";
         msg.Region.Name = null;
-        msg.Region.TemplateId = World.TerrainInfo.region_template;
-        msg.Region.TerrainId = "1";
+        msg.Region.TemplateId = playerWorld.TerrainInfo.region_template;
+        // TerrainId = ชื่อเกาะจริง ไม่ใช่ "1" — ตัวเกมเอาค่านี้ไปประกอบ URL แผนที่ตรง ๆ ไม่ validate
+        // (client/Durango.Terrain/TerrainMeta.cs:130 · TerrainBase.cs:337 · MapSystem.cs:752)
+        // และ **จำเป็นต้องต่างกันต่อเกาะ** เพราะ chunk ถูกขอแบบ disableCache:false
+        // (TerrainBase.cs:332) ⇒ BestHTTP แคชตาม URL ถ้าใช้ id ซ้ำ เกาะใหม่จะได้แผนที่เก่าจากแคช
+        msg.Region.TerrainId = playerWorld.TerrainId ?? "1";
         msg.Region.Role = Role.Rural;
         msg.Options.Bool = new[]
         {

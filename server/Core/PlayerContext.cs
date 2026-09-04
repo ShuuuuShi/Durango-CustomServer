@@ -39,6 +39,19 @@ public class PlayerContext
     [JsonProperty("storage")]
     public Dictionary<string, byte[]> Storage;
 
+    /// <summary>
+    /// [5 ก.ย. 2026] เกาะที่ผู้เล่นอยู่ตอนนี้ (= terrain id ดู RegionCatalog) — ว่าง = เกาะตั้งต้น
+    ///
+    /// ต้นฉบับไม่มีฟิลด์นี้เพราะเซิร์ฟในตัวของเกมมีโลกเดียวเสมอ พอทำระบบล่องเรือแล้ว
+    /// ผู้เล่นแต่ละคนอยู่คนละเกาะได้ ⇒ ต้องจำไว้กับตัวผู้เล่น ไม่ใช่กับเซิร์ฟ
+    ///
+    /// การย้ายเกาะทำผ่านการต่อใหม่: เซิร์ฟส่ง Emigrated แล้วเกมตัดการเชื่อมต่อเอง
+    /// (client/GameManager.cs:316-331 EmigratedReceived → Connections.Frontend.Close())
+    /// รอบต่อไปที่ต่อเข้ามา เซิร์ฟอ่านค่านี้แล้วส่งเข้าโลกของเกาะปลายทาง
+    /// </summary>
+    [JsonProperty("region_id")]
+    public string RegionId;
+
     [JsonIgnore]
     public string Path { get; private set; }
 

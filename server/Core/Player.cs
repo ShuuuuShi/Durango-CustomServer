@@ -168,6 +168,23 @@ public class Player
         {
             HandleGetRegionMsg(msg, header.Seq);
         });
+        _connection.Recv(delegate(TravelByRegion msg, PacketHeader header)
+        {
+            HandleTravelMsg(msg.RegionId, header.Seq);
+        });
+        _connection.Recv(delegate(TravelByRegionInArchipelago msg, PacketHeader header)
+        {
+            HandleTravelMsg(msg.RegionId, header.Seq);
+        });
+        _connection.Recv(delegate(SailingBack msg, PacketHeader header)
+        {
+            // ล่องกลับ = กลับเกาะตั้งต้น (ยังไม่มีประวัติการเดินทาง จึงยังไม่รู้ว่า "เกาะก่อนหน้า" คือลูกไหน)
+            HandleTravelMsg(null, header.Seq);
+        });
+        _connection.Recv(delegate(GetSailingBackCost msg, PacketHeader header)
+        {
+            Send(new SailingBackCost { Cost = 0L }, header.Seq);
+        });
         _connection.Recv(delegate(GetArtifactBlueprints msg, PacketHeader header)
         {
             HandleGetArtifactBlueprintsMsg(msg, header.Seq);
@@ -1093,6 +1110,42 @@ public class Player
         // เกาะที่เราไม่รู้จัก — ตอบ Error ให้เกมเลิกรอ (client/MapSystem.cs:650 มี .On<Error> รออยู่)
         Console.WriteLine($"[sail] ไม่รู้จักเกาะ '{msg.RegionId}'");
         Send(default(Error), seq);
+    }
+
+    /// <summary>
+    /// ล่องเรือไปเกาะอื่น — TravelByRegion (2029) / TravelByRegionInArchipelago / SailingBack (3130)
+    ///
+    /// การย้ายเกาะของเกมนี้ทำผ่าน **การต่อใหม่** ไม่ใช่สลับโลกกลางคัน:
+    ///   เซิร์ฟส่ง Emigrated (2099) → client/GameManager.cs:316-331 EmigratedReceived
+    ///   ตั้ง Emigrated = Explore แล้วเรียก Connections.Frontend.Close() ตัดการเชื่อมต่อทันที
+    ///   เกมกลับหน้า Title แล้วต่อใหม่เอง (knock → sessions → entry → Auth → Ready)
+    /// ⇒ หน้าที่ของเราคือจำว่าผู้เล่นคนนี้จะไปเกาะไหน แล้วรอบต่อไปส่งเข้าโลกนั้น
+    ///
+    /// ตำแหน่ง: ล้าง Movements ทิ้งเพื่อให้ Player ctor ตั้งจุดเกิดของเกาะปลายทางให้เอง
+    /// (Core/Player.cs ctor — ถ้า Movements เป็น null จะใช้ GetEntryPosition ของโลกนั้น)
+    /// ถ้าไม่ล้าง ผู้เล่นจะไปโผล่พิกัดเดิมของเกาะเก่าซึ่งอาจกลางทะเลของเกาะใหม่
+    /// </summary>
+    private void HandleTravelMsg(string regionId, uint seq)
+    {
+        string target = regionId;
+        if (!string.IsNullOrEmpty(target) && !RegionCatalog.TryGet(target, out _))
+        {
+            Console.WriteLine($"[sail] ปฏิเสธ: ไม่รู้จักเกาะ '{target}'");
+            Send(new Abort { Text = "ไม่พบเกาะปลายทาง" }, seq);
+            return;
+        }
+
+        _context.RegionId = target;                       // null = กลับเกาะตั้งต้น
+        _context.AppearPlayer.Move.Movements = null;      // ให้ตั้งจุดเกิดใหม่ตามเกาะปลายทาง
+        if (!string.IsNullOrEmpty(_context.Path))
+        {
+            _context.Save();
+        }
+
+        Console.WriteLine($"[sail] {EntityId[..Math.Min(8, EntityId.Length)]} ออกเรือ {_world.TerrainId} → {target ?? "(เกาะตั้งต้น)"}");
+        Send(default(OK), seq);
+        // Type.Unknown ⇒ client ตั้ง EmigratedType.Explore (ไม่ใช่ Warp) ตรงกับการเดินทางด้วยเรือ
+        Send(new Emigrated { Type = TeleportType.Unknown });
     }
 
     public void Send<T>(T msg, uint replyOf = 0u)
