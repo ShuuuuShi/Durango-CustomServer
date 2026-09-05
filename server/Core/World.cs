@@ -152,6 +152,8 @@ public class World
             wanted.Add(($"poi_crater_{i}", (ushort)7037, SizeOf(7037, 4), pois.Craters[i]));        // crack_01 닫힌 크레이터
         }
 
+        RemoveStaleTerrainPois(wanted);
+
         int placed = 0;
         foreach ((string id, ushort type, Point2 size, Point2 tile) in wanted)
         {
@@ -180,7 +182,7 @@ public class World
             artifact.Display.EntityId = id;
             artifact.States.EntityId = id;
             artifact.IsAlive = true;
-            if (type == 7037) artifact.States.Crack = MakeClosedCrack(artifact.States.Level);
+            if (type == 7037) artifact.States.Crack = MakeClosedCrack(RegionLevel);
             ArtifactManager.AddArtifact(artifact);
             if (addons.HasValue)
             {
@@ -196,6 +198,42 @@ public class World
                               $"(ท่าเรือ {pois.PortPoints.Count} · รูวาร์ป {pois.Warpholes.Count} · " +
                               $"รอยแยก {pois.Rifts.Count} · หลุมอุกกาบาต {pois.Craters.Count})");
         }
+    }
+
+    /// <summary>
+    /// ลบจุดสำคัญค้างที่ไม่ตรงกับ pois.yml อีกต่อไป
+    ///
+    /// ═══ ทำไมต้องมี ═══
+    /// id ของจุดสำคัญผูกกับ "ลำดับในไฟล์" (<c>poi_rift_0</c>, <c>poi_rift_1</c>, …) เพื่อไม่ให้
+    /// เปิดเซิร์ฟรอบสองแล้ววางซ้อนเพิ่มทุกรอบ — แต่ถ้าลำดับเปลี่ยน ของเดิมจะกลายเป็นขยะทันที
+    /// เกิดขึ้นจริงตอนแก้บั๊กหลุมอุกกาบาต (ดู Support/TerrainPois.Craters): เกาะที่เคยเปิดไว้มี
+    /// <c>poi_rift_0..5</c> โดย 4 อันแรกยืนอยู่บนช่องของหลุมอุกกาบาต พอแยกสองอย่างออกจากกัน
+    /// รายการรอยแยกจริงเหลือ 2 ⇒ <c>poi_rift_4</c>, <c>poi_rift_5</c> กลายเป็นของซ้ำบนช่องเดียวกัน
+    ///
+    /// กติกา: <c>poi_&lt;ชนิด&gt;_&lt;i&gt;</c> จะอยู่ต่อได้ก็ต่อเมื่อรายการที่ต้องวางรอบนี้มีตัวนั้น
+    /// **และช่องตรงกัน** — ที่เหลือคือของค้างจากลำดับเก่า ลบทิ้ง
+    /// (ใช้กับทุกชนิด ไม่เจาะจงรอยแยก ⇒ ถ้าไฟล์เกาะเปลี่ยนทีหลังก็ซ่อมตัวเองได้)
+    /// </summary>
+    private void RemoveStaleTerrainPois(List<(string Id, ushort Type, Point2 Size, Point2 Tile)> wanted)
+    {
+        var expected = new Dictionary<string, Point2>(wanted.Count);
+        foreach ((string id, ushort _, Point2 _, Point2 tile) in wanted) expected[id] = tile;
+
+        var stale = new List<string>();
+        foreach (var pair in _context.Artifacts)
+        {
+            if (!pair.Key.StartsWith("poi_", StringComparison.Ordinal)) continue;
+            if (!expected.TryGetValue(pair.Key, out Point2 tile)
+                || pair.Value.Tile.x != tile.x || pair.Value.Tile.y != tile.y)
+            {
+                stale.Add(pair.Key);
+            }
+        }
+        if (stale.Count == 0) return;
+
+        foreach (string id in stale) ArtifactManager.RemoveArtifact(id);
+        Console.WriteLine($"[world] ลบจุดสำคัญค้างที่ไม่ตรงกับไฟล์เกาะแล้ว {stale.Count} จุด: " +
+                          string.Join(", ", stale));
     }
 
     /// <summary>ขนาด footprint จาก entity_types/artifact.json — ถอยไปค่าสำรองถ้าไฟล์ไม่มีชนิดนี้</summary>
@@ -219,7 +257,14 @@ public class World
     /// ไม่ได้อยู่ในไฟล์ที่สกัดออกมา — ฝั่งเกมเจอ null แล้วซ่อนหัวข้อนั้นไปเอง
     /// (client/ArtifactInfoMainWidget.cs:610-612) ดีกว่าเดาชื่อขึ้นมาเอง
     /// </summary>
-    private static Crack MakeClosedCrack(byte level)
+    /// <summary>
+    /// เลเวลของเกาะนี้ — จาก <c>region_templates.json → level</c> (ri35de = 35)
+    /// ใช้กับสูตรที่มีตัวแปร level ระดับเกาะ เช่นหินนำทางที่ต้องใช้เปิดหลุมอุกกาบาต
+    /// </summary>
+    private int RegionLevel =>
+        RegionCatalog.GetTemplate(_terrainData.Info?.region_template)?.Level ?? 1;
+
+    private static Crack MakeClosedCrack(int level)
     {
         var vars = new System.Collections.Generic.Dictionary<string, double> { ["level"] = level };
         int required = StatFormula.TryEval(CrackTuning.RequiredInvestment, vars, out double value)
