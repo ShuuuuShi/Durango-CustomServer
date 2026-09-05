@@ -27,6 +27,9 @@ public class MergedBlueprint
     public Yaml.BlueprintSlot[] Slots;
 
     public int EntityType;
+
+    /// <summary>เลเวลสูงสุดของแบบแปลน (building/blueprints.json → max_level) — 1 ถ้าไม่มีแบบแปลน</summary>
+    public int MaxLevel = 1;
 }
 
 public static class BlueprintStore
@@ -57,7 +60,8 @@ public static class BlueprintStore
                 Musics = proto.musics,
                 DefaultLook = bp?.default_look,
                 IsShowCraftMode = proto.is_craft,
-                Slots = bp?.slots
+                Slots = bp?.slots,
+                MaxLevel = bp?.max_level ?? 1
             };
             // ชื่อ: blueprint มี name (Gettext) ก่อน ถ้าไม่มีใช้ prototype ไม่มี fallback ชื่อจาก __name__
             merged.Name = bp?.name ?? new Gettext(proto.__name__);

@@ -111,6 +111,8 @@ public class PlayerContext
             AppearPlayer.Member.RoleId = -1;
             AppearPlayer.Move.EntityId = text;
             AppearPlayer.Survival.EntityId = text;
+            // ค่าตั้งต้นก่อนรู้เพศ — ตัวจริงถูกตั้งอีกทีตอนสร้างตัวละครที่ Gateway.UpdateAppearPlayer
+            // (ตอน Initialize ยังไม่มีใครบอกเพศมา EntityType จึงยังเป็น 0)
             AppearPlayer.Display.Body = "Models/PC/Male/Body/m_body_nothing.FBX";
             AppearPlayer.Display.DefaultBody = AppearPlayer.Display.Body;
             AppearPlayer.Display.DefaultInner = "Models/PC/Male/Inner/m_inner_basic.FBX";

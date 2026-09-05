@@ -412,6 +412,17 @@ public class Gateway
     {
         bool flag = postData.Get("gender") == "male";
         player.AppearPlayer.EntityType = (ushort)(!flag ? 1001 : 1000);
+
+        // ⚠️ ร่างเปล่า/ชุดชั้นในต้องตามเพศด้วย ไม่งั้นตัวละครหญิงที่ถอดเสื้อจะได้ร่างผู้ชาย
+        // สวมทับโครงตัวหญิง (client/PlayerBehavior.cs:327-329 ใช้ DefaultBody เมื่อช่อง body ว่าง)
+        // ต้นฉบับทำถูกอยู่แล้วที่ client/Durango.Online/PlayerContext.cs:91-93
+        player.AppearPlayer.Display.DefaultBody = flag
+            ? "Models/PC/Male/Body/m_body_nothing.FBX"
+            : "Models/PC/Female/Body/f_body_nothing.FBX";
+        player.AppearPlayer.Display.DefaultInner = flag
+            ? "Models/PC/Male/Inner/m_inner_basic.FBX"
+            : "Models/PC/Female/Inner/f_inner_basic.FBX";
+        player.AppearPlayer.Display.Body = player.AppearPlayer.Display.DefaultBody;
         string json = postData.Get("model_info");
         PlayerDisplay display = player.AppearPlayer.Display;
         if (!string.IsNullOrEmpty(json))

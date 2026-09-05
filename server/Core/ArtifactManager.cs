@@ -43,6 +43,25 @@ public class ArtifactManager
                 AppearArtifact artifact = _artifacts[key];
                 bool changed = WorkbenchTags.Apply(ref artifact);
                 changed |= CageTypes.Apply(ref artifact);
+
+                // เติมฟิลด์ที่เซฟรุ่นเก่าไม่มี — ไม่เติมแล้วของเดิมบนเกาะจะยัง "Lv.0" และ
+                // ข้อความอัปเดตสถานะถูกทิ้งเงียบตลอดไป (ดูเหตุผลเต็มที่ Cheats.MakeAppearArtifact)
+                if (string.IsNullOrEmpty(artifact.States.EntityId))
+                {
+                    artifact.States.EntityId = artifact.EntityId;
+                    changed = true;
+                }
+                if (artifact.States.Level == 0)
+                {
+                    MergedBlueprint bp = BlueprintStore.GetBlueprint(artifact.EntityType);
+                    artifact.States.Level = (byte)Math.Clamp(bp?.MaxLevel ?? 1, 1, 255);
+                    changed = true;
+                }
+                if (artifact.States.MaxHealth <= 0f)
+                {
+                    artifact.States.MaxHealth = Cheats.ArtifactMaxHealth;
+                    changed = true;
+                }
                 if (!changed) continue;
                 _artifacts[key] = artifact;
                 patched++;
@@ -98,6 +117,20 @@ public class ArtifactManager
     //  GrowCage อย่างเดียว (โรงเลี้ยงที่สั่งงานได้) ดู Support/CageTypes.cs
     // ══════════════════════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// ยิง ArtifactStateUpdated พร้อมประทับ EntityId ให้ก่อนเสมอ
+    ///
+    /// ⚠️ <c>ArtifactState.EntityId</c> เป็นฟิลด์ของตัวมันเอง ไม่ได้ถูกเติมจาก
+    /// <c>AppearArtifact.EntityId</c> ที่ห่อมันอยู่ ⇒ เซิร์ฟไม่เคยตั้ง = ว่างตลอด
+    /// แล้วฝั่งเกมหา artifact ด้วย <c>Find(msg.EntityId)</c> (client/ArtifactManager.cs:57-60)
+    /// ⇒ **หาไม่เจอ ทิ้งข้อความเงียบ ๆ ทุกครั้ง** หน้าจอกรง/ตู้/ประตูจึงไม่รีเฟรชเลย
+    /// </summary>
+    private void RaiseStateUpdated(string entityId, ArtifactState state)
+    {
+        state.EntityId = entityId;
+        ArtifactStateUpdated?.Invoke(state);
+    }
+
     public GrowCage? GetGrowCage(string entityId) =>
         entityId != null && _artifacts.TryGetValue(entityId, out var a) && a.States.Cage is GrowCage cage
             ? cage
@@ -121,7 +154,7 @@ public class ArtifactManager
 
         artifact.States.Cage = mutate(cage);
         _artifacts[entityId] = artifact;
-        ArtifactStateUpdated?.Invoke(artifact.States);      // → Player ส่งต่อให้ client + World เซฟ
+        RaiseStateUpdated(entityId, artifact.States);      // → Player ส่งต่อให้ client + World เซฟ
         return true;
     }
 
@@ -134,7 +167,7 @@ public class ArtifactManager
 
         artifact.States.DomesticCage = mutate(artifact.States.DomesticCage.Value);
         _artifacts[entityId] = artifact;
-        ArtifactStateUpdated?.Invoke(artifact.States);
+        RaiseStateUpdated(entityId, artifact.States);
         return true;
     }
 
@@ -174,7 +207,7 @@ public class ArtifactManager
                 Type = scribble.Type
             };
             _artifacts[scribble.EntityId] = value;
-            ArtifactStateUpdated?.Invoke(value.States);
+            RaiseStateUpdated(scribble.EntityId, value.States);
         }
     }
 
@@ -185,7 +218,7 @@ public class ArtifactManager
             value.States.EntityId = value.EntityId;
             value.States.GateOpened = open;
             _artifacts[key.EntityId] = value;
-            ArtifactStateUpdated?.Invoke(value.States);
+            RaiseStateUpdated(key.EntityId, value.States);
         }
     }
 

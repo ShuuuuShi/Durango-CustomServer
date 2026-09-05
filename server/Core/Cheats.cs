@@ -128,6 +128,10 @@ public static class Cheats
             });
         }
 
+        // เติมค่าพลังที่เหลือทั้งหมดจาก performance.json (คิดสูตรที่เลเวลของไอเทมชิ้นนี้)
+        // ไม่มีบล็อกตัวเลขพวกนี้ = หน้ารายละเอียดไอเทมไม่โชว์ค่าโจมตี/ป้องกัน/พลังงานเลยสักบรรทัด
+        ItemPerformance.MergeInto(list2, prototypeId, level);
+
         value.Performance = list2.ToArray();
         return value;
     }
@@ -228,6 +232,22 @@ public static class Cheats
         {
             new GaugeNode { Time = 0.0, Value = 1f }
         });
+
+        // ⚠️ ArtifactState.EntityId เป็นฟิลด์ของตัวมันเอง ไม่ได้สืบจาก AppearArtifact.EntityId
+        // ฝั่งเกมหา artifact ด้วยค่านี้ (client/ArtifactManager.cs:57-60 Find(msg.EntityId))
+        // ⇒ ไม่ตั้ง = ข้อความอัปเดตสถานะถูกทิ้งเงียบทุกครั้ง
+        appearArtifact.States.EntityId = appearArtifact.EntityId;
+
+        // เลเวลของสิ่งปลูกสร้าง — ไม่ตั้งจะโชว์ "Lv.0" บนป้ายชื่อและกรอบเป้าหมายทุกหลัง
+        // ใช้ max_level ของแบบแปลน (ข้อมูลจริง building/blueprints.json) ด้วยเหตุผลเดียวกับ
+        // แท็กโต๊ะคราฟต์/ความจุกรง: เซิร์ฟยังไม่ได้เก็บเลเวลรายหลัง ถ้าให้ต่ำไว้ผู้เล่นเพิ่มไม่ได้เลย
+        appearArtifact.States.Level = (byte)Math.Clamp(blueprint.MaxLevel, 1, 255);
+
+        // **ค่าของเรา** — ข้อมูลเกมไม่มี HP ของสิ่งปลูกสร้างเลย (artifact_stats ว่างทั้ง 249 รายการ
+        // และ blueprints.json ไม่มีฟิลด์ durability/hp) แต่ไม่ตั้งแล้วหลอดเลือดเป้าอ่านเป็น 0/0
+        // (client/ArtifactDamageableEntity.cs:87 ใช้ MaxHealth / Durability.Max() เป็นสเกลหลอด)
+        // ⇒ ใช้ 100 เพราะ Durability ของเราเป็นอัตราส่วน 0-1 อยู่แล้ว ตัวเลขจะอ่านเป็นเปอร์เซ็นต์พอดี
+        appearArtifact.States.MaxHealth = ArtifactMaxHealth;
         if (appearArtifact.Display.Parts.Count == 0)
         {
             appearArtifact.Display.Parts.Add("common",
@@ -251,18 +271,37 @@ public static class Cheats
         return appearArtifact;
     }
 
+    /// <summary>**ค่าของเรา** — เลขที่หลอดความทนทานของสิ่งปลูกสร้างอ่านเป็น "เต็ม" (ดูเหตุผลที่จุดใช้งาน)</summary>
+    internal const float ArtifactMaxHealth = 100f;
+
     private static void SetDisplayParts(AppearArtifact artifact, MergedBlueprint blueprint)
     {
         if (artifact.Display.Parts.Count != 0)
         {
             return;
         }
+        // ⚠️ หนึ่งช่องมีได้หลายหน้าตา (blueprints.json มี 68 ช่องที่มีมากกว่าหนึ่ง look
+        // เช่น gate2/main = {wood, bone, stone}) — Parts เป็น Dictionary คีย์ slot_id
+        // ⇒ วนใส่ทุก look แล้ว Add ซ้ำคีย์เดิม = ArgumentException ตัวที่สอง
+        // exception ถูกกลืนที่ GameCode/Durango.Online/Connection.cs:486-489 (เขียนแค่ log ฝั่งเซิร์ฟ)
+        // ⇒ **สิ่งปลูกสร้าง 43 ชนิดวางแล้วไม่โผล่บนจอเลยโดยไม่มีข้อความบอกผู้เล่น**
+        // (เตียง 7007 · โต๊ะ 6226 · เก้าอี้ 6227 · ชั้นวาง 6228 · ตู้เซฟ 7009 · gate3 · fence3 ...)
+        // และ blueprint.Slots เป็น null ได้ (BlueprintStore.cs:59 `Slots = bp?.slots`)
+        // อีก 4 ชนิดที่ไม่มีใน blueprints.json เลยพังด้วย NullReferenceException
+        if (blueprint.Slots == null) return;
+
         foreach (Yaml.BlueprintSlot blueprintSlot in blueprint.Slots)
         {
-            if (blueprintSlot.looks == null) continue;
+            if (blueprintSlot.looks == null || blueprintSlot.slot_id == null) continue;
+            if (artifact.Display.Parts.ContainsKey(blueprintSlot.slot_id)) continue;
+
+            // เอาหน้าตาแรกที่มีโมเดลจริง — ผู้เล่นเลือกแบบอื่นได้ทีหลังผ่านระบบดัดแปลง
             foreach (var item in blueprintSlot.looks)
             {
-                artifact.Display.Parts.Add(blueprintSlot.slot_id, item.Value.model_key);
+                string modelKey = item.Value?.model_key;
+                if (string.IsNullOrEmpty(modelKey)) continue;
+                artifact.Display.Parts[blueprintSlot.slot_id] = modelKey;
+                break;
             }
         }
     }

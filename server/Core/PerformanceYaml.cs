@@ -47,6 +47,20 @@ public static class PerformanceYaml
 
         [JsonProperty("slot")]
         public string Slot;
+
+        // ลูกกระสุน/ลูกศร — ไม่ส่งไปฝั่งเกมจะไม่มีลูกศรติดคันธนู ไม่มีลูกพุ่งออกไป ไม่มีเสียง
+        // (client/ProjectileController.cs:100-104 เจอ Projectile ว่างแล้ว return ทันที
+        //  ⇒ MakeArrow คืน null · ShootProjectile ออกก่อน = ยิงลม)
+        // performance.json → weapon มีคีย์นี้จริง 26 รายการ เช่น bow_metal_01 → arrow / 3000
+        [JsonProperty("projectile")]
+        public string Projectile;
+
+        [JsonProperty("projectile_speed")]
+        public float? ProjectileSpeed;
+
+        // ความเร็วเดินตอนอยู่ในโหมดต่อสู้ (300/350/400 ตามชนิดอาวุธ) — ใช้กับ SetBaseMoveSpeed
+        [JsonProperty("battle_speed")]
+        public float? BattleSpeed;
     }
 
     public class Armor

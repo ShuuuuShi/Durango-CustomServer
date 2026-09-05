@@ -1364,7 +1364,10 @@ public partial class Player
             {
                 display.WeaponInfo = new WeaponDisplayInfo
                 {
-                    WeaponFramework = weapon.WeaponFramework
+                    WeaponFramework = weapon.WeaponFramework,
+                    // ไม่ส่งสองตัวนี้ = ธนูยิงแล้วไม่มีลูกศรเลย (ดูหมายเหตุที่ PerformanceYaml.Weapon)
+                    Projectile = weapon.Projectile,
+                    ProjectileSpeed = weapon.ProjectileSpeed
                 };
                 display.Equip = weapon.Model;
                 display.EquipColor = array;
@@ -1397,7 +1400,43 @@ public partial class Player
     private void SendEquipments(uint replyOf = 0u)
     {
         Send(UpdateEquipments(), replyOf);
+        SendBaseMoveSpeed();
     }
+
+    /// <summary>
+    /// ความเร็วเดินโหมดปกติ/โหมดต่อสู้ — ต้องส่งใหม่ทุกครั้งที่เปลี่ยนอาวุธ
+    ///
+    /// ⚠️ **ไม่ส่งเลย = โหมดต่อสู้วิ่งเร็วเท่าเดินปกติ** ฝั่งเกมเก็บค่านี้เป็น nullable
+    /// (client/PlayerController.cs:406-409) แล้วที่ :100-106 เขียนว่า
+    /// <c>ไม่มีค่า ⇒ ใช้ 500 ทั้งสองโหมด</c> ⇒ ค่า BattleSpeed ไม่เคยถูกใช้
+    /// ⇒ ชักอาวุธแล้วไม่มีอาการเดินช้าลง และอาวุธหนัก/เบาให้ความเร็วเท่ากันหมด
+    ///
+    /// ค่าจากข้อมูลจริงทั้งคู่: <c>players.json → player.moving.default_normal_speed</c> = 500
+    /// และ <c>performance.json → weapon.&lt;id&gt;.battle_speed</c> (300/350/400 ตามชนิดอาวุธ)
+    /// มือเปล่าใช้ <c>players.json → player.bare_hands.battle_speed</c> = 350
+    /// </summary>
+    private void SendBaseMoveSpeed()
+    {
+        float battle = DefaultBareHandsBattleSpeed;   // players.json → player.bare_hands.battle_speed
+        foreach (var pair in _context.EquippedItems)
+        {
+            int index = _context.InventoryItems.FindIndex(item => item.Id == pair.Value);
+            if (index < 0) continue;
+            PerformanceYaml.Weapon weapon = PerformanceYaml.GetWeapon(_context.InventoryItems[index].Prototype);
+            if (weapon?.BattleSpeed is > 0f) { battle = weapon.BattleSpeed.Value; break; }
+        }
+
+        Send(new SetBaseMoveSpeed
+        {
+            EntityId = EntityId,
+            NormalSpeed = (int)DefaultNormalSpeed,        // players.json → player.moving.default_normal_speed
+            BattleSpeed = (int)battle
+        });
+    }
+
+    /// <summary>ค่าสำรองตรงกับ players.json เป๊ะ — มีไว้กันไฟล์หาย ไม่ใช่ค่าที่คิดเอง</summary>
+    private const float DefaultNormalSpeed = 500f;
+    private const float DefaultBareHandsBattleSpeed = 350f;
 
     public void Process()
     {
@@ -1417,14 +1456,18 @@ public partial class Player
         _survival.SetMoving(now - _lastMovedAt < SurvivalTuning.MoveIdleTimeout);
         if (_survival.Tick(now, out SurvivalUpdated msg))
         {
-            Send(msg);
+            // ⚠️ ต้องกระจายให้ทุกคนบนเกาะ ไม่ใช่ส่งให้เจ้าตัวคนเดียว
+            // หลอดเลือดของ entity อื่นบนจอมีที่มาเดียวคือ Survival(182)/SurvivalUpdated(183)
+            // (client/ObjectManager.cs:47-87) ⇒ ส่งเฉพาะเจ้าตัว = คนอื่นเห็นหลอดค้างนิ่ง
+            // จนกว่าจะตาย แล้วกระโดดเป็น 0 ทันที
+            _world.BroadCast(msg);
         }
     }
 
     /// <summary>ส่งเส้นหลอดชุดใหม่เดี๋ยวนี้ — ใช้ตอนค่า/ความชันกระโดดแบบไม่ต่อเนื่อง (พัก/กิน/โดนตี)</summary>
     private void FlushSurvival()
     {
-        Send(_survival.Flush(Gauge.CurrentTime));
+        _world.BroadCast(_survival.Flush(Gauge.CurrentTime));   // เหตุผลเดียวกับ UpdateSurvival
     }
 
     public void Stop()
