@@ -94,7 +94,7 @@ public class World
     {
         _context = context;
         ArtifactManager = new ArtifactManager(_context.Artifacts, _context.ArtifactAddOns,
-            _context.ArtifactMannequins, _context.Plantings);
+            _context.ArtifactMannequins, _context.Plantings, _context.ArtifactOwners);
         ArtifactManager.ArtifactStateUpdated += ArtifactManager_ArtifactStateUpdated;
         ArtifactManager.ArtifactDisplayUpdated += ArtifactManager_ArtifactDisplayUpdated;
         _addedNatural = _context.AddedNatural;
@@ -468,9 +468,11 @@ public class World
         return list;
     }
 
-    public void ConstructArtifact(AppearArtifact artifact, AddOns? addon)
+    public void ConstructArtifact(AppearArtifact artifact, AddOns? addon, string ownerEntityId = null)
     {
         ArtifactManager.AddArtifact(artifact);
+        // จำว่าใครสร้าง — ไม่จำ = ไม่มีใครเป็นเจ้าของ แล้วรื้อไม่ได้ (ดู WorldContext.ArtifactOwners)
+        ArtifactManager.SetOwner(artifact.EntityId, ownerEntityId);
         if (addon.HasValue)
         {
             AppearArtifact? appearArtifact = ArtifactManager.PlaceAddOns(artifact.EntityId, addon.Value._AddOns);

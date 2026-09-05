@@ -22,6 +22,9 @@ public class ArtifactManager
     /// <summary>แปลง → prototype ของเมล็ดที่ปลูกไว้ (ดู WorldContext.Plantings)</summary>
     private readonly Dictionary<string, string> _plantings;
 
+    /// <summary>สิ่งปลูกสร้าง → entity ของผู้เล่นที่สร้าง (ดู WorldContext.ArtifactOwners)</summary>
+    private readonly Dictionary<string, string> _owners;
+
     public static readonly string[] AddOnTags = { "door", "window", "wall_deco", "empty_door" };
 
     public event Action<ArtifactDisplay> ArtifactDisplayUpdated;
@@ -29,12 +32,14 @@ public class ArtifactManager
     public event Action<ArtifactState> ArtifactStateUpdated;
 
     public ArtifactManager(Dictionary<string, AppearArtifact> artifacts, Dictionary<string, AddOns> addons,
-        Dictionary<string, Messages.Mannequin> mannequins, Dictionary<string, string> plantings = null)
+        Dictionary<string, Messages.Mannequin> mannequins, Dictionary<string, string> plantings = null,
+        Dictionary<string, string> owners = null)
     {
         _artifacts = artifacts;
         _addOns = addons;
         _mannequins = mannequins;
         _plantings = plantings ?? new Dictionary<string, string>();
+        _owners = owners ?? new Dictionary<string, string>();
 
         // โลกที่โหลดจากไฟล์เซฟมีสิ่งปลูกสร้างเก่าที่ยังไม่มีแท็ก (เซฟก่อนหน้านี้ไม่เคยเก็บ)
         // ⇒ เติมให้ตอนเปิดโลก ไม่งั้นโต๊ะที่สร้างไว้ก่อนจะคราฟต์ไม่ได้ตลอดไป
@@ -74,6 +79,20 @@ public class ArtifactManager
         }
     }
 
+    /// <summary>
+    /// ใครเป็นเจ้าของหลังนี้ — <c>null</c> = ไม่มีเจ้าของ (ของที่เซิร์ฟวางเอง หรือของเก่าก่อนมีระบบ)
+    /// **ไม่มีเจ้าของ = ห้ามรื้อ ห้ามเปิดตู้** ไม่ใช่ "ใครก็ทำได้"
+    /// </summary>
+    public string OwnerOf(string entityId) =>
+        string.IsNullOrEmpty(entityId) ? null : _owners.Get(entityId);
+
+    /// <summary>บันทึกเจ้าของตอนสร้าง — เรียกจาก World.ConstructArtifact</summary>
+    public void SetOwner(string entityId, string ownerEntityId)
+    {
+        if (string.IsNullOrEmpty(entityId) || string.IsNullOrEmpty(ownerEntityId)) return;
+        _owners[entityId] = ownerEntityId;
+    }
+
     public void AddArtifact(AppearArtifact artifact)
     {
         // โต๊ะคราฟต์ต้องมีแท็กติดไปด้วย ไม่งั้นฝั่งเกมถือว่า "ไม่มีโต๊ะ" (ดู Support/WorkbenchTags.cs)
@@ -98,6 +117,8 @@ public class ArtifactManager
         if (_artifacts.TryGetValue(entityId, out var value))
         {
             _artifacts.Remove(entityId);
+            _owners.Remove(entityId);
+            _plantings.Remove(entityId);
             return value;
         }
         return null;

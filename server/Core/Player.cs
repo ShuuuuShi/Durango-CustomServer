@@ -106,6 +106,15 @@ public partial class Player
         });
         _connection.Recv(delegate(Cheat msg, PacketHeader header)
         {
+            // ⚠️ เดิมรับจากทุก connection ไม่มีด่านเลย ⇒ ผู้เล่นคนไหนก็เสกไอเทมทุกชิ้นทุกเลเวล
+            // ไม่จำกัดจำนวน กระโดดเลเวล 60 วางสิ่งปลูกสร้างทับที่ใครก็ได้ = เศรษฐกิจเกมตายทันที
+            // ที่มีคนเดียวลอง และเช็คไม่ได้ด้วยว่าใครทำ
+            if (!IsAdmin)
+            {
+                Console.WriteLine($"[โกง] ปฏิเสธคำสั่งจาก {Short(EntityId)}: {msg._Cheat}");
+                Send(new Abort { Text = "ไม่มีสิทธิ์ใช้คำสั่งนี้" }, header.Seq);
+                return;
+            }
             HandleCheatMsg(msg._Cheat, header.Seq);
         });
         _connection.Recv(delegate(Messages.Touch msg, PacketHeader header)
@@ -830,7 +839,7 @@ public partial class Player
             {
                 AppearArtifact? appearArtifact = Cheats.MakeAppearArtifact(array, out var addons);
                 if (!appearArtifact.HasValue) return;
-                _world.ConstructArtifact(appearArtifact.Value, addons);
+                _world.ConstructArtifact(appearArtifact.Value, addons, EntityId);
                 break;
             }
             case "it_color":
@@ -1049,6 +1058,22 @@ public partial class Player
         }
         else if (DataHelper.IsNaturalObject(touch.EntityType))
         {
+            // ⚠️ เดิมเชื่อ EntityType/Tile ที่ client ส่งมาล้วน ๆ ⇒ วน Touch ปลอม → Collect
+            // เสกไอเทมชนิดไหน เลเวลไหน เท่าไรก็ได้ โดยไม่ต้องใช้คำสั่ง cheat เลย
+            //
+            // ⚠️⚠️ **ห้ามตรวจด้วย garden ของเซิร์ฟ** — เคยลองแล้วบล็อกการเก็บของที่ถูกต้อง:
+            // ของธรรมชาติที่ตัวเกมแสดง (เช่นชนิด 13014/15001/14037 บนเกาะ pe10gr_4)
+            // **ไม่มีอยู่ใน whole.garden ของเซิร์ฟเลยสักตัว** — ฝั่งเกมมีของที่มันวาดเองด้วย
+            // (แบบเดียวกับสัตว์ประดับที่ terrain วาง ดู Support/AnimalMotions) ⇒ garden ไม่ใช่ความจริงทั้งหมด
+            //
+            // ⇒ ด่านที่ใช้ได้จริงคือ "ระยะ" — ผู้เล่นต้องยืนใกล้ของที่อ้างว่าแตะ
+            // กันการฟาร์มจากอีกฝั่งเกาะได้ โดยไม่ไปบล็อกการเล่นปกติ
+            if (!IsWithinTiles(touch.Tile, NaturalReachTiles))
+            {
+                Console.WriteLine($"[แตะ] ปฏิเสธ {Short(EntityId)}: ช่อง [{touch.Tile.x},{touch.Tile.y}] อยู่ไกลเกินไป");
+                Send(new Abort { Text = "อยู่ไกลเกินไป" }, seq);
+                return;
+            }
             BiomeSpriteInfo biomeSpriteInfo = DataHelper.GetBiomeSpriteInfo(touch.EntityType);
             if (biomeSpriteInfo != null)
             {
@@ -1075,8 +1100,79 @@ public partial class Player
         OnContextChanged();
     }
 
+    /// <summary>
+    /// ระยะไกลสุด (ช่อง) ที่ยังยุ่งกับสิ่งปลูกสร้างได้ — บวกขนาดของหลังนั้นเข้าไปอีกที
+    ///
+    /// **ค่าของเรา** — ข้อมูลเกมไม่มีตัวเลขนี้ ตั้ง 6 ช่องเพราะฝั่งเกมเดินเข้าไปหาก่อนเสมอ
+    /// (client/BuildSystem.cs:530 MoveToPosition(pos, …, 141f) แล้วค่อยยิงคำสั่ง)
+    /// ⇒ ผู้เล่นปกติอยู่ใกล้กว่านี้มาก · ด่านนี้กันสคริปต์ที่ยิงจากอีกฝั่งเกาะ
+    /// </summary>
+    private const int ArtifactReachTiles = 6;
+
+    /// <summary>
+    /// ระยะไกลสุด (ช่อง) ที่ยังแตะของธรรมชาติได้
+    ///
+    /// **ค่าของเรา** — ตั้ง 8 ช่องเพราะฝั่งเกมเดินเข้าไปหาก่อนแตะเสมอ และ Player.Hunting.cs
+    /// ใช้ระยะใกล้เคียงกันกับการกัดสัตว์ · เผื่อไว้กว้างหน่อยเพราะของบางชนิดมีพื้นที่กว้าง
+    /// </summary>
+    private const int NaturalReachTiles = 8;
+
+    /// <summary>
+    /// ผู้เล่นคนนี้มีสิทธิ์ยุ่งกับสิ่งปลูกสร้างหลังนี้ไหม (เจ้าของ + อยู่ใกล้พอ)
+    ///
+    /// ⚠️ ไม่มีด่านนี้ = ผู้เล่นคนเดียวเขียนสคริปต์วน entity id ที่ได้ฟรีจากแพ็กเก็ต AppearArtifact
+    /// แล้วรื้อสิ่งปลูกสร้างทั้งเกาะ/ขนของออกจากตู้คนอื่นได้จากทั่วเกาะ
+    ///
+    /// ของที่ไม่มีเจ้าของ (ท่าเรือ/รูวาร์ปที่เซิร์ฟวางเอง · ของเก่าก่อนมีระบบเจ้าของ)
+    /// **ยุ่งไม่ได้ทั้งคู่** — ปลอดภัยกว่าปล่อยให้ใครก็รื้อ
+    /// </summary>
+    private bool MayTouchArtifact(string artifactEntityId, string what)
+    {
+        AppearArtifact? found = _world.ArtifactManager.Get(artifactEntityId);
+        if (!found.HasValue)
+        {
+            Console.WriteLine($"[สิทธิ์] {Short(EntityId)} {what}: ไม่มีสิ่งปลูกสร้าง {artifactEntityId}");
+            return false;
+        }
+
+        string owner = _world.ArtifactManager.OwnerOf(artifactEntityId);
+        if (!string.Equals(owner, EntityId, StringComparison.Ordinal))
+        {
+            Console.WriteLine($"[สิทธิ์] {Short(EntityId)} {what} {artifactEntityId} ไม่ได้ — " +
+                              (string.IsNullOrEmpty(owner) ? "ของนี้ไม่มีเจ้าของ" : $"เจ้าของคือ {Short(owner)}"));
+            return false;
+        }
+
+        // ใช้ตัวเดียวกับที่ระบบล่าสัตว์ใช้ (Player.Hunting.cs) — พิสูจน์แล้วว่าอ่านตำแหน่งถูก
+        // วัดจากมุมของ footprint แล้วบวกขนาดหลังเข้าไป เพื่อไม่ให้บ้านหลังใหญ่โดนตัดสิทธิ์
+        AppearArtifact artifact = found.Value;
+        int reach = ArtifactReachTiles + Math.Max(artifact.Size.x, artifact.Size.y);
+        if (!IsWithinTiles(artifact.Tile, reach))
+        {
+            Console.WriteLine($"[สิทธิ์] {Short(EntityId)} {what} {artifactEntityId} ไม่ได้ — อยู่ไกลเกินไป");
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// ผู้เล่นคนนี้เป็นผู้ดูแลไหม — รายชื่อจาก <c>--admins</c> หรือ env <c>DURANGO_ADMINS</c>
+    /// (คั่นด้วยจุลภาค ใส่ entity id ของตัวละคร)
+    ///
+    /// ⚠️ ค่าตั้งต้นคือ **ไม่มีใครเป็นแอดมิน** ⇒ คำสั่ง cheat ปิดสนิท
+    /// ไม่ตั้ง = ปลอดภัย · ตั้งผิด = แค่ใช้คำสั่งไม่ได้ ไม่ได้เปิดช่องให้ใคร
+    /// </summary>
+    private bool IsAdmin => Admins.Contains(EntityId);
+
+    /// <summary>รายชื่อ entity id ของผู้ดูแล — Program ตั้งให้ตอนบูต</summary>
+    public static readonly HashSet<string> Admins = new(StringComparer.Ordinal);
+
+    private static string Short(string id) =>
+        string.IsNullOrEmpty(id) ? "(ว่าง)" : id[..Math.Min(8, id.Length)];
+
     private void HandleDestructMsg(DestructArtifact msg)
     {
+        if (!MayTouchArtifact(msg.EntityId, "รื้อ")) return;
         _world.DestructArtifact(msg.EntityId);
     }
 

@@ -160,6 +160,7 @@ public class PlayerContext
         // ⚠️ ของเดิมเอา Gauge ก้อนเดียวใส่ทั้ง Survival.Life และ Gauges["stamina"] ⇒ HP กับ
         // ความอึดเดินพร้อมกันเป๊ะ · ตอนนี้แยกก้อนตามนิยามจริงใน entity_types/players.json
         SurvivalState.Reset(this);
+        ResetStaleMotion();
         if (KUtility.GetSize(Storage) != 0) return;
         Storage = new Dictionary<string, byte[]>();
         var data = MemoStorageDefaults.Empty();
@@ -167,6 +168,42 @@ public class PlayerContext
         if (Json.WriteToBytes(data) is { } memoBlob)
         {
             Storage[MemoStorageDefaults.StorageKey] = memoBlob;
+        }
+    }
+
+    /// <summary>
+    /// ท่าที่จะให้ตัวละครยืนตอนเพิ่งโผล่เข้าโลก — ชื่อนี้ไม่ได้ตั้งเอง
+    /// เป็นตัวเดียวกับที่ฝั่งเกมส่งให้ตัวเองตอนสร้างตัวละคร (client/PlayerManager.cs:109)
+    /// จึงมั่นใจได้ว่าโหลดเสร็จก่อน clip ของอาวุธเสมอ
+    /// </summary>
+    private const string SafeSpawnMotion = "Barehand_Stand";
+
+    /// <summary>
+    /// ล้างท่าค้างที่ผูกกับอาวุธออกจากเซฟ — **กันเกมแครชทั้งโปรเซสตอนเข้าเกม**
+    ///
+    /// ⚠️ อาการจริง (แครช 2 ครั้งซ้อน 6 ก.ย. 2026): ผู้เล่นออกจากเกมตอนถืออาวุธสองมือ
+    /// เซฟจึงเก็บ <c>MotionName = "Twohand_Stand"</c> ไว้ พอเข้าเกมใหม่เซิร์ฟส่งค่านี้กลับไปกับ
+    /// <c>AppearPlayer</c> แล้วฝั่งเกมเล่นท่าทันทีตอนสร้างตัวละคร ทั้งที่ clip ของอาวุธ
+    /// **ยังโหลดไม่เสร็จ** ⇒ <c>Anim["M_Twohand_Stand"]</c> ทำ UnityPlayer.dll ล้ม (Access Violation)
+    /// <code>
+    ///   UnityEngine.Animation:GetState(string)          ← แครชตรงนี้ (native)
+    ///   PlayerBehavior:TryPlayClip                       (client/PlayerBehavior.cs:1712 Anim[text])
+    ///   PlayerManager:MakePlayerObject
+    ///   PlayerManager:&lt;Start&gt;b__42_0(AppearPlayer, …)     ← รับ AppearPlayer จากเซิร์ฟ
+    /// </code>
+    /// เป็นแครชทั้งโปรเซส ไม่ใช่ exception ที่ดักได้ ⇒ ต้องกันที่ต้นทาง (ไม่ส่งชื่อท่าของอาวุธมาแต่แรก)
+    ///
+    /// ท่าของอาวุธจะถูกตั้งใหม่เองตามปกติเมื่อผู้เล่นขยับ (Move) หลังอุปกรณ์โหลดครบแล้ว
+    /// </summary>
+    private void ResetStaleMotion()
+    {
+        Movement[] movements = AppearPlayer.Move.Movements;
+        if (movements == null) return;
+        for (int i = 0; i < movements.Length; i++)
+        {
+            if (string.IsNullOrEmpty(movements[i].MotionName)) continue;
+            if (movements[i].MotionName == SafeSpawnMotion) continue;
+            movements[i].MotionName = SafeSpawnMotion;
         }
     }
 

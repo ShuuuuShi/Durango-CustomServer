@@ -181,6 +181,7 @@ public partial class Player
         // ⇒ ถ้าหาด้วย tile ไม่เจอ ให้ลองหาด้วย EntityId (สัตว์มี id จริง ต่างจากของธรรมชาติ)
         AnimalManager.Animal carcass = _world.AnimalManager?.Get(msg.EntityId);
         if (carcass != null && carcass.IsAlive) carcass = null;         // ยังไม่ตาย = ชำแหละไม่ได้
+        if (carcass != null && carcass.Butchered) carcass = null;       // ชำแหละไปแล้ว = ไม่มีอะไรเหลือ
 
         ushort entityType;
         if (carcass != null)
@@ -267,6 +268,12 @@ public partial class Player
             // ผ่าน World.NaturalDestroyed ที่ Core/Player.cs:94-97)
             _world.DestroyNatural(msg.Tile);
             _touchedNaturals.Remove(msg.Tile);
+        }
+        else
+        {
+            // ⚠️ ซากไม่ได้อยู่ในตาราง natural จึงไม่ผ่าน DestroyNatural ข้างบน
+            // ไม่ปักธงตรงนี้ = กดชำแหละซ้ำได้ไม่จำกัด (ดู AnimalManager.Animal.Butchered)
+            carcass.Butchered = true;
         }
 
         var collected = new Collected

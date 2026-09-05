@@ -602,6 +602,9 @@ public partial class Player
     /// </summary>
     private void HandleGetWarehouseMsg(GetWarehouse msg, uint seq)
     {
+        // ⚠️ ตู้/คลังผูกกับสิ่งปลูกสร้าง ⇒ ต้องเป็นเจ้าของและอยู่ใกล้ ไม่งั้นเดินผ่านบ้านคนอื่น
+        // จำ entity id จากแพ็กเก็ต แล้วขนของทั้งคลังเข้ากระเป๋าตัวเองได้โดยเจ้าของไม่รู้ตัว
+        if (!MayTouchArtifact(msg.EntityId, "เปิดตู้")) return;
         WarehouseStore.EnsureDefaultSection(msg.EntityId, DefaultWarehouseSection);
         Send(new Messages.Warehouse
         {
@@ -623,6 +626,9 @@ public partial class Player
     /// </summary>
     private void HandleGetSectionItemsMsg(GetSectionItems msg, uint seq)
     {
+        // ⚠️ ตู้/คลังผูกกับสิ่งปลูกสร้าง ⇒ ต้องเป็นเจ้าของและอยู่ใกล้ ไม่งั้นเดินผ่านบ้านคนอื่น
+        // จำ entity id จากแพ็กเก็ต แล้วขนของทั้งคลังเข้ากระเป๋าตัวเองได้โดยเจ้าของไม่รู้ตัว
+        if (!MayTouchArtifact(msg.EntityId, "ดูของในตู้")) return;
         List<Item> items = WarehouseStore.Items(msg.EntityId, msg.SectionName, create: false);
         Send(new SectionItems
         {
@@ -680,6 +686,9 @@ public partial class Player
     /// </summary>
     private void HandlePopItemsFromWarehouseMsg(PopItemsFromWarehouse msg)
     {
+        // ⚠️ ตู้/คลังผูกกับสิ่งปลูกสร้าง ⇒ ต้องเป็นเจ้าของและอยู่ใกล้ ไม่งั้นเดินผ่านบ้านคนอื่น
+        // จำ entity id จากแพ็กเก็ต แล้วขนของทั้งคลังเข้ากระเป๋าตัวเองได้โดยเจ้าของไม่รู้ตัว
+        if (!MayTouchArtifact(msg.EntityId, "เอาของออกจากตู้")) return;
         List<Item> section = WarehouseStore.Items(msg.EntityId, msg.SectionName, create: false);
         if (section == null) return;
         int free = InventoryMaxSizeMirroredFromPlayerCs

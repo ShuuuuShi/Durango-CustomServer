@@ -52,6 +52,22 @@ public class WorldContext
     [JsonProperty("plantings", NullValueHandling = NullValueHandling.Ignore)]
     public Dictionary<string, string> Plantings;
 
+    /// <summary>
+    /// [6 ก.ย. 2026] เจ้าของสิ่งปลูกสร้าง — entity ของหลัง → entity ของผู้เล่นที่สร้าง
+    ///
+    /// ⚠️ ไม่มีตารางนี้ = ไม่มีการเช็คเจ้าของเลยสักจุด ⇒ ผู้เล่นคนเดียวเขียนสคริปต์วน entity id
+    /// ที่ได้ฟรีจากแพ็กเก็ต AppearArtifact (เซิร์ฟส่งให้ทุกคนที่เดินผ่าน) แล้วยิง DestructArtifact รัว ๆ
+    /// **ล้างสิ่งปลูกสร้างทั้งเกาะได้ในไม่กี่วินาที** และของในตู้หายไปด้วย
+    ///
+    /// เก็บแยกเพราะ <c>Messages.AppearArtifact</c> เป็น struct ของ NEXON ไม่มีช่องเจ้าของ
+    /// และแก้ไฟล์ใน GameCode/Messages ไม่ได้ (เหตุผลเดียวกับ Plantings)
+    ///
+    /// ค่าว่าง/ไม่มีคีย์ = ของที่เซิร์ฟวางเอง (ท่าเรือ · รูวาร์ป · หลุมอุกกาบาต) หรือของเก่าก่อนมีระบบนี้
+    /// — พวกนี้รื้อไม่ได้ทั้งคู่ ปลอดภัยกว่าปล่อยให้ใครก็รื้อ
+    /// </summary>
+    [JsonProperty("artifact_owners", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, string> ArtifactOwners;
+
     // ของในตู้/คลังของสิ่งปลูกสร้างบนเกาะนี้ (ดู Player.WarehouseStore)
     // เดิมอยู่ในหน่วยความจำอย่างเดียว รีสตาร์ตแล้วของหายเกลี้ยง
     [JsonProperty("warehouses", NullValueHandling = NullValueHandling.Ignore)]
@@ -66,6 +82,7 @@ public class WorldContext
         ArtifactAddOns ??= new Dictionary<string, AddOns>();
         ArtifactMannequins ??= new Dictionary<string, Messages.Mannequin>();
         Plantings ??= new Dictionary<string, string>();
+        ArtifactOwners ??= new Dictionary<string, string>();
         AddedNatural ??= new List<NaturalInfo>();
         RemovedNatural ??= new List<Point2>();
         GrazedPetList ??= new List<Pet>();

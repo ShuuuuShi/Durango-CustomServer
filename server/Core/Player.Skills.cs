@@ -481,6 +481,15 @@ public partial class Player
         // ⚠️ ถ้าระบบอื่นจะห่อ Cheat ด้วย ต้องระวังว่าใครลงทะเบียนทีหลังชนะ — ตอนนี้มีแค่ที่นี่ที่เดียว
         _connection.Recv(delegate(Cheat msg, PacketHeader header)
         {
+            // ⚠️ ตัวนี้ลงทะเบียนทีหลัง Player.cs:107 จึง **ทับ** ด่านตรวจสิทธิ์ที่นั่น
+            // (Connection.Recv ลบ handler เดิมของ TypeCode เดียวกันทิ้งก่อนเสมอ)
+            // ⇒ ต้องเช็คซ้ำที่นี่ด้วย ไม่งั้นด่านโน้นเป็นโค้ดตายและ cheat ยังเปิดให้ทุกคน
+            if (!IsAdmin)
+            {
+                Console.WriteLine($"[โกง] ปฏิเสธคำสั่งจาก {Short(EntityId)}: {msg._Cheat}");
+                Send(new Abort { Text = "ไม่มีสิทธิ์ใช้คำสั่งนี้" }, header.Seq);
+                return;
+            }
             if (TryHandleSkillCheat(msg._Cheat)) return;
             HandleCheatMsg(msg._Cheat, header.Seq);
         });

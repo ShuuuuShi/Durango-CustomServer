@@ -77,6 +77,7 @@ internal static class Program
         int maxPlayers = 200;
         // token ของ /health — เอาจาก env ได้ด้วย จะได้ไม่ต้องโผล่ในบรรทัดคำสั่ง (ps เห็นหมด)
         string adminToken = Environment.GetEnvironmentVariable("DURANGO_ADMIN_TOKEN");
+        string admins = Environment.GetEnvironmentVariable("DURANGO_ADMINS");
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -116,6 +117,10 @@ internal static class Program
                 // ย้ายข้อมูลครั้งเดียว — ให้บัญชีแรกที่เข้ามารับตัวละครที่ยังไม่มีเจ้าของไป
                 // ⚠️ ห้ามเปิดค้างตอนเปิดให้คนนอกเล่น (ดู Core/Host.AdoptOrphans)
                 case "--adopt-orphans": Host.AdoptOrphans = true; break;
+
+                // รายชื่อผู้ดูแล (entity id ของตัวละคร คั่นด้วยจุลภาค) — คนเดียวที่ใช้คำสั่ง cheat ได้
+                // ไม่ตั้ง = ไม่มีใครใช้ได้เลย ซึ่งเป็นค่าที่ปลอดภัยตอนเปิดให้คนนอกเล่น
+                case "--admins": admins = args[++i]; break;
                 case "--admin-token": adminToken = args[++i]; break;
                 case "--tps": _ticksPerSecond = int.Parse(args[++i]); break;
                 case "--cluster-mode":
@@ -128,11 +133,20 @@ internal static class Program
                     Console.WriteLine("  --assetbundles-android, --public-host, --url-prefix, --max-players, --tps, --cluster-mode,");
                     Console.WriteLine("  --admin-token <t>   token ของ /health (หรือ env DURANGO_ADMIN_TOKEN) — ไม่ตั้ง = เรียกได้เฉพาะเครื่องตัวเอง");
                     Console.WriteLine("  --adopt-orphans     ให้บัญชีแรกที่เข้ามารับตัวละครที่ยังไม่มีเจ้าของ (ใช้ตอนย้ายข้อมูลครั้งเดียว ห้ามเปิดค้าง)");
+                    Console.WriteLine("  --admins <id,id>    entity id ของผู้ดูแล (หรือ env DURANGO_ADMINS) — ไม่ตั้ง = คำสั่ง cheat ปิดสนิท");
                     return 0;
             }
         }
 
+        foreach (string id in (admins ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            Player.Admins.Add(id.Trim());
+        }
+
         Console.WriteLine("=== DurangoServerNx (เซิร์ฟแท้พอร์ตตรง · มือถือก่อน) ===");
+        Console.WriteLine(Player.Admins.Count > 0
+            ? $"[boot] ผู้ดูแล {Player.Admins.Count} คน — ใช้คำสั่ง cheat ได้เฉพาะคนเหล่านี้"
+            : "[boot] ไม่ได้ตั้งผู้ดูแล (--admins) — คำสั่ง cheat ปิดสนิททุกคน");
         if (Host.AdoptOrphans)
         {
             Console.WriteLine("[boot] ⚠️⚠️ --adopt-orphans เปิดอยู่ — บัญชีแรกที่ต่อเข้ามาจะได้ตัวละครที่ยังไม่มีเจ้าของไปทั้งหมด");
