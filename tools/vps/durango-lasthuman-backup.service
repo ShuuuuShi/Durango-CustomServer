@@ -1,0 +1,8 @@
+[Unit]
+Description=สำรองไฟล์เซฟ Durango LastHuman
+
+[Service]
+Type=oneshot
+ExecStart=/opt/durango-lasthuman/backup.sh
+StandardOutput=append:/var/log/durango-lasthuman-backup.log
+StandardError=append:/var/log/durango-lasthuman-backup.log
