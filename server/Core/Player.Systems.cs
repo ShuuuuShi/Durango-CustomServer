@@ -29,6 +29,7 @@ public partial class Player
         RegisterDomesticationHandlers(); // Player.Domestication.cs — ทำให้เชื่อง (ทับ Abort ของ Animals/Inventory)
 
         RegisterHuntingHandlers();     // Player.Hunting.cs   — จับสัตว์ป่าเป็นบังเหียน
+        RegisterTutorialHandlers();    // Player.Tutorial.cs  — คำสั่งจัดฉากของบทเรียนเริ่มเกม
         RegisterPetSaveHandlers();     // Player.PetSave.cs   — โหลด/เซฟสัตว์เลี้ยง+จำนวนครั้งที่ตาย
 
         // ── หลังทุกระบบพร้อมแล้ว ─────────────────────────────────────────────────

@@ -151,7 +151,7 @@ public partial class Player
                 Value = (int)value,
                 Part = BodyPart.Body,
                 Direction = CombatTuning.HitDirection,
-                AttackType = AttackType.BareHands,
+                AttackType = BodyAttackTypeOf(info),
                 Effects = DamageEffects.None
             }
         });
@@ -182,6 +182,21 @@ public partial class Player
 
     /// <summary>เลือดต่ำกว่านี้ถือว่าตาย — เผื่อความชันของหลอดที่ไต่ขึ้นระหว่างอ่านค่า</summary>
     private const float DeadLifeThreshold = 1f;
+
+    /// <summary>
+    /// เอฟเฟกต์ตอนสัตว์กัดโดน — เลือกจากขนาดตัว
+    ///
+    /// ฝั่งเกมเลือกเอฟเฟกต์จาก <c>Damage.AttackType</c> ตรง ๆ
+    /// (client/Durango.Render.Effect/DamageEffectManager.cs:138 <c>AttackedEffects[(int)type]</c>)
+    /// ⇒ ส่ง BareHands จะได้เอฟเฟกต์ "หมัดคน" ตอนไดโนเสาร์กัด ซึ่งผิดแน่
+    ///
+    /// **การตีความของเรา**: ในชนิดโจมตีทั้งหมดมีแค่ SmallBody/LargeBody ที่เข้ากับสัตว์
+    /// แต่ซอร์สฝั่งเกมไม่มีที่ไหนบอกว่าสัตว์ตัวไหนใช้ตัวไหน (grep แล้วเจอแค่ในนิยาม enum)
+    /// ⇒ แบ่งด้วย <c>size_level</c> ซึ่งเป็นฟิลด์ขนาดเดียวที่มีในข้อมูล (ค่าจริง 1-7)
+    /// ที่ 4 ขึ้นไปนับว่าตัวใหญ่ — เป็นจุดกึ่งกลางของช่วง ไม่ได้มาจากไฟล์
+    /// </summary>
+    private static AttackType BodyAttackTypeOf(AnimalTypes.Info info) =>
+        (info?.SizeLevel ?? 1) >= 4 ? AttackType.LargeBody : AttackType.SmallBody;
 
     /// <summary>ผู้เล่นอยู่ในระยะกี่ช่องจากจุดนี้ไหม (1 ช่อง = 200 หน่วยพิกัดโลก)</summary>
     private bool IsWithinTiles(Point2 tile, int tiles)

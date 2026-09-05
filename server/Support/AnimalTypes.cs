@@ -43,6 +43,9 @@ public static class AnimalTypes
         /// </summary>
         public float BaseScale = 1f;
 
+        /// <summary>ขนาดตัวตามข้อมูล (entity_types/animal.json → size_level) ค่าจริง 1-7</summary>
+        public int SizeLevel = 1;
+
         /// <summary>
         /// จับแล้วได้บังเหียนชนิดไหน — <c>animal.json → taming_result</c>
         ///
@@ -122,6 +125,7 @@ public static class AnimalTypes
                 Defense = (string)o["defense"],
                 Tamable = (bool?)o["tamable"] ?? false,
                 BaseScale = ReadScale(o),
+                SizeLevel = (int?)o["size_level"] ?? 1,
                 TamingResult = (string)o["taming_result"],
                 PreferredFoodTag = (string)o["preferred_food_tag"],
                 DropItem = (string)o["drop_item"],
