@@ -186,6 +186,13 @@ public class TitleMenuGroup : MonoBehaviour
 				string clusterJson = ReadLocalClusterJson();
 				if (string.IsNullOrEmpty(clusterJson))
 				{
+					// [6 ก.ย. 2026] ที่อยู่ที่ฝังมาตอน build — ทางเดียวที่ใช้ได้บน Android
+					// เพราะผู้เล่นวาง clusters.json ลง persistentDataPath เองไม่ได้
+					// (ดูเหตุผลเต็มที่ Durango.System.BakedCluster) · ค่าว่าง = ข้ามไปขั้นถัดไป
+					clusterJson = Durango.System.BakedCluster.Json;
+				}
+				if (string.IsNullOrEmpty(clusterJson))
+				{
 					TextAsset textAsset = Resources.Load("offline/clusters") as TextAsset;
 					clusterJson = ((textAsset != null) ? textAsset.text : null);
 				}

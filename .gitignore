@@ -35,3 +35,8 @@ __pycache__/
 
 # ไฟล์สำรองที่เครื่องมือสร้างให้ (region_templates.json.bak, terrain zip .bak)
 *.bak
+
+# APK ฐานกับชุดที่ build ออกมา (ใหญ่หลักร้อย MB · ไม่ใช่ซอร์ส)
+tools/android/base/
+tools/android/keys/
+*.apk
