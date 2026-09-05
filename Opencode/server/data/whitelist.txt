@@ -1,0 +1,17 @@
+# รายชื่อที่อนุญาตให้เข้าเซิร์ฟ (entity id หรือชื่อตัวละคร บรรทัดละ 1)
+8ae11e65-ac1e-4dfc-9f4d-dc31b0e380a1
+alice
+bot-op
+tester
+newbie
+gp-check-1
+gp-check-lv
+gp-check-cap
+multi-1
+multi-2
+multi-3
+farmbot-1
+farmbot-2
+farmbot-3
+equiptest
+test

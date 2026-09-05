@@ -1,0 +1,479 @@
+{
+  "_อ่านก่อน": "ตารางนี้เราสร้างเอง ไม่ใช่ข้อมูลของ NEXON — ดูเหตุผลแต่ละแท็กใน _ที่มา และวิธีสร้างใหม่ใน tools/derive-workbench-tags.py",
+  "_ที่มา": {
+    "table": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "ชื่อมีคำว่า table ตรง ๆ · icon ของแท็กคือ furniture_fur_table_01 · *_tech เป็นโต๊ะช่างชุดใหญ่ที่ระบบคราฟต์เรียกรวมว่าโต๊ะทั่วไป",
+      "โต๊ะ": [
+        "allround",
+        "camp_fur_table_01",
+        "closet_table_01",
+        "fur_table",
+        "fur_table_01",
+        "fur_table_01_marble_01",
+        "fur_table_02",
+        "fur_table_03",
+        "fur_table_jewel",
+        "heavy_tech_01",
+        "heavy_tech_02",
+        "heavy_tech_03",
+        "heavy_tech_04",
+        "kitchen_table_05",
+        "light_tech_01",
+        "light_tech_02",
+        "light_tech_03",
+        "light_tech_04",
+        "living_tech_01",
+        "living_tech_02",
+        "living_tech_03",
+        "living_tech_04",
+        "s02_fur_table",
+        "worktable_05",
+        "worktable_warp_01",
+        "worktable_warp_02",
+        "worktable_warp_03",
+        "worktable_warp_04",
+        "worktable_warp_05"
+      ]
+    },
+    "cook": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "icon ของแท็กคือ furniture_workbench_bonfire ⇒ กองไฟ · ครัวก็ทำอาหารได้",
+      "โต๊ะ": [
+        "bonfire",
+        "bonfire_01",
+        "camp_kitchen_01",
+        "camp_square_fire",
+        "camping_grill",
+        "kitchen_01",
+        "kitchen_02",
+        "kitchen_03",
+        "kitchen_04",
+        "kitchen_table_05",
+        "s02_bonfire"
+      ]
+    },
+    "kiln": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "ชื่อตรงกับ id แท็ก · furnace (เตาหลอม) เป็นเตาเผาชนิดเดียวกัน",
+      "โต๊ะ": [
+        "camp_furnace_01",
+        "camp_kiln_01",
+        "camp_kiln_02",
+        "furnace_01",
+        "furnace_small",
+        "kiln_01",
+        "kiln_02",
+        "kiln_04"
+      ]
+    },
+    "table_clothes": {
+      "ความมั่นใจ": "เดา",
+      "เหตุผล": "icon เป็น furniture_fur_table_01 เหมือนแท็ก table ⇒ ใช้โต๊ะทั่วไปได้ และกี่ทอผ้า/ราวตากผ้าเป็นของสายเสื้อผ้า",
+      "โต๊ะ": [
+        "camp_fur_table_01",
+        "camp_loom_01",
+        "camp_loom_02",
+        "clotheshorse_warp_01",
+        "clotheshorse_warp_02",
+        "fur_table",
+        "fur_table_01",
+        "fur_table_01_marble_01",
+        "fur_table_02",
+        "fur_table_03",
+        "fur_table_jewel",
+        "loom",
+        "loom_01",
+        "loom_02",
+        "s02_fur_table"
+      ]
+    },
+    "table_weapon": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "ชื่อตรงกับ id แท็ก",
+      "โต๊ะ": [
+        "weapon_table_01"
+      ]
+    },
+    "dryer": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "icon คือ recipe_dry · ทั้งสามอย่างคือราวตาก/แร็คตากของ",
+      "โต๊ะ": [
+        "camp_dryingrack_01",
+        "camp_dryingrack_02",
+        "clotheshorse_warp_01",
+        "clotheshorse_warp_02",
+        "dryingrack_01",
+        "dryingrack_02",
+        "dryingrack_02_t2",
+        "hide_drying"
+      ]
+    },
+    "loom": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "ชื่อตรงกับ id แท็ก · icon คือ building_workbench_loom",
+      "โต๊ะ": [
+        "camp_loom_01",
+        "camp_loom_02",
+        "loom",
+        "loom_01",
+        "loom_02"
+      ]
+    },
+    "table_medicine": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "ชื่อตรงกับ id แท็ก · icon คือ worktable_medicine",
+      "โต๊ะ": [
+        "medicine_table_01",
+        "medicine_table_01_t2"
+      ]
+    },
+    "kitchen": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "ชื่อตรงกับ id แท็ก · icon คือ workbench_kitchen_01",
+      "โต๊ะ": [
+        "camp_kitchen_01",
+        "kitchen_01",
+        "kitchen_02",
+        "kitchen_03",
+        "kitchen_04",
+        "kitchen_table_05"
+      ]
+    },
+    "fertilizer_maker": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "ชื่อตรงกับ id แท็ก · icon คือ workbench_fertilizer_maker_01",
+      "โต๊ะ": [
+        "fertilizer_maker_01",
+        "fertilizer_maker_02",
+        "fertilizer_maker_03"
+      ]
+    },
+    "dye_work_table": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "ชุดย้อมสี — ชื่อขึ้นต้นด้วย dye",
+      "โต๊ะ": [
+        "dye_01",
+        "dye_02",
+        "dye_03",
+        "dye_rack_01"
+      ]
+    },
+    "dye_medicine_lab": {
+      "ความมั่นใจ": "เดา",
+      "เหตุผล": "icon คือ tag_purpose_medicine เหมือนกับ dye_work_table ⇒ อยู่สายยา+ย้อมสี",
+      "โต๊ะ": [
+        "dye_rack_01",
+        "medicine_table_01",
+        "medicine_table_01_t2"
+      ]
+    },
+    "table_jewelry": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "มีโต๊ะชื่อ fur_table_jewel ตัวเดียวในเกม",
+      "โต๊ะ": [
+        "fur_table_jewel"
+      ]
+    },
+    "kitchen_lava": {
+      "ความมั่นใจ": "เดา",
+      "เหตุผล": "icon คือ workbench_kitchen_03 ⇒ ครัวรุ่นสูงสุด · เลือกครัวเลขมากสุดที่มี",
+      "โต๊ะ": [
+        "kitchen_04"
+      ]
+    },
+    "cook_filter": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "icon คือ warp_dutch_01 ⇒ ชุดกาแฟดริป (coffee_dutch_01)",
+      "โต๊ะ": [
+        "coffee_dutch_01"
+      ]
+    },
+    "alcohol_ripen": {
+      "ความมั่นใจ": "แน่",
+      "เหตุผล": "icon คือ warp_oak_01 ⇒ ถังไม้โอ๊กหมักเหล้า (barrel_oak_01)",
+      "โต๊ะ": [
+        "barrel_oak_01"
+      ]
+    },
+    "urban_worktable": {
+      "ความมั่นใจ": "เดา",
+      "เหตุผล": "โต๊ะตระกูล _warp เป็นของที่ได้จากรูวาร์ป/เมือง ⇒ ตรงกับคำว่า urban",
+      "โต๊ะ": [
+        "worktable_warp_01",
+        "worktable_warp_02",
+        "worktable_warp_03",
+        "worktable_warp_04",
+        "worktable_warp_05"
+      ]
+    },
+    "urban_kitchen": {
+      "ความมั่นใจ": "เดา",
+      "เหตุผล": "ไม่มีครัวที่ชื่อมี warp/urban ⇒ ให้ครัวรุ่นสูงใช้แทน ไม่งั้นสูตร 4 ตัวนี้ตายสนิท",
+      "โต๊ะ": [
+        "kitchen_03",
+        "kitchen_04"
+      ]
+    },
+    "urban_dye_medicine_lab": {
+      "ความมั่นใจ": "เดา",
+      "เหตุผล": "สาย urban ของ dye_medicine_lab ⇒ ให้ชั้นวางย้อมสีซึ่งเป็นตัวรุ่นใหม่สุด",
+      "โต๊ะ": [
+        "dye_rack_01"
+      ]
+    }
+  },
+  "โต๊ะ": {
+    "allround": {
+      "table": 50
+    },
+    "camp_fur_table_01": {
+      "table": 70,
+      "table_clothes": 70
+    },
+    "closet_table_01": {
+      "table": 60
+    },
+    "fur_table": {
+      "table": 19,
+      "table_clothes": 19
+    },
+    "fur_table_01": {
+      "table": 39,
+      "table_clothes": 39
+    },
+    "fur_table_01_marble_01": {
+      "table": 60,
+      "table_clothes": 60
+    },
+    "fur_table_02": {
+      "table": 59,
+      "table_clothes": 59
+    },
+    "fur_table_03": {
+      "table": 60,
+      "table_clothes": 60
+    },
+    "fur_table_jewel": {
+      "table": 60,
+      "table_clothes": 60,
+      "table_jewelry": 60
+    },
+    "heavy_tech_01": {
+      "table": 60
+    },
+    "heavy_tech_02": {
+      "table": 60
+    },
+    "heavy_tech_03": {
+      "table": 60
+    },
+    "heavy_tech_04": {
+      "table": 60
+    },
+    "kitchen_table_05": {
+      "table": 60,
+      "cook": 60,
+      "kitchen": 60
+    },
+    "light_tech_01": {
+      "table": 60
+    },
+    "light_tech_02": {
+      "table": 60
+    },
+    "light_tech_03": {
+      "table": 60
+    },
+    "light_tech_04": {
+      "table": 60
+    },
+    "living_tech_01": {
+      "table": 60
+    },
+    "living_tech_02": {
+      "table": 60
+    },
+    "living_tech_03": {
+      "table": 60
+    },
+    "living_tech_04": {
+      "table": 60
+    },
+    "s02_fur_table": {
+      "table": 60,
+      "table_clothes": 60
+    },
+    "worktable_05": {
+      "table": 60
+    },
+    "worktable_warp_01": {
+      "table": 60,
+      "urban_worktable": 60
+    },
+    "worktable_warp_02": {
+      "table": 60,
+      "urban_worktable": 60
+    },
+    "worktable_warp_03": {
+      "table": 60,
+      "urban_worktable": 60
+    },
+    "worktable_warp_04": {
+      "table": 60,
+      "urban_worktable": 60
+    },
+    "worktable_warp_05": {
+      "table": 60,
+      "urban_worktable": 60
+    },
+    "bonfire": {
+      "cook": 19
+    },
+    "bonfire_01": {
+      "cook": 60
+    },
+    "camp_kitchen_01": {
+      "cook": 66,
+      "kitchen": 66
+    },
+    "camp_square_fire": {
+      "cook": 80
+    },
+    "camping_grill": {
+      "cook": 60
+    },
+    "kitchen_01": {
+      "cook": 59,
+      "kitchen": 59
+    },
+    "kitchen_02": {
+      "cook": 60,
+      "kitchen": 60
+    },
+    "kitchen_03": {
+      "cook": 60,
+      "kitchen": 60,
+      "urban_kitchen": 60
+    },
+    "kitchen_04": {
+      "cook": 60,
+      "kitchen": 60,
+      "kitchen_lava": 60,
+      "urban_kitchen": 60
+    },
+    "s02_bonfire": {
+      "cook": 60
+    },
+    "camp_furnace_01": {
+      "kiln": 38
+    },
+    "camp_kiln_01": {
+      "kiln": 44
+    },
+    "camp_kiln_02": {
+      "kiln": 66
+    },
+    "furnace_01": {
+      "kiln": 39
+    },
+    "furnace_small": {
+      "kiln": 60
+    },
+    "kiln_01": {
+      "kiln": 54
+    },
+    "kiln_02": {
+      "kiln": 60
+    },
+    "kiln_04": {
+      "kiln": 60
+    },
+    "camp_loom_01": {
+      "table_clothes": 40,
+      "loom": 40
+    },
+    "camp_loom_02": {
+      "table_clothes": 66,
+      "loom": 66
+    },
+    "clotheshorse_warp_01": {
+      "table_clothes": 60,
+      "dryer": 60
+    },
+    "clotheshorse_warp_02": {
+      "table_clothes": 60,
+      "dryer": 60
+    },
+    "loom": {
+      "table_clothes": 60,
+      "loom": 60
+    },
+    "loom_01": {
+      "table_clothes": 39,
+      "loom": 39
+    },
+    "loom_02": {
+      "table_clothes": 60,
+      "loom": 60
+    },
+    "weapon_table_01": {
+      "table_weapon": 60
+    },
+    "camp_dryingrack_01": {
+      "dryer": 38
+    },
+    "camp_dryingrack_02": {
+      "dryer": 66
+    },
+    "dryingrack_01": {
+      "dryer": 39
+    },
+    "dryingrack_02": {
+      "dryer": 60
+    },
+    "dryingrack_02_t2": {
+      "dryer": 60
+    },
+    "hide_drying": {
+      "dryer": 60
+    },
+    "medicine_table_01": {
+      "table_medicine": 60,
+      "dye_medicine_lab": 60
+    },
+    "medicine_table_01_t2": {
+      "table_medicine": 60,
+      "dye_medicine_lab": 60
+    },
+    "fertilizer_maker_01": {
+      "fertilizer_maker": 60
+    },
+    "fertilizer_maker_02": {
+      "fertilizer_maker": 70
+    },
+    "fertilizer_maker_03": {
+      "fertilizer_maker": 60
+    },
+    "dye_01": {
+      "dye_work_table": 44
+    },
+    "dye_02": {
+      "dye_work_table": 60
+    },
+    "dye_03": {
+      "dye_work_table": 60
+    },
+    "dye_rack_01": {
+      "dye_work_table": 60,
+      "dye_medicine_lab": 60,
+      "urban_dye_medicine_lab": 60
+    },
+    "coffee_dutch_01": {
+      "cook_filter": 60
+    },
+    "barrel_oak_01": {
+      "alcohol_ripen": 60
+    }
+  }
+}
