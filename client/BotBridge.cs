@@ -80,9 +80,20 @@ public static class BotBridge
     public static void Bootstrap()
     {
         if (_started) return;
-        _started = true;
 
+        // [5 ก.ย. 2026] ต้องเปิดเองเท่านั้น — ตั้ง env DURANGO_BOT=1 (หรือ DURANGO_BOT_PORT)
+        //
+        // ⚠️ ทำไมเปลี่ยน: bridge นี้เปิดคำสั่ง cheat/teleport/spawn ให้ยิงเข้ามาได้ตรง ๆ
+        // ถึงจะ bind แค่ loopback แต่พอแพ็กตัวเกมแจกให้คนอื่นเทส ใครก็ตามที่รันเกม
+        // สามารถต่อ 127.0.0.1:8192 บนเครื่องตัวเองแล้วโกงได้ทันทีโดยไม่ต้องแก้อะไรเลย
+        // ⇒ ชุดแจกไม่ตั้ง env = bridge ไม่ทำงาน · เครื่องที่เทสตั้ง env เอง (tools/bot.ps1 ตั้งให้)
+        string enabled = Environment.GetEnvironmentVariable("DURANGO_BOT");
         string envPort = Environment.GetEnvironmentVariable("DURANGO_BOT_PORT");
+        if (string.IsNullOrEmpty(enabled) && string.IsNullOrEmpty(envPort))
+        {
+            return;
+        }
+        _started = true;
         _port = DefaultPort;
         if (!string.IsNullOrEmpty(envPort) && int.TryParse(envPort, out int p) && p > 0 && p < 65536)
         {
@@ -292,6 +303,7 @@ public static class BotBridge
                 case "revive": return CmdRevive();
                 case "travel": return CmdTravel(args);
                 case "animdump": return CmdAnimDump(args);
+                case "tilesetdump": return CmdTileSetDump();
                 case "animdumpstat": return CmdAnimDumpStat();
                 case "menus": return CmdMenus();
                 default: return Err("unknown cmd: " + cmd);
@@ -854,6 +866,99 @@ public static class BotBridge
             return "{\"ok\":true,\"done\":" + _animDump.Count + ",\"wanted\":" + _animDumpWanted
                  + ",\"withMotions\":" + ok + ",\"written\":" + (_animDumpWritten ? "true" : "false") + "}";
         }
+    }
+
+
+    // ---------------------------------------------------------------- ดึงรายชื่อชุดพื้นผิวเกาะ
+
+    /// <summary>
+    /// รายชื่อ <c>tile_set</c> ที่ตัวเกมรู้จักจริง — ตัวที่ตัดสินว่าเกาะจะหน้าตาแบบไหน
+    ///
+    /// ═══ ทำไมต้องดึงจากตรงนี้ ═══
+    /// <c>TerrainMeta.TileSet</c> มาจาก <c>info.yml</c> ของเกาะตรง ๆ (TerrainMeta.cs:146)
+    /// แล้วถูกเอาไปเทียบชื่อกับตารางที่ **ฝังอยู่ในฉากของเกม** สามที่:
+    ///   • <c>AmbientLightingManager.OverrideColorSets[i].Name</c>   (สีแสงตามไบโอม)
+    ///   • <c>CustomColorCorrectionEffect._overrideSets[j].Name</c>  (โทนสีภาพรวม)
+    ///   • <c>BgmManager._tileSetBgm[j].TileSet</c>                  (เพลงประจำเกาะ)
+    /// ชื่อที่ไม่ตรงสักตาราง = เกาะใช้ค่าเริ่มต้นหมด ⇒ **เกาะหิมะเรนเดอร์เป็นทุ่งหญ้า**
+    /// และไม่มี error อะไรเลยเพราะโค้ดแค่วนหาไม่เจอแล้วผ่านไป
+    ///
+    /// ตารางพวกนี้เป็นฟิลด์ที่ตั้งค่าไว้ในฉาก ⇒ ไม่มีทางรู้จากไฟล์ JSON ที่เซิร์ฟมี
+    /// ⇒ ให้ตัวเกมอ่านออกมาให้เอง = ได้ชื่อต้นฉบับเป๊ะ ไม่ต้องเดา
+    ///
+    /// ⚠️ เป็นเครื่องมือทดสอบ ลบพร้อม BotBridge.cs ก่อนเปิดจริง
+    /// </summary>
+    private static string CmdTileSetDump()
+    {
+        var sb = new StringBuilder(512);
+        sb.Append("{\"ok\":true");
+
+        sb.Append(",\"current\":");
+        JStr(sb, Durango.Terrain.TerrainMeta.TileSet ?? "");
+
+        DumpNames(sb, "colorSets", CollectColorSetNames());
+        DumpNames(sb, "correctionSets", CollectCorrectionSetNames());
+        DumpNames(sb, "bgmSets", CollectBgmTileSetNames());
+
+        sb.Append('}');
+        return sb.ToString();
+    }
+
+    private static void DumpNames(StringBuilder sb, string key, List<string> names)
+    {
+        sb.Append(",\"").Append(key).Append("\":[");
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            JStr(sb, names[i]);
+        }
+        sb.Append(']');
+    }
+
+    /// <summary>อ่านฟิลด์ private ด้วย reflection — ตารางพวกนี้ไม่มี property สาธารณะให้</summary>
+    private static List<string> ReadNames(object owner, string fieldName, string nameMember)
+    {
+        var result = new List<string>();
+        if (owner == null) return result;
+        try
+        {
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public
+                      | System.Reflection.BindingFlags.NonPublic;
+            var field = owner.GetType().GetField(fieldName, flags);
+            var list = (field == null) ? null : field.GetValue(owner) as System.Collections.IEnumerable;
+            if (list == null) return result;
+            foreach (object entry in list)
+            {
+                if (entry == null) continue;
+                var m = entry.GetType().GetField(nameMember, flags);
+                object v = (m == null) ? null : m.GetValue(entry);
+                string name = (v == null) ? null : v.ToString();
+                if (!string.IsNullOrEmpty(name)) result.Add(name);
+            }
+        }
+        catch (Exception e)
+        {
+            UnityEngine.Debug.LogWarning("[BotBridge] tilesetdump " + fieldName + ": " + e.Message);
+        }
+        return result;
+    }
+
+    private static List<string> CollectColorSetNames()
+    {
+        var mgr = UnityEngine.Object.FindObjectOfType<Durango.Environment.AmbientLightingManager>();
+        return ReadNames(mgr, "OverrideColorSets", "Name");
+    }
+
+    private static List<string> CollectCorrectionSetNames()
+    {
+        var fx = UnityEngine.Object.FindObjectOfType<Durango.Render.Screen.CustomColorCorrectionEffect>();
+        return ReadNames(fx, "_overrideSets", "Name");
+    }
+
+    private static List<string> CollectBgmTileSetNames()
+    {
+        var bgm = UnityEngine.Object.FindObjectOfType<BgmManager>();
+        return ReadNames(bgm, "_tileSetBgm", "TileSet");
     }
 
     private static string CmdMenus()

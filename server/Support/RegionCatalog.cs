@@ -34,6 +34,13 @@ public static class RegionCatalog
 
         /// <summary>ฝูงสัตว์ที่เกิดบนเกาะแบบนี้ · ชื่อกลุ่ม (land/beach/…) → รายการฝูง</summary>
         public Dictionary<string, List<HerdSpawn>> Herds = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// ชื่อสถานการณ์สภาพอากาศของเกาะแบบนี้ — ค่าจริงจาก <c>region_templates.json → weather</c>
+        /// เช่น <c>ending_climate_snowy</c> · <c>volcanic_normal</c> · <c>always_volcanic_ash</c>
+        /// (null = ไม่ระบุ) แปลงเป็นลำดับสภาพอากาศจริงที่ <see cref="WeatherTuning"/>
+        /// </summary>
+        public string Weather;
     }
 
     /// <summary>
@@ -99,6 +106,7 @@ public static class RegionCatalog
                 if (kv.Value is JObject o)
                 {
                     info.Level = (int?)o["level"] ?? 0;
+                    info.Weather = (string)o["weather"];
                     if ((int?)o["role"] is { } roleValue && Enum.IsDefined(typeof(Role), roleValue))
                     {
                         info.Role = (Role)roleValue;

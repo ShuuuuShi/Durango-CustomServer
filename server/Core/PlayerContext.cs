@@ -78,6 +78,15 @@ public class PlayerContext
     /// จงใจใช้ <c>int</c> ไม่ใช่ <c>int?</c> เพราะ "ไฟล์เก่าที่ยังไม่มีช่องนี้" กับ "ยังไม่เคยตาย"
     /// มีความหมายเดียวกันคือ 0 อยู่แล้ว ⇒ ค่า default ของชนิดทำหน้าที่ migration ให้ในตัว
     /// </summary>
+    /// <summary>
+    /// [5 ก.ย. 2026] จุดสำคัญที่ผู้เล่นคนนี้เดินไปเจอมาแล้ว — คีย์คือ "เกาะ|x,y"
+    ///
+    /// เหตุผลที่ต้องเก็บกับผู้เล่น (ไม่ใช่กับโลก) และเก็บเป็นชนิดของเราเอง:
+    /// ดูที่หัวคลาส <see cref="ExploredPoint"/> ใน Core/Player.Map.cs
+    /// </summary>
+    [JsonProperty("explored_pois", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, ExploredPoint> ExploredPOIs;
+
     [JsonProperty("death_count")]
     public int DeathCount;
 
@@ -267,6 +276,21 @@ internal static class ItemExtRepair
             // ยังถูกต้อง เสียแค่ข้อมูลเสริมของชิ้นนั้น ส่วน JObject ทำให้ทั้งแพ็กเก็ตอ่านผิดตำแหน่ง
             Console.WriteLine($"[เซฟ] ⚠️ ข้อมูลเสริมของไอเทมใน{where} {dropped} ชิ้นระบุชนิดไม่ได้ — ล้างทิ้งกันแพ็กเก็ตเลื่อนช่อง");
         }
+    }
+
+    /// <summary>
+    /// ซ่อมไอเทม "ชิ้นเดียว" ที่ไม่ได้อยู่ในลิสต์ — ประตู/หน้าต่างที่ติดกับบ้าน (AddOns._AddOns)
+    /// และเสื้อผ้าบนหุ่นโชว์ (Mannequin.Head/Body) ซึ่งเก็บลงไฟล์ .world เหมือนกัน
+    /// </summary>
+    public static Item Fix(Item item, string where)
+    {
+        if (item.Ext is not JObject node) return item;
+        object rebuilt = Rebuild(node);
+        Console.WriteLine(rebuilt != null
+            ? $"[เซฟ] ซ่อมข้อมูลเสริมของไอเทมใน{where}"
+            : $"[เซฟ] ⚠️ ข้อมูลเสริมของไอเทมใน{where} ระบุชนิดไม่ได้ — ล้างทิ้งกันแพ็กเก็ตเลื่อนช่อง");
+        item.Ext = rebuilt;
+        return item;
     }
 
     /// <summary>แปลง JObject กลับเป็นชนิดจริง — null = ระบุชนิดไม่ได้ (ผู้เรียกล้างทิ้ง)</summary>

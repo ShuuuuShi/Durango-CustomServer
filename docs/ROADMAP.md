@@ -9,179 +9,103 @@
 
 | | สถานะ |
 |---|---|
-| `server/` | โค้ดเซิร์ฟของ NEXON พอร์ตเป็น .NET 9 · **build ผ่าน · selftest ผ่าน** · รับ message ได้ **42 ชนิด** |
-| `client/` | ซอร์ส NEXON แท้ 3,755 ไฟล์ · **build ผ่าน** · DLL วางลงเกมแล้ว · เกมเปิดได้ ไม่มี exception |
-| namespace | `Durango.Offline` → **`Durango.Online`** ทั้งโปรเจกต์ (server 22 + client 24 ไฟล์) |
-| โปรโตคอล | 852 message มี TypeCode ครบ พร้อม `Pack`/`Unpack` — **ไม่ต้องเขียน serializer เอง** |
-| ช่องว่าง | เกมยิงออกมาจริง **391 ชนิด** → เซิร์ฟรับได้ **33** · **ยังขาด 358** |
-
-### วิธีรู้ว่าขาดอะไร (ไม่ต้องเดา)
-
-1. **สแกนซอร์ส** — `python tools/scan-protocol.py`
-   อ่าน `Send(new X{..})` ในซอร์สเกม เทียบกับ `Recv(delegate(X msg, ..))` ในเซิร์ฟ
-2. **อ่าน log ตอนเล่นจริง** — เซิร์ฟพิมพ์เองทุกครั้งที่เกมยิงของที่ยังไม่ได้ทำ:
-   ```
-   [conn] ไม่มี handler สำหรับ type=2040 (bytes=23) — จะไม่เตือนซ้ำอีก
-   ```
-   หาชื่อจากเลข: `grep -l "TypeCode = 2040" server/GameCode/Messages/*.cs` → `Statistics.cs`
-
-ทุก message ใน `server/GameCode/Messages/` บอกครบว่ามี field อะไร ชนิดอะไร เรียงยังไง
+| `server/` | โค้ดเซิร์ฟ NEXON พอร์ต .NET 9 · build ผ่าน · **รับ message ได้ 147 ชนิด** (เริ่มที่ 42) |
+| `client/` | ซอร์ส NEXON แท้ · build ผ่าน · DLL วางลงเกมแล้ว · เข้าเล่นได้จริง |
+| โปรโตคอล | 989 message มี TypeCode + `Pack`/`Unpack` ครบ — ไม่ต้องเขียน serializer เอง |
+| เกาะ | 18 เกาะ · เดินทางข้ามเกาะได้จริง · สัตว์ป่าเกิดครบทุกเกาะ |
+| โมดูล | `Player.<ระบบ>.cs` 12 ไฟล์ ต่อสายที่ `Player.Systems.cs` จุดเดียว |
 
 ---
 
-## แพ็กเกจ 0 — ปลดเกมออกจาก "เซิร์ฟในตัว" ⚠️ ต้องทำก่อนทุกอย่าง
+## ✅ ระบบที่ทำเสร็จ + เทสในเกมจริงแล้ว
 
-**อาการจริงที่เจอ** (เปิดเกมพร้อมเซิร์ฟรันอยู่ที่ 8190):
-```
-EndPointListener..ctor → พอร์ต 8190 ถูกใช้อยู่
-InvalidOperationException: You must call the Bind method before performing this operation.
-  at Durango.Online.Listener.Accept () → Server.Process () → GameManager.Update ()
-```
-
-**สาเหตุ:** เกมของ NEXON เป็น offline build — พอเลือก save slot มันเรียก `Server.BeginServer()`
-(`client/Durango.Online/Server.cs:126`) เปิด `GameServer` + `Gateway` **ของตัวเอง** ที่พอร์ต 8190/8191
-ชนกับเซิร์ฟเรา ต้นเหตุอยู่ที่ `client/Durango.Logic.Clusters/Clusters.cs:55`
-```csharp
-public static bool Offline => true;   // hardcode → บรรทัด 127 สั่ง _clusters.Clear() ลบเซิร์ฟจริงทิ้ง
-```
-
-**ทางแก้ที่ NEXON เตรียมไว้ให้แล้ว:** `Server.ConnectTo(string ip)` (`Server.cs:160-183`)
-เซ็ต `GameManager.ConnectCluster` แล้วรอบถัดไป `Clusters.LoadFromJson` เข้า branch บรรทัด 117 แทน branch offline
-
-**สิ่งที่ต้องทำ**
-1. `Clusters.Offline` — เปลี่ยนจาก `=> true` เป็นอ่านจากไฟล์/env (default = ต่อออนไลน์)
-2. อ่านที่อยู่เซิร์ฟจาก `server.txt` ข้างตัวเกม (ตอนนี้ `Server.cs:33` hardcode `127.0.0.1:8190`)
-   — เปลี่ยนเซิร์ฟได้โดยไม่ต้อง build ใหม่ · มือถือ/เพื่อนต่อเข้ามาได้
-3. ไม่เรียก `BeginServer()` เมื่ออยู่โหมดออนไลน์
-4. เติม `SingleMode`, `MultiMode` ใน `server/Support/ClusterTypes.cs` (ดูตารางล่าง)
-
-**เรื่อง cluster_mode:** `/entry` ตอบ `"cluster_mode": "Offline"` อยู่ ค่านี้คุมว่า UI เปิด/ปิดอะไร
-และ **ซอร์สเกมรู้จัก Mode มากกว่าที่เซิร์ฟมี** (`client/Durango.Online/GameServer.cs:159-160`)
-
-| Mode | ในเกมคือ | ผล |
+| ระบบ | ไฟล์หลัก | ยืนยันด้วย |
 |---|---|---|
-| `Editable` | 창작섬 เกาะสร้างสรรค์ | สร้าง/รื้อได้เต็มที่ · `Role.Sandbox` |
-| `Offline` | 기록섬 เกาะบันทึก | ดูอย่างเดียว · `Role.Invalid` |
-| `SingleMode` | 개인섬 เกาะส่วนตัว | `Role.Personal` |
-| **`MultiMode`** | **멀티 플레이 모드** | **`Role.Rural`** — โหมดผู้เล่นหลายคน |
-| `Online` | 온라인 서버 | `Role.Urban` · เปิดเมนู MMO ครบ |
+| หลาย region + ล่องเรือ/เดินทางข้ามเกาะ | `Core/Host.cs` `World.cs` | ไปเกาะอื่นแล้วกลับ ของไม่หาย · เซฟแยก `regions/<id>.world` |
+| จุดสำคัญประจำเกาะ (ท่าเรือ/รูวาร์ป/รอยแยก) | `World.PlaceTerrainPois` · `Support/TerrainPois.cs` | ท่าเรือโผล่ในโลก กดล่องเรือได้ |
+| สัตว์ป่า — เกิด/เดินเล่น/อนิเมชั่น/ขนาดตัว | `Core/AnimalManager.cs` · `Support/AnimalMotions.cs` | `Compso_Stand` `Raptor_Walk` `Compso_Die` เล่นจริง · scale ตรงตามชนิด |
+| ล่าสัตว์ — ตี/ดาเมจ/ตาย/ชำแหละ/สัตว์ตีกลับ | `Core/Player.Hunting.cs` `Player.Combat.cs` | ดาเมจ 1→225 ตามอาวุธ · หลอดเป้า 1803→1353→903 · เลขดาเมจขึ้นจอ |
+| ทำให้เชื่อง (taming) | `Player.Domestication.cs` · `Support/TamingTuning.cs` | ใช้สูตรจริงจาก `constants.json → taming` |
+| กรงสัตว์ + งานของสัตว์เลี้ยง | `Player.Cage.cs` · `Support/CageTypes.cs` | เมนูกรงเปิดได้ · ความจุ 45 = `min(45, 15+5*int(60/10))` |
+| สัตว์เลี้ยง — เซฟ/โหลด/จำนวนครั้งที่ตาย | `Player.PetSave.cs` `PlayerContext.cs` | รีสตาร์ตแล้วสัตว์ยังอยู่ |
+| คราฟต์จริง | `Player.Crafting.cs` · `Support/WorkbenchTags.cs` | 720 สูตร (ทำใหม่ได้จริง 625) · แท็กโต๊ะปลด 587 สูตร |
+| เก็บเกี่ยวของธรรมชาติ | `Player.Gathering.cs` | ตัดไม้/เก็บพืช/ทุบหิน |
+| สกิล/เลเวล/exp | `Player.Skills.cs` | 275 bundle · 13 หมวด · 8 อาชีพ |
+| ของ/กระเป๋า/ตู้เก็บของ | `Player.Inventory.cs` | ตู้เซฟลงไฟล์เกาะ คนอื่นเปิดเห็นของชุดเดียวกัน |
+| หลอดเอาชีวิตรอด + ตาย/เกิดใหม่ | `Core/SurvivalState.cs` | กินอาหารดันเพดานเลือด 30/30 → 300/300 |
+| บทเรียนเริ่มเกม | `Player.Tutorial.cs` | บทสนทนาไม่ค้างบังจอแล้ว |
+| กลางวัน/กลางคืน | (เดิมถูกต้องอยู่แล้ว) | รอบละ 48 นาที · `daytime 2880` |
 
-`server/Support/ClusterTypes.cs` มีแค่ `Online, Offline, Editable` — ขาด 2 ตัว
-⚠️ อย่ารีบตั้ง `Online` ถ้ายังไม่มี handler เมนู MMO จะโผล่แล้วกดค้าง
-ลำดับปลอดภัย: `Editable` → `MultiMode` → `Online`
-
----
-
-# แพ็กเกจ 1 — ระบบล่องเรือ / หมู่เกาะ ⛵ (งานหลักของรอบนี้)
-
-ระบบนี้ใหญ่ที่สุดจริง — **70+ message** และมันบังคับให้ต้องรื้อสถาปัตยกรรมของเซิร์ฟก่อน
-
-**ทำไมใหญ่:** ตอนนี้ `Core/Host.cs` ถือ `_worldCtx` **ตัวเดียว** และ `Core/GameServer.cs:186-190`
-hardcode `Region.Id = "1"` / `Region.TerrainId = "1"` — คือมีเกาะเดียวในจักรวาล
-ส่วนระบบล่องเรือทั้งระบบตั้งอยู่บนสมมติฐานว่า **มีหลายเกาะพร้อมกัน แล้วเดินทางไปมาได้**
-
-**ของที่มีอยู่แล้ว:** `server/data/terrains/` มี **14 แผนที่** พร้อมใช้ —
-`pe10gr_1..5` (ทุ่งหญ้า) · `ri35de` · `ri35te` · `ri40tr` · `ri45sa` · `ri50sn` · `ri55tu` ·
-`ra60sw` · `sn20snow` · `ua60vol` (ภูเขาไฟ) → มีของพอเปิด 14 เกาะได้ทันทีที่รองรับหลาย region
-
-## เฟส 1.1 — หลาย region ในเซิร์ฟเดียว (แกนกลาง ต้องทำก่อน)
-
-นี่คือ 80% ของความยากทั้งแพ็กเกจ
-
-| ไฟล์ | ต้องเปลี่ยนเป็น |
-|---|---|
-| `Core/Host.cs:25` `_worldCtx` | `Dictionary<string regionId, World>` — โหลด terrain ต่อ region |
-| `Core/GameServer.cs:186-190` | `Region.Id` / `TerrainId` มาจาก region ที่ผู้เล่นอยู่จริง ไม่ใช่ `"1"` |
-| `Core/WorldContext.cs` | path เซฟแยกต่อ region (`<cluster>/<regionId>/N.world`) |
-| `Core/Player.cs` | ผูกกับ `World` ปัจจุบัน · ย้าย region = ถอดออกจาก World เก่า ใส่ World ใหม่ |
-| `Program.cs:124-136` | loop 120 TPS ต้อง `Process()` ทุก region ไม่ใช่โลกเดียว |
-
-จุดที่ต้องระวัง: `World.BroadCast<T>` (`Core/World.cs:146`) กระจายให้ทุกคน **ในโลกนั้น** อยู่แล้ว
-พอแยกหลาย World แล้วมันจะถูกต้องเอง — แต่ `AppearPlayer`/`DisappearEntity` ต้องยิงตอนข้าม region ด้วย
-
-**เกณฑ์ว่าเฟสนี้ผ่าน:** เปิดเซิร์ฟแล้วมี 2 region ทำงานพร้อมกัน ผู้เล่น A อยู่เกาะ 1 ผู้เล่น B อยู่เกาะ 2
-ต่างคนต่างไม่เห็นกัน เซฟแยกไฟล์กัน
-
-## เฟส 1.2 — ท่าเรือ + ล่องเรือพื้นฐาน
-
-| message | TypeCode | field | ความหมาย |
-|---|---:|---|---|
-| `TravelByRegion` | 2029 | `EntityId` (ท่าเรือ), `Tile`, `RegionId`, `PartierId` | ล่องเรือไปเกาะที่เลือก |
-| `TravelByRegionInArchipelago` | — | `EntityId`, `Tile`, `RegionId` | ไปเกาะข้างเคียงในหมู่เกาะเดียวกัน |
-| `SailingBack` | 3130 | `EntityId`, `Tile` | ล่องเรือกลับ |
-| `GetSailingBackCost` → `SailingBackCost` | — | `Cost` (long) | ค่าล่องเรือกลับ |
-| `TravelToStableRegion` | — | | ไปเกาะถาวร |
-| `TravelToRandomPersonalRegion` | — | | สุ่มไปเกาะส่วนตัว |
-| `Teleported` | 2037 | `Tile`, `Type` | ย้ายตำแหน่ง **ในเกาะเดียวกัน** |
-
-ฝั่งเกมเรียกจาก `client/ExploreSystem.cs:151-199` — อ่าน `CoTravelRegion()` เป็นสเปกได้เลย
-ท่าเรือ (`Port`) คือ artifact ในโลกที่มี `Id` + `Tile` ⇒ ต้องมี artifact ประเภทท่าเรือใน terrain ก่อน
-
-**เกณฑ์ผ่าน:** เดินไปท่าเรือ → เลือกเกาะ → กดล่อง → โผล่อีกเกาะ → กดกลับ → กลับมาที่เดิม ของในกระเป๋าไม่หาย
-
-## เฟส 1.3 — หมู่เกาะ (Archipelago)
-
-| message | TypeCode | field สำคัญ |
-|---|---:|---|
-| `Archipelago` | 2053 | `Id`, `TemplateId`, `UnstableFactor`, `Name`, `ExpiresAt`, `IncludedRegions[]` |
-| `GetArchipelago` / `RecommendArchipelago` | — | `Level`, `Biome`, `UnstableFactor` |
-| `ArchipelagoRoute` | — | `Level`, `Biome`, `ArchipelagoId`, `IncludedRoutes[]`, `IsEpic`, `EpicRegionId` |
-| `GetRouteOfArchipelago` → `RoutesOfArchipelago` | — | เส้นทางที่เลือกได้ |
-| `WarpToNextArchipelagoRegion` | — | ไปเกาะถัดไปตามเส้นทาง |
-| `ArchipelagoRegionInfo` · `ArchipelagoTodos` · `CurrentArchipelagoTodos` | — | ภารกิจประจำหมู่เกาะ |
-
-หมู่เกาะ = ชุดเกาะที่ผูกกันด้วย `Level` + `Biome` + มี `ExpiresAt` (หมดอายุแล้วสร้างใหม่)
-ฝั่งเกม: `client/ExploreSystem.cs:391-413`, `client/Durango.UI/Archipelago.cs`
-
-**เกณฑ์ผ่าน:** หน้าสำรวจในเกมโชว์หมู่เกาะพร้อมเกาะย่อยและเส้นทาง เลือกแล้วไปได้จริง
-
-## เฟส 1.4 — Warphole (รูวาร์ป)
-
-| message | TypeCode | ใช้ตอน |
-|---|---:|---|
-| `GetWarpCosts` → `WarpCosts` | — | เปิดหน้าแผนที่ (`WorldMapGroup.cs:961`) |
-| `Warp` | — | วาร์ปไปเกาะ (`MapSystem.cs:435`) |
-| `WarpBack` / `GetWarpBackCost` | — | วาร์ปกลับ |
-| `WarpToPort` | — | วาร์ปไปท่าเรือ |
-| `WarpToUrbanRegion` / `WarpToPersonalRegion` | — | ไปเมือง / เกาะส่วนตัว (`ArtifactInteractions.cs:127,135`) |
-| `IsWarpholeAvailable` | — | เช็คก่อนวาร์ป (`WorldMapGroup.cs:1217`) |
-| `GetWarpCostToNextRegion` | — | ภารกิจหมู่เกาะ |
-| `RequestEpicWarp` | — | วาร์ปสายเนื้อเรื่อง (`QuestSystem.cs:159`) |
-
-ต่างจากล่องเรือ: วาร์ปใช้จากแผนที่โดยตรง ไม่ต้องเดินไปท่าเรือ แต่มีค่าใช้จ่าย
-
-## เฟส 1.5 — สำรวจ POI + ของเสริม
-
-- `ExplorePOI` (908) / `GetExploredPOIs` (902) / `ExploredPOIs` — เปิดพื้นที่บนแผนที่ (`POIUpdater.cs:214`)
-- `WarpAccelerator` ชุด (`Accelerate`, `ParticipateAcceleration`, `WarpAcceleratorInfo`,
-  `ReceiveAcceleratorRewards`) — ระบบเร่งวาร์ปแบบร่วมมือกัน
-- `TutorialBoat` ชุด (`AppearTutorialBoat`, `ParticipateTutorialBoat`,
-  `PutMaterialsIntoTutorialBoat`, `TutorialBoatSessions`) — เรือบทเรียนตอนเริ่มเกม
-- `CargoWarphole` ชุด — รูวาร์ปขนของของแคลน (ทำท้ายสุด ต้องมีแคลนก่อน)
-
-## ลำดับที่แนะนำภายในแพ็กเกจนี้
-
-```
-1.1 หลาย region  ──►  1.2 ท่าเรือ+ล่องเรือ  ──►  1.3 หมู่เกาะ  ──►  1.4 วาร์ป  ──►  1.5 POI/ของเสริม
-    (รื้อ Host)        (เล่นได้แล้ว!)          (มีเป้าหมาย)      (สะดวก)       (ครบ)
-```
-จบ 1.2 ก็ได้เกมที่ "ล่องเรือข้ามเกาะได้จริง" แล้ว — ที่เหลือคือทำให้ลึกขึ้น
+**เครื่องมือทดสอบ:** `client/BotBridge.cs` (mod — ⚠️ ต้องลบก่อนเปิดจริง) +
+`tools/bot.ps1` `tools/reload.ps1` `tools/regression.ps1`
 
 ---
 
-## แพ็กเกจถัดไป (หลังล่องเรือ)
+## 🔧 งานปัจจุบัน — กวาดบั๊กการแสดงผล
 
-| # | ระบบ | ขนาด | หมายเหตุ |
-|---|---|---|---|
-| 2 | สถานะตัวละคร | 4 msg | `GetStatistics`(2039) `Statistics`(2040) `GetStatusEffects`(2016) `Inventory`(110) `Equipments`(111) — ตอนนี้ hardcode ที่ `Core/Player.cs:403-412` |
-| 3 | เอาชีวิตรอด | tick | `Gauge` ถูก set ตอน init แล้วไม่แตะอีก (`Core/PlayerContext.cs:67-86`) หลอดไม่เดิน |
-| 4 | ต่อสู้/ล่า | 4 msg | `UseBattleAction`(3440) `ExitBattle`(3496) `Revive`(2101) `ReviveImmediately`(210201) |
-| 5 | คราฟต์จริง | 9 msg | ตอนนี้ตอบได้แค่รายการสูตร · ข้อมูล 720 สูตรโหลดไว้แล้ว |
-| 6 | สัตว์/สัตว์เลี้ยง | 25 msg | ก้อนใหญ่ · `data/assets/pet/pets_for_client` มี 74 รายการพร้อม |
-| 7 | สกิล/เลเวล | — | `PlayerLevel = 60` ตายตัว (`Core/PlayerContext.cs:51`) |
-| 8 | ที่ดิน/Estate | 6+ msg | `GetEstateLicenses` ตอบ struct ว่าง (`Core/Player.cs:230-233`) |
-| 9 | เควส | — | `GetQuests` ตอบ `Finished = true` หมด (`Core/Player.cs:296-311`) |
-| 10 | สังคม/ตลาด | หลายสิบ | ทำท้ายสุด · `MarketManager` ตอนนี้ราคา 0 ของไม่หมด |
+**รูปแบบบั๊กที่เจอซ้ำที่สุด:** เซิร์ฟไม่ส่ง/ส่งฟิลด์ผิด → ฝั่งเกมวาดไม่ออก **โดยไม่มี error เลย**
+ที่ร้ายที่สุดคือฟิลด์ชนิด `object` (`Item.Ext`, `ArtifactState.Cage`, …) — `Pack` เขียนแบบ
+`if/else if` **ไม่มี else** ⇒ เจอ `JObject` จากไฟล์เซฟแล้วไม่เขียนอะไรลงไปเลย
+⇒ ฟิลด์ที่เหลือ**เลื่อนตำแหน่งทั้งแพ็กเก็ต** ไม่ใช่แค่ช่องนั้นหาย
+
+### เสร็จแล้ว (commit `0d5284d`)
+
+| # | อาการ | จุดแก้ |
+|---|---|---|
+| 5 | **สิ่งปลูกสร้าง 43 ชนิดวางไม่ได้เลย** — `slot_id` ซ้ำ → `ArgumentException` ถูกกลืนเงียบ | `Cheats.SetDisplayParts` |
+| 6·11 | `ArtifactState.EntityId` ไม่เคยตั้ง → ข้อความอัปเดตถูกทิ้งเงียบ (หลอดเลือด/กรง/ปลูกไม่ขยับ) | `Cheats` · `ArtifactManager.RaiseStateUpdated` |
+| 13·17 | ป้ายชื่อโชว์ `Lv.0` ทุกหลัง · หลอดเลือดเป้าอ่าน 0/0 | `Cheats` · `BlueprintStore.MaxLevel` |
+| 12 | หน้ารายละเอียดไอเทมไม่โชว์ค่าโจมตี/ป้องกัน/พลังงานเลยสักบรรทัด | `Support/ItemPerformance.cs` (ใหม่) |
+| 1 | ธนูยิงแล้วไม่มีลูกศร ไม่มีเสียง | `PerformanceYaml.Weapon.Projectile` |
+| 4 | ความเร็วเดินไม่เปลี่ยนตามอาวุธ | `battle_speed` + `SendBaseMoveSpeed` |
+| 2 | หลอดสถานะของผู้เล่นคนอื่นค้างที่ค่าตอนเข้ามา | `UpdateSurvival` → `BroadCast` |
+| 3 | ตัวละครหญิงถอดเสื้อได้ร่างผู้ชาย | `Gateway.UpdateAppearPlayer` |
+
+### กำลังทำ
+
+| # | อาการ | จุดแก้ |
+|---|---|---|
+| 7 | `Item.Ext` จากไฟล์เซฟเป็น `JObject` ⇒ แพ็กเก็ตไอเทมเลื่อนช่องทั้งชิ้น — ยังไม่คลุมของในตู้/ประตูบ้าน/หุ่นโชว์ | `WarehouseStore.Import` · `WorldContext.NormalizeLoadedItems` |
+| 15 | **หลุมอุกกาบาตถูกยัดรวมกับรอยแยก** ⇒ วางเป็นแท่งเร่งวาร์ปผิดชนิดทั้งเกาะ | `TerrainPois.Craters` · `World.PlaceTerrainPois` · `Support/CrackTuning.cs` |
+| 9 | `ExploredPOIs` ตอบลิสต์ว่างเสมอ + ไม่มี handler `ExplorePOI`(908) ⇒ **แผนที่ไม่มีหมุดเลยสักอัน** | `Player.Map.cs` (ใหม่) |
+
+### ยังไม่ได้ทำ
+
+| # | อาการ | หมายเหตุ |
+|---|---|---|
+| 8 | ปลูกพืชแล้วโตเต็มที่ทันที — `ArtifactState.Farming` ไม่เคยถูกตั้ง | ต้องมี tick การเติบโต |
+| 10 | เกาะที่ generate เองส่ง `tile_set`/`color_set` ว่าง ⇒ **เกาะหิมะเรนเดอร์เป็นทุ่งหญ้า** | |
+| 14 | `Weather` ส่งเฉพาะตอนใช้ cheat ⇒ ไม่มีฝน/หิมะเลยตลอดเกม | |
+| 16 | `Item.RepairRequirement` เป็น null ⇒ **หน้าต่างซ่อมของไม่เปิด** | |
+| — | ไม่มี handler `GetDefoggedChunks`(204) ⇒ แผนที่ถูกหมอกบังหมด | เพิ่งเจอจาก log |
+
+### ค้างจากงานกรง (ตรวจสอบเชิงโต้แย้งแล้วว่าเป็นปัญหาจริง)
+
+- `Cheats.MakeItem` ไม่ตั้ง `Item.Ext = Reins` ⇒ หน้าต่างเลือกสัตว์ว่างเปล่า
+- `PerformanceYaml.Rein` ขาด `vehicle_entity_type` / `size`
+- `PetFood` ขาดฟิลด์ฝั่งการเลี้ยง
+- `Player.Inventory.HandleUseItemMsg` ยังไม่รองรับการประทับบังเหียน
+- `PetTuning.LifeSpanDaysBase` หน่วยไม่ตรง (วัน vs วินาที ที่ `TimedeltaFormatter`)
+
+---
+
+## ระบบถัดไป (ยังไม่ได้เริ่ม)
+
+| ระบบ | ขนาด | สถานะตอนนี้ |
+|---|---|---|
+| ที่ดิน / Estate | 6+ msg | `GetEstateLicenses` ตอบ struct ว่าง (`Core/Player.cs`) |
+| เควส | หลายสิบ | `GetQuests` ตอบ `Finished = true` หมด · ไม่มี handler `GetQuestState`(398132) |
+| แคลน / ปาร์ตี้ / เพื่อน / จดหมาย | หลายสิบ | ไม่มี handler `GetParty`(20001) `GetSocial`(2402) `GetMemos`(2439) `GetFactions`(3600) |
+| ตลาดจริง | หลายสิบ | `MarketManager` ราคา 0 · ของไม่หมด |
+| หมู่เกาะ (Archipelago) + วาร์ป | 30+ msg | เดินทางข้ามเกาะทำแล้ว แต่ยังไม่มีระบบหมู่เกาะ/เส้นทาง |
+| ระบบเปิดหลุมอุกกาบาต (ลงหินนำทาง) | ~5 msg | วางหลุมได้แล้ว ยังลงทุนเปิดไม่ได้ — ค่าอยู่ใน `Support/CrackTuning.cs` แล้ว |
+| ภารกิจ / สารานุกรม | — | ไม่มี handler `GetMissions`(3620) |
+
+**วิธีรู้ว่าขาดอะไรต่อ:** อ่าน log เซิร์ฟตอนเล่นจริง มันพิมพ์เองทุกครั้งที่เกมยิงของที่ยังไม่ได้ทำ
+```
+[conn] ไม่มี handler สำหรับ type=204 (bytes=3) — จะไม่เตือนซ้ำอีก
+```
+หาชื่อจากเลข: `grep -l "TypeCode = 204u" server/GameCode/Messages/*.cs` → `GetDefoggedChunks.cs`
 
 ---
 
@@ -189,9 +113,9 @@ hardcode `Region.Id = "1"` / `Region.TerrainId = "1"` — คือมีเก�
 
 | ของ | ที่อยู่ | ใช้ทำอะไร |
 |---|---|---|
-| `Messages/` 852 ตัว | `server/GameCode/Messages/` | สเปกโปรโตคอลครบ + `Pack`/`Unpack` พร้อมใช้ |
-| ตารางข้อมูลเกม | `server/data/assets/` | prototype 2,407 · natural 711 · artifact 560 · recipe 720 · pet 74 |
-| terrain 14 แผนที่ | `server/data/terrains/*.zip` | วัตถุดิบของระบบหลายเกาะ |
+| `Messages/` 989 ตัว | `server/GameCode/Messages/` | สเปกโปรโตคอลครบ + `Pack`/`Unpack` พร้อมใช้ |
+| ตารางข้อมูลเกม | `server/data/assets/` | prototype 2,407 · natural 711 · artifact 560 · recipe 720 · pet 74 · สัตว์ 214 ชนิดพร้อมชื่อท่าทาง |
+| terrain 18 แผนที่ | `server/data/terrains/*.zip` | วัตถุดิบของระบบหลายเกาะ |
 | ตัวโหลดข้อมูล | `server/Support/DataStore.cs` | `DataStore.Load(dataDir)` เรียกตอนบูตแล้ว |
 | broadcast หลายคน | `Core/World.cs:146` | `BroadCast<T>` — โครง multiplayer มีแล้ว |
 | entity appear | `Core/World.cs:118` `AddPlayer` | เห็นกันตอนเข้ามา |

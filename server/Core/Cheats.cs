@@ -57,6 +57,11 @@ public static class Cheats
             });
         }
         value.Tags = list.ToArray();
+
+        // เงื่อนไขการซ่อม — ไม่แนบ ⇒ ฝั่งเกมถือว่า "ซ่อมไม่ได้" แล้วหน้าต่างซ่อมไม่เปิดเลย
+        // (client/Durango.Logic.Item/ItemData.cs:107 IsRepairable) ดูเหตุผลเต็มที่ RepairTuning
+        value.RepairRequirement = RepairTuning.Of(itemPrototype, level);
+
         var list2 = new List<Performance>();
         if (PerformanceYaml.TryGetAddOnModelKey(prototypeId, out var modelKey))
         {

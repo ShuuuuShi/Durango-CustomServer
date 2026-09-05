@@ -5,6 +5,8 @@ using Durango.Terrain;
 using Shared.Building;
 using Messages;
 using UnityEngine;
+using Yaml.Util;
+using Durango.Utils.Extensions;
 
 namespace Durango.Online;
 
@@ -91,7 +93,8 @@ public class World
     public World(WorldContext context)
     {
         _context = context;
-        ArtifactManager = new ArtifactManager(_context.Artifacts, _context.ArtifactAddOns, _context.ArtifactMannequins);
+        ArtifactManager = new ArtifactManager(_context.Artifacts, _context.ArtifactAddOns,
+            _context.ArtifactMannequins, _context.Plantings);
         ArtifactManager.ArtifactStateUpdated += ArtifactManager_ArtifactStateUpdated;
         ArtifactManager.ArtifactDisplayUpdated += ArtifactManager_ArtifactDisplayUpdated;
         _addedNatural = _context.AddedNatural;
@@ -126,19 +129,27 @@ public class World
             return;
         }
 
-        // (id, blueprint, entity type, ขนาด footprint) — ชนิดจาก data/assets/entity_types/artifact.json
+        // (id, ชนิด, ขนาด footprint, ช่อง) — ชนิดจาก data/assets/entity_types/artifact.json
+        // ขนาดอ่านจากไฟล์เดียวกัน (ฟิลด์ size) ไม่ฝังเลขไว้ในโค้ด: ท่าเรือ 3x3 · รูวาร์ป 6x6 ·
+        // แท่งเร่งวาร์ป 4x4 · หลุมอุกกาบาต 4x4 — ตรงกับที่เคยฝังไว้ทุกตัว แต่ถ้าข้อมูลเปลี่ยนก็ตามได้เอง
         var wanted = new List<(string Id, ushort Type, Point2 Size, Point2 Tile)>();
         for (int i = 0; i < pois.PortPoints.Count; i++)
         {
-            wanted.Add(($"poi_port_{i}", (ushort)7001, new Point2(3, 3), pois.PortPoints[i]));   // dock 항구
+            wanted.Add(($"poi_port_{i}", (ushort)7001, SizeOf(7001, 3), pois.PortPoints[i]));       // dock 항구
         }
         for (int i = 0; i < pois.Warpholes.Count; i++)
         {
-            wanted.Add(($"poi_warphole_{i}", (ushort)9450, new Point2(6, 6), pois.Warpholes[i])); // neutral_warphole
+            wanted.Add(($"poi_warphole_{i}", (ushort)9450, SizeOf(9450, 6), pois.Warpholes[i]));    // neutral_warphole 중립 워프홀
         }
         for (int i = 0; i < pois.Rifts.Count; i++)
         {
-            wanted.Add(($"poi_rift_{i}", (ushort)6282, new Point2(4, 4), pois.Rifts[i]));        // warp_accelerator
+            wanted.Add(($"poi_rift_{i}", (ushort)6282, SizeOf(6282, 4), pois.Rifts[i]));            // warp_accelerator 균열
+        }
+        // หลุมอุกกาบาต — เดิมถูกยัดรวมกับ Rifts จึงวางเป็นแท่งเร่งวาร์ปผิดชนิดมาตลอด
+        // (เหตุผลเต็มที่ Support/TerrainPois.Craters)
+        for (int i = 0; i < pois.Craters.Count; i++)
+        {
+            wanted.Add(($"poi_crater_{i}", (ushort)7037, SizeOf(7037, 4), pois.Craters[i]));        // crack_01 닫힌 크레이터
         }
 
         int placed = 0;
@@ -167,7 +178,9 @@ public class World
             // id ต้องเป็นของเรา (คงที่ตามลำดับในไฟล์) ไม่ใช่ Guid สุ่มที่ตัวสร้างแจกมา
             artifact.EntityId = id;
             artifact.Display.EntityId = id;
+            artifact.States.EntityId = id;
             artifact.IsAlive = true;
+            if (type == 7037) artifact.States.Crack = MakeClosedCrack(artifact.States.Level);
             ArtifactManager.AddArtifact(artifact);
             if (addons.HasValue)
             {
@@ -179,8 +192,48 @@ public class World
         if (placed > 0)
         {
             Save();
-            Console.WriteLine($"[world] วางจุดสำคัญของเกาะ {placed} จุด (ท่าเรือ {pois.PortPoints.Count})");
+            Console.WriteLine($"[world] วางจุดสำคัญของเกาะ {placed} จุด " +
+                              $"(ท่าเรือ {pois.PortPoints.Count} · รูวาร์ป {pois.Warpholes.Count} · " +
+                              $"รอยแยก {pois.Rifts.Count} · หลุมอุกกาบาต {pois.Craters.Count})");
         }
+    }
+
+    /// <summary>ขนาด footprint จาก entity_types/artifact.json — ถอยไปค่าสำรองถ้าไฟล์ไม่มีชนิดนี้</summary>
+    private static Point2 SizeOf(int entityType, int fallback)
+    {
+        int[] size = SingletonDict<int, Yaml.ArtifactPrototype>.Instance?.Get(entityType)?.size;
+        return size is { Length: >= 2 } && size[0] > 0 && size[1] > 0
+            ? new Point2(size[0], size[1])
+            : new Point2(fallback, fallback);
+    }
+
+    /// <summary>
+    /// สถานะเริ่มต้นของหลุมอุกกาบาตที่ "ยังปิดอยู่" — ยังไม่เปิดใช้ ยังไม่มีใครลงหินนำทาง
+    ///
+    /// ⚠️ ไม่ตั้งช่องนี้ = ฝั่งเกมไม่นับว่าเป็นจุดสำคัญเลย เพราะ POIUpdater.cs:122 คัดด้วย
+    /// <c>artifact.ArtifactState.Crack.HasValue</c> ⇒ ไม่มีหมุดบนแผนที่ ไม่มีป้ายข้อมูล
+    ///
+    /// ค่าที่ใส่มาจาก data/assets/constants.json → crack ทั้งหมด ไม่ได้ตั้งเอง:
+    ///   required_investment = "max(1, int(level * 0.2))"   (คิดที่เลเวลของหลุม)
+    /// ส่วน PotentialBiocoms (รายชื่อ "군락ที่วาร์ปมาได้") ปล่อย null เพราะตารางชื่อของ biocom
+    /// ไม่ได้อยู่ในไฟล์ที่สกัดออกมา — ฝั่งเกมเจอ null แล้วซ่อนหัวข้อนั้นไปเอง
+    /// (client/ArtifactInfoMainWidget.cs:610-612) ดีกว่าเดาชื่อขึ้นมาเอง
+    /// </summary>
+    private static Crack MakeClosedCrack(byte level)
+    {
+        var vars = new System.Collections.Generic.Dictionary<string, double> { ["level"] = level };
+        int required = StatFormula.TryEval(CrackTuning.RequiredInvestment, vars, out double value)
+            ? Math.Max(1, (int)value)
+            : 1;
+        return new Crack
+        {
+            ActivatedSince = null,      // ยังไม่เปิด
+            ActivatedUntil = null,
+            CurrentInvestment = 0,
+            RequiredInvestment = required,
+            InvestmentUnit = 1,
+            PotentialBiocoms = null
+        };
     }
 
     public void Process()
@@ -200,7 +253,38 @@ public class World
 
         // สัตว์เดินเล่น — ต้องอยู่นอกลูปผู้เล่น เพราะเป็นเรื่องของสัตว์ ไม่ใช่ของใครคนใดคนหนึ่ง
         // (ถ้าไม่มีใครอยู่บนเกาะก็ไม่ต้องเดิน จะได้ไม่เปลืองแรงเปล่า)
-        if (_players.Count > 0) AnimalManager?.Process(Gauge.CurrentTime, BroadCast);
+        if (_players.Count > 0)
+        {
+            AnimalManager?.Process(Gauge.CurrentTime, BroadCast);
+            ProcessWeather(Gauge.CurrentTime);
+            ArtifactManager?.ProcessFarming(Gauge.CurrentTime);
+        }
+    }
+
+    // ── สภาพอากาศ ───────────────────────────────────────────────────────────────────
+
+    private IReadOnlyList<string> _weatherSequence;
+    private int _weatherStep = -1;
+    private double _nextWeatherAt;
+
+    /// <summary>
+    /// หมุนสภาพอากาศของเกาะตามลำดับของภูมิอากาศเกาะนี้
+    ///
+    /// ⚠️ ไม่มีตัวนี้ = <c>Weather</c> ว่างตลอด ⇒ <c>SendInitialState</c> ข้ามการส่งไปเลย
+    /// ⇒ ฝั่งเกมไม่เคยได้รับ <c>Weather</c>(2028) ⇒ **ท้องฟ้าแจ่มใสตลอดกาลทุกเกาะ**
+    /// ที่มาของลำดับกับจังหวะ ดูที่ <see cref="WeatherTuning"/> (ชื่อสถานการณ์เป็นข้อมูลจริง
+    /// ของ NEXON · ลำดับกับจังหวะเป็นของเรา เพราะไฟล์ไม่ได้บอกไว้)
+    /// </summary>
+    private void ProcessWeather(double now)
+    {
+        _weatherSequence ??= WeatherTuning.SequenceFor(
+            RegionCatalog.GetTemplate(_terrainData.Info?.region_template)?.Weather);
+        if (_weatherSequence.Count == 0) return;
+        if (_weatherStep >= 0 && now < _nextWeatherAt) return;
+
+        _weatherStep = (_weatherStep + 1) % _weatherSequence.Count;
+        _nextWeatherAt = now + WeatherTuning.CycleSeconds;
+        ChangeWeather(_weatherSequence[_weatherStep]);
     }
 
     public void Stop()
@@ -488,6 +572,28 @@ public class World
 
     public byte[] GetChunkLandmark(Point2 pos) => _chunkData[pos.x, pos.y].Landmarks;
 
+    /// <summary>
+    /// ไบโอมของช่องนั้น — อ่านจากตาราง whole.biomes ของ terrain โดยตรง
+    ///
+    /// การจัดเรียงเป็น <c>x + y * width</c> ยืนยันจาก <see cref="CopyChunk"/> ที่ใช้สูตรเดียวกัน
+    /// (ตัวนั้นส่งข้อมูลไบโอมให้ฝั่งเกมวาดพื้นอยู่แล้ว ⇒ ถ้าสูตรผิด พื้นดินจะเพี้ยนตั้งแต่แรก)
+    /// </summary>
+    public Shared.Region.Biome BiomeAt(Point2 tile)
+    {
+        byte[] biomes = _terrainData.Biomes;
+        if (biomes == null || biomes.Length == 0) return Shared.Region.Biome.Invalid;
+
+        int width = (int)Math.Sqrt(biomes.Length);
+        if (width <= 0) return Shared.Region.Biome.Invalid;
+        int x = Math.Clamp(tile.x, 0, width - 1);
+        int y = Math.Clamp(tile.y, 0, width - 1);
+
+        int index = x + y * width;
+        return index >= 0 && index < biomes.Length
+            ? (Shared.Region.Biome)biomes[index]
+            : Shared.Region.Biome.Invalid;
+    }
+
     private Chunk CreateChunk(int chunkX, int chunkY)
     {
         Chunk result = default;
@@ -500,8 +606,16 @@ public class World
     public void ChangeWeather(string weather)
     {
         if (Weather == weather) return;
+        // ⚠️ ชื่อนอกชุดที่ฝั่งเกมรู้จักทำให้มัน Debug.LogError แล้วค้างที่ Weather.Invalid
+        // (client/Durango.Environment/WeatherManager.cs:148-150) — กันไว้ที่ต้นทางดีกว่า
+        if (!WeatherTuning.IsKnown(weather))
+        {
+            Console.WriteLine($"[อากาศ] ⚠️ ไม่รู้จักสภาพอากาศ '{weather}' — ไม่เปลี่ยน");
+            return;
+        }
         Weather = weather;
         BroadCast(new Weather { _Weather = weather });
+        Console.WriteLine($"[อากาศ] {TerrainId} → {weather}");
     }
 
     public List<Pet> GetGrazedPets() => _context.GrazedPetList;

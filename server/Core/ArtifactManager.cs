@@ -19,6 +19,9 @@ public class ArtifactManager
 
     private readonly Dictionary<string, Messages.Mannequin> _mannequins;
 
+    /// <summary>แปลง → prototype ของเมล็ดที่ปลูกไว้ (ดู WorldContext.Plantings)</summary>
+    private readonly Dictionary<string, string> _plantings;
+
     public static readonly string[] AddOnTags = { "door", "window", "wall_deco", "empty_door" };
 
     public event Action<ArtifactDisplay> ArtifactDisplayUpdated;
@@ -26,11 +29,12 @@ public class ArtifactManager
     public event Action<ArtifactState> ArtifactStateUpdated;
 
     public ArtifactManager(Dictionary<string, AppearArtifact> artifacts, Dictionary<string, AddOns> addons,
-        Dictionary<string, Messages.Mannequin> mannequins)
+        Dictionary<string, Messages.Mannequin> mannequins, Dictionary<string, string> plantings = null)
     {
         _artifacts = artifacts;
         _addOns = addons;
         _mannequins = mannequins;
+        _plantings = plantings ?? new Dictionary<string, string>();
 
         // โลกที่โหลดจากไฟล์เซฟมีสิ่งปลูกสร้างเก่าที่ยังไม่มีแท็ก (เซฟก่อนหน้านี้ไม่เคยเก็บ)
         // ⇒ เติมให้ตอนเปิดโลก ไม่งั้นโต๊ะที่สร้างไว้ก่อนจะคราฟต์ไม่ได้ตลอดไป
@@ -171,16 +175,148 @@ public class ArtifactManager
         return true;
     }
 
-    public void SeedPlant(string entityId, string prototypeId)
+    /// <summary>
+    /// ปลูกเมล็ดลงแปลง — ตั้งทั้ง "หน้าตา" และ "สถานะการเติบโต"
+    ///
+    /// ⚠️ ต้นฉบับที่พอร์ตมา (client/Durango.Online/ArtifactManager.cs:80) ตั้งแค่
+    /// <c>Display.Crop = grown_looks[…]</c> ⇒ **ปลูปแล้วโตเต็มที่ทันทีในเฟรมเดียว**
+    /// และ <c>ArtifactState.Farming</c> ไม่เคยถูกตั้ง ⇒ ฝั่งเกม:
+    ///   • <c>Farm.UpdateGrowTimer</c> (client/Farm.cs:159-165) return ทันที = ไม่มีหลอดเวลาโต
+    ///   • <c>Farm.GetName()</c> คืน null = แปลงไม่มีชื่อพืช
+    ///   • <c>ArtifactInfoMainWidget.FillFarming</c> (:512-515) return = ป้ายข้อมูลไม่มีอะไรเลย
+    ///     (ไม่มีบรรทัด 작물 / 수확까지 / 필요 물의 양 / 기후 적합성 / 비옥도 / 퇴비)
+    ///   • เมนู รดน้ำ/ใส่ปุ๋ย/เร่งโต ทั้งสามตัวเช็ค Farming.HasValue ก่อน ⇒ กดไม่ได้
+    /// นั่นคือพฤติกรรมของ "เซิร์ฟในตัวโหมดแซนด์บ็อกซ์" ไม่ใช่ของเซิร์ฟจริง
+    ///
+    /// ค่าทุกตัวมาจาก <c>data/assets/crops.json</c> ของ NEXON — ไม่มีตัวไหนตั้งเอง
+    /// </summary>
+    public void SeedPlant(string entityId, string prototypeId, int level, Shared.Region.Biome biome)
     {
         Crop crop = CropYaml.Get(prototypeId);
-        if (crop != null && _artifacts.TryGetValue(entityId, out var value))
+        if (crop == null || !_artifacts.TryGetValue(entityId, out var value)) return;
+
+        double now = Gauge.CurrentTime;
+        var vars = new Dictionary<string, double> { ["level"] = level };
+        double seconds = StatFormula.TryEval(crop.GrowsUntil, vars, out double evaluated) && evaluated > 0
+            ? evaluated
+            : 0.0;
+
+        value.States.Farming = new Farming
         {
-            value.Display.Crop = crop.GrownLooks[KUtilityNx.GetRandomHash(value.Tile.x, value.Tile.y) % crop.GrownLooks.Length];
-            _artifacts[entityId] = value;
-            ArtifactDisplayUpdated?.Invoke(value.Display);
+            // ชื่อที่โชว์บนป้าย = ชื่อของ "ผลผลิต" ไม่ใช่ของเมล็ด (ป้ายเขียนว่า 작물 = พืชผล)
+            PlantName = CropDisplayName(crop, prototypeId),
+            PlantedAt = now,
+            GrowsUntil = now + seconds,
+            // Vector2(น้ำที่รดแล้ว, น้ำที่ต้องการ) — ฝั่งเกมคิดส่วนต่างเอง (ArtifactInteractions.cs:980)
+            Water = new UnityEngine.Vector2(0f, crop.RequiredWater),
+            BiomeFitness = FitnessOf(crop.PreferenceLand, biome),
+            FertilizedRatio = 0f,
+            FertilizerAmount = 0f,
+            RequiredFertilizer = crop.RequiredFertilizer,
+            AppliedCropBooster = null,
+            BoosterLevel = 0,
+            // ค่าเร่งโตด้วยเพชร — ปล่อย null ฝั่งเกมจะไม่โชว์ตัวเลือกนั้น
+            // (client/ArtifactInteractions.cs:1051-1053 return ทันทีถ้า null) ยังไม่มีระบบเพชร
+            RapidGrowthCost = null
+        };
+
+        // ต้นอ่อนก่อน แล้วค่อยสลับเป็นต้นโตตอนครบเวลา (ดู ProcessFarming)
+        // ถ้าไฟล์ไม่มีโมเดลต้นอ่อน ก็ใช้ต้นโตไปเลยดีกว่าปล่อยว่าง (ว่าง = ไม่มีอะไรบนแปลง)
+        value.Display.Crop = seconds > 0
+            ? crop.GrowingLook ?? crop.GrownLookAt(value.Tile.x, value.Tile.y)
+            : crop.GrownLookAt(value.Tile.x, value.Tile.y);
+
+        _plantings[entityId] = prototypeId;
+        _artifacts[entityId] = value;
+        ArtifactDisplayUpdated?.Invoke(value.Display);
+        RaiseStateUpdated(entityId, value.States);
+    }
+
+    /// <summary>
+    /// สลับต้นอ่อน → ต้นโตเมื่อครบเวลา · เรียกจาก World.Process
+    ///
+    /// เช็คจาก <c>Display.Crop</c> เทียบกับโมเดลต้นอ่อนของพืชชนิดนั้น จึงไม่ต้องเก็บธงเพิ่ม
+    /// และปลอดภัยเมื่อโหลดจากไฟล์เซฟ (แปลงที่ปลูกค้างไว้ก่อนรีสตาร์ตจะโตต่อเองถูกต้อง)
+    /// </summary>
+    public void ProcessFarming(double now)
+    {
+        List<string> ripened = null;
+        foreach (var pair in _artifacts)
+        {
+            AppearArtifact artifact = pair.Value;
+            if (artifact.States.Farming is not { } farming) continue;
+            if (farming.GrowsUntil <= 0.0 || now < farming.GrowsUntil) continue;
+
+            if (!_plantings.TryGetValue(pair.Key, out string seed)) continue;
+            Crop crop = CropYaml.Get(seed);
+            string grown = crop?.GrownLookAt(artifact.Tile.x, artifact.Tile.y);
+            if (grown == null || artifact.Display.Crop == grown) continue;
+
+            (ripened ??= new List<string>()).Add(pair.Key);
+        }
+        if (ripened == null) return;
+
+        foreach (string entityId in ripened)
+        {
+            AppearArtifact artifact = _artifacts[entityId];
+            Crop crop = CropYaml.Get(_plantings[entityId]);
+            artifact.Display.Crop = crop.GrownLookAt(artifact.Tile.x, artifact.Tile.y);
+            Console.WriteLine($"[ปลูก] {entityId[..Math.Min(8, entityId.Length)]} " +
+                              $"{artifact.States.Farming?.PlantName} โตเต็มที่แล้ว");
+            _artifacts[entityId] = artifact;
+            ArtifactDisplayUpdated?.Invoke(artifact.Display);
         }
     }
+
+    /// <summary>
+    /// ชื่อพืชที่โชว์บนป้าย — ใช้ชื่อของผลผลิต (<c>grows_to</c>) ถ้าหาได้
+    /// ถอยไปชื่อเมล็ดเมื่อไม่มี prototype ของผลผลิตในตาราง
+    /// </summary>
+    private static string CropDisplayName(Crop crop, string seedPrototypeId)
+    {
+        Prototype product = string.IsNullOrEmpty(crop.GrowsTo)
+            ? null
+            : PrototypeYaml.GetItemPrototype(crop.GrowsTo);
+        string name = product?.Name?.ToString();
+        if (!string.IsNullOrEmpty(name)) return name;
+
+        return PrototypeYaml.GetItemPrototype(seedPrototypeId)?.Name?.ToString() ?? seedPrototypeId;
+    }
+
+    /// <summary>
+    /// ความเหมาะสมของไบโอม — <c>preference_land</c> ในไฟล์เป็นชื่อไบโอมตรง ๆ
+    /// (grassland · temperate_forest · tropical_forest · tundra · desert)
+    ///
+    /// ระดับที่ฝั่งเกมมีคือ Bad/Normal/Good/Excelent (Shared.Etc.Fitness)
+    /// **การจับคู่ระดับเป็นของเรา** เพราะไฟล์บอกแค่ไบโอมที่ชอบ ไม่ได้บอกตารางคะแนน:
+    ///   ตรงกับที่ชอบ → Excelent · ไบโอมบกอื่น → Normal · หาด/น้ำ/ลาวา → Bad
+    /// </summary>
+    private static Shared.Etc.Fitness FitnessOf(string preferenceLand, Shared.Region.Biome biome)
+    {
+        if (biome is Shared.Region.Biome.PebbleBeach or Shared.Region.Biome.SandBeach
+            or Shared.Region.Biome.ColdOcean or Shared.Region.Biome.WarmOcean
+            or Shared.Region.Biome.River or Shared.Region.Biome.Lake or Shared.Region.Biome.Lava)
+        {
+            return Shared.Etc.Fitness.Bad;
+        }
+        return BiomeNameOf(biome) == preferenceLand
+            ? Shared.Etc.Fitness.Excelent
+            : Shared.Etc.Fitness.Normal;
+    }
+
+    /// <summary>ชื่อไบโอมแบบที่ crops.json ใช้ — ตรงกับ info.yml ของ terrain (lake_biome ฯลฯ)</summary>
+    private static string BiomeNameOf(Shared.Region.Biome biome) => biome switch
+    {
+        Shared.Region.Biome.TemperateForest => "temperate_forest",
+        Shared.Region.Biome.TropicalForest => "tropical_forest",
+        Shared.Region.Biome.Desert => "desert",
+        Shared.Region.Biome.Tundra => "tundra",
+        Shared.Region.Biome.SnowField => "snowfield",
+        Shared.Region.Biome.Grassland => "grassland",
+        Shared.Region.Biome.SwampMud => "swamp_mud",
+        Shared.Region.Biome.Volcanic => "volcanic",
+        _ => null
+    };
 
     public void ChargeEffect(string entityId)
     {

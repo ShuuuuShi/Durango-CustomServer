@@ -326,41 +326,7 @@ public partial class Player
                 DailyExchangedPoints = new Dictionary<float, float>()
             }, header.Seq);
         });
-        // จำนวนจุดสำคัญของเกาะ + จุดที่สำรวจแล้ว — client/Durango.UI/RouteInfoTooltip.cs:78-79
-        // ⚠️ Tooltip.Show() ถูกเรียกจาก callback ของสองตัวนี้เท่านั้น (RouteInfoTooltip.cs:147-152)
-        // ไม่ตอบ = tooltip ไม่โผล่ = ไม่มีปุ่ม "ออกเรือ" ให้กด = เดินทางไม่ได้เลย โดยไม่มี error
-        _connection.Recv(delegate(GetPOICount msg, PacketHeader header)
-        {
-            // นับจากไฟล์ terrain ตรง ๆ ไม่ต้องเปิดโลกของเกาะนั้น (เปลืองหน่วยความจำโดยใช่เหตุ
-            // เพราะ tooltip แค่ขอตัวเลขไปโชว์) — pois.yml คือแหล่งเดียวกับที่ World ใช้วางจริง
-            TerrainPois pois = null;
-            try
-            {
-                pois = TerrainLoader.Load(string.IsNullOrEmpty(msg.RegionId) ? _world.TerrainId : msg.RegionId)?.Pois;
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"[sail] อ่าน POI ของ {msg.RegionId} ไม่ได้: {e.Message}");
-            }
-            Send(new POICount
-            {
-                PortCount = (byte)(pois?.PortPoints.Count ?? 0),
-                WarpholeCount = (byte)(pois?.Warpholes.Count ?? 0),
-                RiftCount = (byte)(pois?.Rifts.Count ?? 0),
-                CraterCount = 0
-            }, header.Seq);
-        });
-        _connection.Recv(delegate(GetExploredPOIs msg, PacketHeader header)
-        {
-            // ⚠️ ต้องตอบแบบ ReplyOf ตรง seq เท่านั้น — ถ้าส่ง ReplyOf=0 จะตกไป global handler
-            // (client/MapSystem.cs:166,247-256) แล้วไปวาด indicator ของเกาะปลายทางทับแผนที่เกาะปัจจุบัน
-            Send(new ExploredPOIs
-            {
-                POIs = Array.Empty<PointOfInterest>(),
-                FullCountRewarded = false,
-                IsOpenedMap = false
-            }, header.Seq);
-        });
+        // จุดสำคัญบนแผนที่ (GetPOICount / GetExploredPOIs / ExplorePOI) → Core/Player.Map.cs
         // ข้อมูลสิ่งที่ค้นพบบนเกาะ — client/Durango.UI/ArchipelagoDiscoveryInfos.cs:75-113
         // ⚠️ ไม่มี .On<Error> fallback ⇒ ไม่ตอบ = ไอคอนโหลดหมุนค้างถาวร
         // ⚠️ TemplateId ต้อง echo กลับให้ตรงกับที่ขอ เพราะ client ใช้เป็น cache key (MapSystem.cs:670-674)
@@ -1171,11 +1137,14 @@ public partial class Player
     {
         foreach (Item inventoryItem in _context.InventoryItems)
         {
-            if (inventoryItem.Id == msg.SeedItemId)
-            {
-                _world.ArtifactManager.SeedPlant(msg.EntityId, inventoryItem.Prototype);
-                break;
-            }
+            if (inventoryItem.Id != msg.SeedItemId) continue;
+
+            // เลเวลของเมล็ดคุมเวลาปลูก (crops.json → grows_until เป็นสูตรของ level)
+            // และไบโอมของช่องคุมความเหมาะสมของภูมิอากาศบนป้ายข้อมูล
+            Point2 tile = _world.ArtifactManager.Get(msg.EntityId)?.Tile ?? default;
+            _world.ArtifactManager.SeedPlant(msg.EntityId, inventoryItem.Prototype,
+                inventoryItem.Level, _world.BiomeAt(tile));
+            break;
         }
     }
 

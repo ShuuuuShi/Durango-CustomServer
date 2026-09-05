@@ -29,10 +29,24 @@ public class TerrainPois
     /// <summary>รูวาร์ปกลาง — neutral_warphole (9450, 6x6)</summary>
     public List<Point2> Warpholes { get; } = new();
 
-    /// <summary>รอยแยก — warp_accelerator (6282, 4x4)</summary>
+    /// <summary>รอยแยก — warp_accelerator (6282) ชื่อในเกม "균열"</summary>
     public List<Point2> Rifts { get; } = new();
 
-    public bool IsEmpty => PortPoints.Count == 0 && Warpholes.Count == 0 && Rifts.Count == 0;
+    /// <summary>
+    /// หลุมอุกกาบาต — crack_01 (7037) ชื่อในเกม "닫힌 크레이터" (หลุมที่ยังปิดอยู่)
+    ///
+    /// ⚠️ **คนละอย่างกับ Rifts** ถึงจะอยู่ไฟล์เดียวกัน — เดิมโค้ดนี้ยัดสองคีย์ลงลิสต์เดียว
+    /// ⇒ หลุมอุกกาบาตทุกหลุมโผล่มาเป็นแท่งเร่งวาร์ป (โมเดล crack_02) ผิดหมด
+    /// และฝั่งเกมแยกสองอย่างนี้ชัดเจน:
+    ///   • crack_01 มี component "Crack" ⇒ POIUpdater.cs:122 อ่าน ArtifactState.Crack
+    ///     แล้วนับเป็น PointOfInterest.Crack (หมุดแผนที่ icon_map_poi_crack)
+    ///   • warp_accelerator ⇒ POIUpdater.cs:156 นับเป็น PointOfInterest.Rift (ไม่มีหมุด)
+    /// ⇒ วางผิดชนิด = หมุดหลุมอุกกาบาตหายจากแผนที่ทั้งเกาะ และ POICount.CraterCount เป็น 0 ตลอด
+    /// </summary>
+    public List<Point2> Craters { get; } = new();
+
+    public bool IsEmpty => PortPoints.Count == 0 && Warpholes.Count == 0
+                        && Rifts.Count == 0 && Craters.Count == 0;
 
     /// <summary>
     /// อ่าน pois.yml — คืน null เมื่อไฟล์ว่างหรืออ่านไม่ได้ (เกาะที่ generate เองบางลูกไม่มีไฟล์นี้)
@@ -76,7 +90,8 @@ public class TerrainPois
                     {
                         "port_points" => pois.PortPoints,
                         "warpholes" => pois.Warpholes,
-                        "rifts" or "craters" => pois.Rifts,
+                        "rifts" => pois.Rifts,
+                        "craters" => pois.Craters,
                         _ => null
                     };
                     // "คีย์: {}" หรือ "คีย์: []" = ว่าง ไม่มีรายการตามมา

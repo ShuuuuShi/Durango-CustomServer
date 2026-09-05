@@ -119,6 +119,8 @@ function Start-Game {
     $token = [guid]::NewGuid().ToString('N')
     Set-Content -Path (Join-Path $gameDir 'launcher.session') -Value $token -Encoding ascii -NoNewline
     $env:DINOWORLD_LAUNCH = $token
+    # BotBridge ต้องเปิดเอง (ชุดแจกจะได้ไม่มีช่องโกง) — ตั้ง env ให้เฉพาะตอนเทส
+    $env:DURANGO_BOT = '1'
     Start-Process -FilePath $gameExe -WorkingDirectory $gameDir
     Say "  เปิดเกมแล้ว (game\server.txt ต้องชี้ 127.0.0.1:$GatewayPort)" 'Green'
 }

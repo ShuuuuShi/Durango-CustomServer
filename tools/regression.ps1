@@ -64,6 +64,8 @@ if (-not $SkipRestart) {
     }
     Get-Process Durango -ErrorAction SilentlyContinue | Stop-Process -Confirm:$false
     Start-Sleep -Seconds 3
+    # BotBridge ต้องเปิดเอง (ชุดแจกจะได้ไม่มีช่องโกง) — ตั้ง env ให้เฉพาะตอนเทส
+    $env:DURANGO_BOT = '1'
     Start-Process -FilePath (Join-Path $Root 'game\Durango.exe') -WorkingDirectory (Join-Path $Root 'game')
     Start-Sleep -Seconds 50
 }

@@ -47,6 +47,7 @@ public static class TerrainLoader
 
     private static void LoadZip(string terrainId, TerrainData data)
     {
+        string theme = null;
         data.Biomes = null;
         data.Ocean = null;
         data.Rivers = null;
@@ -73,12 +74,57 @@ public static class TerrainLoader
                 else if (CheckEntry(entry, "pois.yml")) data.Pois = TerrainPois.Parse(LoadEntry(entry));
                 // [5 ก.ย. 2026] herds.yml บอกจุดที่ฝูงสัตว์เกิด — คู่กับ region_templates.json ที่บอกชนิด
                 else if (CheckEntry(entry, "herds.yml")) data.Herds = TerrainHerds.Parse(LoadEntry(entry));
+                // config.yml มีเฉพาะเกาะที่ tools/gen-island.py สร้าง — ใช้ธีมเติม tile_set ให้ (ดู FillTileSet)
+                else if (CheckEntry(entry, "config.yml")) theme = ReadTheme(LoadEntry(entry));
             }
+            FillTileSet(terrainId, theme, data.Info);
         }
         catch (Exception e)
         {
             Console.WriteLine($"[terrain] อ่าน {path} ไม่สำเร็จ: {e.Message}");
         }
+    }
+
+    /// <summary>ธีมของตัวสร้างเกาะ — <c>config.yml</c> → <c>theme</c> (null ถ้าไม่มี/อ่านไม่ได้)</summary>
+    private static string ReadTheme(byte[] bytes)
+    {
+        try
+        {
+            return (string)Newtonsoft.Json.Linq.JObject.Parse(
+                System.Text.Encoding.UTF8.GetString(bytes))["theme"];
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// เติม <c>tile_set</c>/<c>color_set</c> ให้เกาะที่ไฟล์ปล่อยว่างไว้
+    ///
+    /// ⚠️ ค่าว่าง = ตัวเกมหาชุดสีของเกาะไม่เจอ แล้วใช้ค่าเริ่มต้นแทนทั้งหมด
+    /// ⇒ **เกาะหิมะเรนเดอร์เป็นทุ่งหญ้า · ทะเลทรายก็เขียว** โดยไม่มี error ให้เห็น
+    /// (เหตุผลเต็ม + ที่มาของรายชื่อ ดูที่ <see cref="TileSets"/>)
+    ///
+    /// เขียนทับเฉพาะตอนที่ไฟล์ปล่อยว่าง — เกาะที่ NEXON ใส่ค่ามาแล้วไม่แตะ
+    /// </summary>
+    private static void FillTileSet(string terrainId, string theme, TerrainInfoJson info)
+    {
+        if (info == null) return;
+        bool needTile = string.IsNullOrEmpty(info.tile_set);
+        bool needColor = string.IsNullOrEmpty(info.color_set);
+        if (!needTile && !needColor) return;
+
+        string guess = TileSets.Guess(terrainId, theme);
+        if (!TileSets.IsKnown(guess))
+        {
+            Console.WriteLine($"[terrain] ⚠️ {terrainId} ไม่มี tile_set และเดาไม่ได้ (theme={theme ?? "-"}) " +
+                              "— เกาะจะใช้โทนสีเริ่มต้น");
+            return;
+        }
+        if (needTile) info.tile_set = guess;
+        if (needColor) info.color_set = guess;
+        Console.WriteLine($"[terrain] {terrainId}: เติม tile_set/color_set = {guess}");
     }
 
     private static string ResolvePath(string terrainId)

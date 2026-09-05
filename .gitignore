@@ -7,6 +7,9 @@
 game/
 game-backup/
 
+# ชุดแพ็กไปรัน/แจก (สร้างใหม่ได้ด้วย tools/pack-vps.ps1)
+dist/
+
 # สถานะตอนรัน
 **/logs/
 **/AppData*/

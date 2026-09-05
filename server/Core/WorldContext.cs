@@ -42,6 +42,16 @@ public class WorldContext
     [JsonProperty("persistent")]
     public bool Persistent;
 
+    /// <summary>
+    /// [5 ก.ย. 2026] แปลงไหนปลูกเมล็ดอะไร — entity ของแปลง → prototype ของเมล็ด
+    ///
+    /// ต้องจำแยกเพราะ <c>Messages.Farming</c> ไม่มีช่องเก็บชนิดเมล็ด (มีแต่ชื่อที่โชว์)
+    /// แล้วตอนพืชโตเต็มที่ เซิร์ฟต้องรู้ว่าจะสลับเป็นโมเดลชุดไหนของ crops.json
+    /// เก็บลงไฟล์เกาะเพราะแปลงเป็นของโลก ไม่ใช่ของคนปลูก (คนอื่นเดินผ่านต้องเห็นเหมือนกัน)
+    /// </summary>
+    [JsonProperty("plantings", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, string> Plantings;
+
     // ของในตู้/คลังของสิ่งปลูกสร้างบนเกาะนี้ (ดู Player.WarehouseStore)
     // เดิมอยู่ในหน่วยความจำอย่างเดียว รีสตาร์ตแล้วของหายเกลี้ยง
     [JsonProperty("warehouses", NullValueHandling = NullValueHandling.Ignore)]
@@ -55,6 +65,7 @@ public class WorldContext
         Artifacts ??= new Dictionary<string, AppearArtifact>();
         ArtifactAddOns ??= new Dictionary<string, AddOns>();
         ArtifactMannequins ??= new Dictionary<string, Messages.Mannequin>();
+        Plantings ??= new Dictionary<string, string>();
         AddedNatural ??= new List<NaturalInfo>();
         RemovedNatural ??= new List<Point2>();
         GrazedPetList ??= new List<Pet>();
@@ -62,6 +73,43 @@ public class WorldContext
         Player.WarehouseStore.Import(Warehouses);
         // ⚠️ ต้องทำก่อนที่ artifact จะถูกส่งออกไปหาใคร — ดูเหตุผลเต็มที่ CageTypes.NormalizeLoaded
         CageTypes.NormalizeLoaded(Artifacts);
+        NormalizeLoadedItems();
+    }
+
+    /// <summary>
+    /// ซ่อม <c>Item.Ext</c> ของไอเทมที่ผูกกับสิ่งปลูกสร้างบนเกาะนี้
+    ///
+    /// ไฟล์ .world เก็บไอเทมไว้ 3 ที่ และทุกที่ผ่าน JSON เหมือนกันหมด ⇒ <c>Ext</c> กลับมาเป็น
+    /// <c>JObject</c> ซึ่ง <c>Item.Pack</c> ไม่มี else รองรับ = ไม่เขียนอะไรลงไปเลยสักไบต์
+    /// ทำให้อีก 6 ฟิลด์ท้ายของไอเทมเลื่อนตำแหน่งกันหมด (เหตุผลเต็มที่หัวคลาส ItemExtRepair)
+    ///   • Warehouses      ของในตู้/คลัง — ซ่อมที่ Player.WarehouseStore.Import
+    ///   • ArtifactAddOns  ประตู/หน้าต่างที่ติดกับบ้าน
+    ///   • ArtifactMannequins เสื้อผ้าบนหุ่นโชว์
+    /// </summary>
+    private void NormalizeLoadedItems()
+    {
+        if (ArtifactAddOns != null)
+        {
+            foreach (string entityId in new List<string>(ArtifactAddOns.Keys))
+            {
+                AddOns addons = ArtifactAddOns[entityId];
+                if (addons._AddOns == null) continue;
+                foreach (int slot in new List<int>(addons._AddOns.Keys))
+                {
+                    addons._AddOns[slot] = ItemExtRepair.Fix(addons._AddOns[slot], "ของติดบ้าน");
+                }
+                ArtifactAddOns[entityId] = addons;
+            }
+        }
+
+        if (ArtifactMannequins == null) return;
+        foreach (string entityId in new List<string>(ArtifactMannequins.Keys))
+        {
+            Messages.Mannequin mannequin = ArtifactMannequins[entityId];
+            if (mannequin.Head.HasValue) mannequin.Head = ItemExtRepair.Fix(mannequin.Head.Value, "หุ่นโชว์");
+            if (mannequin.Body.HasValue) mannequin.Body = ItemExtRepair.Fix(mannequin.Body.Value, "หุ่นโชว์");
+            ArtifactMannequins[entityId] = mannequin;
+        }
     }
 
     [CanBeNull]

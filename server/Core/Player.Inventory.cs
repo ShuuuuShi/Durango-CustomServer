@@ -1006,6 +1006,9 @@ public partial class Player
                 foreach (string section in pair.Value.Order ?? new List<string>())
                 {
                     if (!pair.Value.Sections.TryGetValue(section, out List<Item> items)) continue;
+                    // ⚠️ ของในตู้ก็ผ่าน JSON มาเหมือนกระเป๋าผู้เล่น ⇒ Item.Ext เป็น JObject
+                    // ไม่ซ่อมก่อน = แพ็กเก็ตตู้ทั้งใบเลื่อนช่อง (เหตุผลเต็มที่ ItemExtRepair)
+                    ItemExtRepair.Normalize(items, $"ตู้ {pair.Key[..Math.Min(8, pair.Key.Length)]}");
                     store.Sections[section] = items ?? new List<Item>();
                     store.Order.Add(section);
                 }
