@@ -17,7 +17,7 @@ public class Platform
 		Arena = 5
 	}
 
-	public static Platform Instance { get; private set; }
+	public static Platform Instance => _instance ??= Create();
 
 	// [แก้เอง 5 ก.ย. 2026] เดิมคืน string.Empty ตายตัว (ช่องบัญชี NEXON ที่เซิร์ฟส่วนตัวไม่มี)
 	// ⇒ เซิร์ฟแยกไม่ออกว่าใครเป็นใคร แล้ว /accounts คืนตัวละครทุกตัวบนเซิร์ฟให้ทุกคน
@@ -97,9 +97,29 @@ public class Platform
 
 	public virtual bool SupportPortrait => true;
 
-	static Platform()
+	// [แก้เอง 6 ก.ย. 2026] เดิมบรรทัดนี้เขียนตายตัวว่า `Instance = new Platform_PC();`
+	// ⇒ **บน Android ก็ยังได้ Platform_PC** ทั้งที่ Platform_Android มีอยู่แล้วแต่ไม่เคยถูกสร้างเลย
+	//
+	// ⚠️ ผลที่ตามมาไม่ใช่เรื่องเล็ก เพราะค่าพวกนี้ถูกใช้กระจายทั้งเกม:
+	//   UsePCUI      = true ⇒ โหลด **prefab ชุด PC** มาใช้บนมือถือ (UIPrefabMap.Type.PC)
+	//                        ⇒ UITitleWidget_PC / ContextActionButton_PC โผล่บนมือถือ
+	//                        ⇒ logcat ฟ้อง "different serialization layout" เพราะ prefab กับคลาสไม่ตรง
+	//   UsePCRenderer= true ⇒ MainCamera · BlitScreen · TerrainBase · AssetBundleManager
+	//                        เดินเส้นเรนเดอร์ของ PC บน GPU มือถือ
+	//   DefaultUISize/RenderTargetSize/SupportPortrait/GetScreenResolution  ใช้สูตรจอ PC (Screen.dpi)
+	//   RequestPermission   ตกไปที่ตัวฐานที่ไม่ทำอะไรเลย ⇒ ขอสิทธิ์บน Android ไม่ได้
+	//
+	// ⚠️ ทำเป็น lazy ไม่ใช่ static constructor — เพราะ Application.platform เป็น native call
+	//    ถ้า type ถูก init จากเธรดอื่นจะได้ error จาก Unity ⇒ ให้สร้างตอนถูกเรียกใช้ครั้งแรกแทน
+	private static Platform _instance;
+
+	private static Platform Create()
 	{
-		Instance = new Platform_PC();
+		return Application.platform switch
+		{
+			RuntimePlatform.Android => new Platform_Android(),
+			_ => new Platform_PC(),
+		};
 	}
 
 	public virtual void Login(Action onSuccess, Action<int> onFailure)

@@ -8,7 +8,12 @@ powershell -File tools\android\build-android.ps1 -VpsHost 1.2.3.4 -GatewayPort 8
 powershell -File tools\android\build-android.ps1 -Local -Install          # เทสกับเซิร์ฟในเครื่อง
 ```
 
-ผลลัพธ์ออกที่ `dist\DurangoLastHuman-<host>-<port>.apk`
+ผลลัพธ์ออกที่ `dist\android\DurangoLastHuman-<host>-<port>.apk`
+
+> **ชุด Android แยกโฟลเดอร์กับ PC**
+> `dist\android\` APK · `dist\pc\` ชุด PC · `dist\vps\` ชุดเซิร์ฟ
+>
+> คนละแพลตฟอร์มคนละรอบปล่อย — เดิมกองรวมกันใน `dist\` จนแยกไม่ออกว่าไฟล์ไหนของใคร
 
 ---
 

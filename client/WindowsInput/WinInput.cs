@@ -24,6 +24,33 @@ public class WinInput
 	[DllImport("user32.dll", CharSet = CharSet.Auto, ExactSpelling = true)]
 	protected static extern short GetAsyncKeyState(int keyCode);
 
+	private static bool? _hasWinApi;
+
+	/// <summary>
+	/// [เพิ่มเอง 6 ก.ย. 2026] แพลตฟอร์มนี้มี <c>user32.dll</c> ไหม
+	///
+	/// ⚠️ <c>InputSystem.Update()</c> เรียก <c>_inputKeyboard.Process()</c> **ทุกเฟรม ทุกแพลตฟอร์ม**
+	/// แล้วมันวน <c>_keyMap</c> เรียก <c>GetKeyDown/GetKey/GetKeyUp</c> ทีละปุ่ม
+	/// ⇒ บน Android โยน <c>DllNotFoundException: user32.dll</c> รัว ๆ
+	///   (วัดจริงบน MuMu: **4,250 ครั้ง** ต่อการเปิดเกมหนึ่งรอบ)
+	/// ⇒ exception กลางเมธอดทำให้ของที่อยู่หลัง <c>_inputKeyboard.Process()</c> ใน Update
+	///   คือ joystick/axis/mouseWheel ไม่ได้ทำงาน แถมเฟรมเรตร่วง
+	///
+	/// เช็คครั้งเดียวแล้วจำไว้ — เมธอดพวกนี้ถูกเรียกหลักพันครั้งต่อวินาที
+	/// </summary>
+	private static bool HasWinApi
+	{
+		get
+		{
+			if (!_hasWinApi.HasValue)
+			{
+				_hasWinApi = Application.platform == RuntimePlatform.WindowsPlayer ||
+				             Application.platform == RuntimePlatform.WindowsEditor;
+			}
+			return _hasWinApi.Value;
+		}
+	}
+
 	private static int KeyCodeToVkeyFullSet(KeyCode key)
 	{
 		int result = 0;
@@ -319,7 +346,7 @@ public class WinInput
 	public static bool GetKey(KeyCode key)
 	{
 		int num = KeyCodeToVkey(key);
-		if (num != 0)
+		if (num != 0 && HasWinApi)
 		{
 			return (GetAsyncKeyState(num) & 0x8000) != 0;
 		}
@@ -329,7 +356,7 @@ public class WinInput
 	public static bool GetKeyDown(KeyCode key)
 	{
 		int num = KeyCodeToVkey(key);
-		if (num != 0)
+		if (num != 0 && HasWinApi)
 		{
 			bool flag = (GetAsyncKeyState(num) & 0x8000) != 0;
 			bool flag2 = _isPressedVKDown[num];
@@ -342,7 +369,7 @@ public class WinInput
 	public static bool GetKeyUp(KeyCode key)
 	{
 		int num = KeyCodeToVkey(key);
-		if (num != 0)
+		if (num != 0 && HasWinApi)
 		{
 			bool flag = (GetAsyncKeyState(num) & 0x8000) != 0;
 			bool flag2 = _isPressedVKUp[num];
@@ -355,7 +382,7 @@ public class WinInput
 	public static bool GetKeyFullCover(KeyCode key)
 	{
 		int num = KeyCodeToVkeyFullSet(key);
-		if (num != 0)
+		if (num != 0 && HasWinApi)
 		{
 			return (GetAsyncKeyState(num) & 0x8000) != 0;
 		}

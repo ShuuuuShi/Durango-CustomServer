@@ -541,7 +541,12 @@ public class TitleMenuGroup : MonoBehaviour
 				gameObject2.SetActive(value: true);
 			}
 		}
-		_videoPlayer.Load(titleOptions.VideoName);
+		// [แก้เอง 6 ก.ย. 2026] บรรทัดนี้เคยโยน DllNotFoundException: avformat-57 บน Android
+		// แล้วพาโค้ดที่เหลือของ ApplyEmigrationMode + StartGame ตายตามไปทั้งหมด
+		// (เสียง · _fontSetting.Init() · CurState = State.Initial) ⇒ หน้าไตเติลเป็นกล่องขาว
+		// ดูเหตุผลเต็มที่ Durango.System.NativeMedia
+		global::Durango.System.NativeMedia.Try("วิดีโอพื้นหลังหน้าไตเติล",
+			() => _videoPlayer.Load(titleOptions.VideoName));
 		AkAudioListener akAudioListener = UnityEngine.Object.FindObjectOfType<AkAudioListener>();
 		if (akAudioListener != null)
 		{
@@ -611,9 +616,9 @@ public class TitleMenuGroup : MonoBehaviour
 
 	private IEnumerator CoLoadingLevel(string level)
 	{
-		_videoPlayer.Stop();
+		global::Durango.System.NativeMedia.Try("หยุดวิดีโอหน้าไตเติล", () => _videoPlayer.Stop());
 		yield return new WaitForEndOfFrame();
-		_videoPlayer.Destroy();
+		global::Durango.System.NativeMedia.Try("ปิดวิดีโอหน้าไตเติล", () => _videoPlayer.Destroy());
 		SceneManager.LoadSceneAsync(level);
 	}
 

@@ -11,6 +11,11 @@
 #    8590-8592 · 8690-8692  (ยังมี 8080 AMP · 8443/8790 nginx · 8787 node)
 #    ⇒ ชุดนี้ใช้ 8890 (gateway/HTTP) กับ 8891 (game/TCP)
 #
+# ผังปลายทาง (dist\) — **แยกคนละโฟลเดอร์ต่อแพลตฟอร์ม อย่าเอามากองรวมกัน**
+#   dist\vps\      ชุดเซิร์ฟ           (ไฟล์นี้สร้าง)
+#   dist\pc\       ตัวเกมฝั่ง PC       (ไฟล์นี้สร้าง)
+#   dist\android\  APK                (tools\android\build-android.ps1 สร้าง)
+#
 #   powershell -File tools\pack-vps.ps1
 #   powershell -File tools\pack-vps.ps1 -VpsHost 1.2.3.4 -GatewayPort 8590 -SkipGame
 
@@ -29,7 +34,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $Root     = Split-Path -Parent $PSScriptRoot
 $VpsOut   = Join-Path $Out 'vps'
-$GameOut  = Join-Path $Out 'DurangoLastHuman-test'
+$GameOut  = Join-Path $Out 'pc\DurangoLastHuman-test'
 $Address  = "http://${VpsHost}:${GatewayPort}"
 
 function Say([string]$t, [string]$c = 'Gray') { Write-Host $t -ForegroundColor $c }
@@ -184,7 +189,7 @@ systemctl start durango-lasthuman
 
 อัปชุดเกมใหม่:
 ``````sh
-scp dist/DurangoLastHuman-test.zip root@$($VpsHost):/opt/durango-lasthuman/download/
+scp dist/pc/DurangoLastHuman-test.zip root@$($VpsHost):/opt/durango-lasthuman/download/
 ssh root@$($VpsHost) 'cd /opt/durango-lasthuman/download && md5sum DurangoLastHuman-test.zip > DurangoLastHuman-test.zip.md5'
 ``````
 
@@ -245,7 +250,7 @@ if (-not $SkipGame) {
         #    ("Can't translate Pathname ... to CP437") แล้วไฟล์นั้นหายไปจาก zip เงียบ ๆ
         [System.IO.File]::WriteAllText((Join-Path $GameOut 'READ-ME-FIRST.md'), $note, (New-Object System.Text.UTF8Encoding $false))
         # ไฟล์ชื่อไทยที่ติดมากับตัวเกมเดิมก็เจอปัญหาเดียวกัน — เปลี่ยนชื่อให้เป็น ASCII
-        Get-ChildItem $GameOut -File | Where-Object { $_.Name -match '[^ -]' } | ForEach-Object {
+        Get-ChildItem $GameOut -File | Where-Object { $_.Name -match '[^\x00-\x7f]' } | ForEach-Object {
             Rename-Item $_.FullName ('readme-th' + $_.Extension) -ErrorAction SilentlyContinue
         }
 

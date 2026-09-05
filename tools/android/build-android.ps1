@@ -15,6 +15,8 @@
 # ⇒ ใช้ APK ที่ Unity build ไว้แล้วเป็นฐาน แล้วสลับเฉพาะ Assembly-CSharp.dll เข้าไป
 #   IL ที่ Roslyn ออกมาเป็น net35 รันบน Mono ตัวเดียวกับที่ใช้บน PC อยู่ทุกวัน
 #
+# ⚠️ ผลลัพธ์ลง dist\android\ **แยกจาก dist\pc\ ของชุด PC** — คนละแพลตฟอร์ม คนละรอบปล่อย
+#    เดิม APK กับชุด PC กองรวมกันใน dist\ จนแยกไม่ออกว่าไฟล์ไหนของใคร
 # ⚠️ APK ฐานต้องเป็นแบบ **Mono** เท่านั้น — ของ NEXON แท้เป็น IL2CPP สลับ DLL ไม่ได้
 # ⚠️ ไฟล์นี้ต้องเซฟเป็น UTF-8 **มี BOM** (PowerShell 5.1 อ่านไฟล์ไม่มี BOM เป็น ANSI แล้วไทยพัง)
 
@@ -23,7 +25,7 @@ param(
   [int]$GatewayPort    = 8890,
   [string]$ServerName  = 'lasthuman',
   [string]$BaseApk     = '',                  # ว่าง = ใช้ tools\android\base\base-mono.apk
-  [string]$Out         = '',                  # ว่าง = dist\DurangoLastHuman-<host>.apk
+  [string]$Out         = '',                  # ว่าง = dist\android\DurangoLastHuman-<host>-<port>.apk
   [switch]$Local,                             # ชี้ 127.0.0.1 (ใช้คู่กับ adb reverse)
   [switch]$Install,                           # ลงเครื่องที่ต่อ adb อยู่หลัง build
   [switch]$SkipBuild                          # ใช้ DLL ที่ build ไว้แล้ว
@@ -43,7 +45,7 @@ $address = "http://${VpsHost}:${GatewayPort}"
 if (-not $BaseApk) { $BaseApk = Join-Path $PSScriptRoot 'base\base-mono.apk' }
 if (-not $Out) {
   $tag = $VpsHost -replace '[^0-9A-Za-z]', '-'
-  $Out = Join-Path $root "dist\DurangoLastHuman-$tag-$GatewayPort.apk"
+  $Out = Join-Path $root "dist\android\DurangoLastHuman-$tag-$GatewayPort.apk"
 }
 
 Say "`n=== build APK สำหรับ Android ===" Cyan

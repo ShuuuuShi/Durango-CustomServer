@@ -77,7 +77,9 @@ def main():
             zp, lp = a[i + 1].split('=', 1)
             extra[zp] = lp
 
-    keystore = arg('--keystore', os.path.join(os.path.dirname(os.path.abspath(out)), 'keys', 'durangoth.keystore'))
+    # ⚠ ต้องอิงโฟลเดอร์ของ**เครื่องมือ** ไม่ใช่ของไฟล์ผลลัพธ์ — ผลลัพธ์ย้ายไป dist\android\ แล้ว
+    #   อิงปลายทาง = ย้ายที่วางไฟล์เมื่อไหร่ก็สร้าง keystore ใหม่เมื่อนั้น ⇒ เซ็นคนละคีย์ ⇒ ผู้เล่นอัปเดตทับไม่ได้
+    keystore = arg('--keystore', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'keys', 'durangoth.keystore'))
     alias = arg('--alias', 'durangoth')
     pw = arg('--pass', 'durangoth-2026')
 
