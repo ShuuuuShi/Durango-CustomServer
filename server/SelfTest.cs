@@ -14,10 +14,24 @@ namespace DurangoServerNx;
 // รัน: DurangoServerNx --selftest [--gateway-port N] [--game-port N] (เซิร์ฟต้องกำลังรันอยู่)
 internal static class SelfTest
 {
+    /// <summary>
+    /// กุญแจบัญชีของตัวละครทดสอบ — ต้องผ่าน AccountKeys.Normalize (ตัวอักษร/ตัวเลข/ขีด เท่านั้น)
+    /// </summary>
+    private const string SelfTestAccountKey = "selftest-local";
+
     public static int Run(int gatewayPort, int gamePort)
     {
         // 1) ขอ session ผ่าน /sessions (เหมือน client ตอนบูต)
-        string body = HttpPost($"http://127.0.0.1:{gatewayPort}/sessions", "platform=Android");
+        //
+        // ⚠️ [6 ก.ย. 2026] ต้องส่ง account_id ด้วย — ตั้งแต่ระบบบัญชีเข้ามา (commit 524137e)
+        // /sessions ตอบ 401 no_account_key ให้คำขอที่ไม่มีกุญแจ (Core/Gateway.cs:140-146)
+        // ⇒ selftest พังมาตั้งแต่ตอนนั้นด้วย exception ของ HttpWebRequest ที่อ่านไม่รู้เรื่อง
+        // ตัวเกมจริงส่งช่องนี้อยู่แล้วผ่าน Platform.BuildSessionForm (client/Durango.System/Platform.cs:144)
+        //
+        // ใช้กุญแจคงที่ไม่ใช่กุญแจสุ่ม: รันซ้ำกี่ครั้งก็ได้ตัวละครทดสอบตัวเดิม ไม่ทิ้งขยะสะสม
+        // และแยกออกจากผู้เล่นจริงชัดเจนเวลาไล่ log
+        string body = HttpPost($"http://127.0.0.1:{gatewayPort}/sessions",
+                               $"platform=Android&account_id={SelfTestAccountKey}");
         var json = Newtonsoft.Json.Linq.JObject.Parse(body);
         string entityId = (string)json["user_id"];
         string token = (string)json["session_token"];

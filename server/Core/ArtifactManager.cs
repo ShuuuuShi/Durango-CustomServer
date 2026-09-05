@@ -25,6 +25,9 @@ public class ArtifactManager
     /// <summary>สิ่งปลูกสร้าง → entity ของผู้เล่นที่สร้าง (ดู WorldContext.ArtifactOwners)</summary>
     private readonly Dictionary<string, string> _owners;
 
+    /// <summary>หลังที่ยังสร้างไม่เสร็จ → ช่อง → วัสดุที่ใส่แล้ว (ดู WorldContext.BuildMaterials)</summary>
+    private readonly Dictionary<string, Dictionary<string, List<Item>>> _buildMaterials;
+
     public static readonly string[] AddOnTags = { "door", "window", "wall_deco", "empty_door" };
 
     public event Action<ArtifactDisplay> ArtifactDisplayUpdated;
@@ -33,13 +36,15 @@ public class ArtifactManager
 
     public ArtifactManager(Dictionary<string, AppearArtifact> artifacts, Dictionary<string, AddOns> addons,
         Dictionary<string, Messages.Mannequin> mannequins, Dictionary<string, string> plantings = null,
-        Dictionary<string, string> owners = null)
+        Dictionary<string, string> owners = null,
+        Dictionary<string, Dictionary<string, List<Item>>> buildMaterials = null)
     {
         _artifacts = artifacts;
         _addOns = addons;
         _mannequins = mannequins;
         _plantings = plantings ?? new Dictionary<string, string>();
         _owners = owners ?? new Dictionary<string, string>();
+        _buildMaterials = buildMaterials ?? new Dictionary<string, Dictionary<string, List<Item>>>();
 
         // โลกที่โหลดจากไฟล์เซฟมีสิ่งปลูกสร้างเก่าที่ยังไม่มีแท็ก (เซฟก่อนหน้านี้ไม่เคยเก็บ)
         // ⇒ เติมให้ตอนเปิดโลก ไม่งั้นโต๊ะที่สร้างไว้ก่อนจะคราฟต์ไม่ได้ตลอดไป
@@ -119,6 +124,7 @@ public class ArtifactManager
             _artifacts.Remove(entityId);
             _owners.Remove(entityId);
             _plantings.Remove(entityId);
+            _buildMaterials.Remove(entityId);
             return value;
         }
         return null;
@@ -150,6 +156,73 @@ public class ArtifactManager
     /// แล้วฝั่งเกมหา artifact ด้วย <c>Find(msg.EntityId)</c> (client/ArtifactManager.cs:57-60)
     /// ⇒ **หาไม่เจอ ทิ้งข้อความเงียบ ๆ ทุกครั้ง** หน้าจอกรง/ตู้/ประตูจึงไม่รีเฟรชเลย
     /// </summary>
+    // ══ ระบบสร้างสิ่งปลูกสร้าง ═══════════════════════════════════════════════════════
+    // ใช้จาก Core/Player.Building.cs — เก็บไว้ที่นี่เพราะเป็นสถานะของ "หลัง" ไม่ใช่ของผู้เล่น
+    // (คนอื่นมาช่วยใส่วัสดุ/ช่วยสร้างต่อได้ และต้องรอดจากการรีสตาร์ตเซิร์ฟ)
+
+    /// <summary>วัสดุที่ใส่ไว้แล้วในหลังนี้ — คืนตารางว่างถ้ายังไม่มีใครใส่อะไร (ไม่คืน null)</summary>
+    public Dictionary<string, List<Item>> GetBuildMaterials(string entityId)
+    {
+        if (string.IsNullOrEmpty(entityId)) return new Dictionary<string, List<Item>>();
+        return _buildMaterials.TryGetValue(entityId, out var slots) && slots != null
+            ? slots
+            : new Dictionary<string, List<Item>>();
+    }
+
+    /// <summary>ใส่วัสดุเพิ่มลงช่องหนึ่ง — ต่อท้ายของเดิม ไม่ทับ</summary>
+    public void AddBuildMaterials(string entityId, string slotId, IEnumerable<Item> items)
+    {
+        if (string.IsNullOrEmpty(entityId) || string.IsNullOrEmpty(slotId) || items == null) return;
+        if (!_buildMaterials.TryGetValue(entityId, out var slots) || slots == null)
+        {
+            slots = new Dictionary<string, List<Item>>();
+            _buildMaterials[entityId] = slots;
+        }
+        if (!slots.TryGetValue(slotId, out List<Item> list) || list == null)
+        {
+            list = new List<Item>();
+            slots[slotId] = list;
+        }
+        list.AddRange(items);
+    }
+
+    /// <summary>ล้างวัสดุทิ้งเมื่อหลังนี้สร้างเสร็จแล้ว (ของถูกใช้ไปแล้ว ไม่ต้องเก็บต่อ)</summary>
+    public void ClearBuildMaterials(string entityId)
+    {
+        if (!string.IsNullOrEmpty(entityId)) _buildMaterials.Remove(entityId);
+    }
+
+    /// <summary>
+    /// เปลี่ยนสถานะการก่อสร้างของหลังหนึ่ง แล้วกระจายให้ทุกคนบนเกาะเห็น
+    ///
+    /// <paramref name="postprocess"/> เป็น null = ล้างช่วง "มาร์มูรี" ทิ้ง
+    /// (ฝั่งเกมอ่าน Postprocess เฉพาะตอน Built/Remodeling — client/Artifact.cs:1063)
+    /// </summary>
+    public bool SetBuildingState(string entityId, Shared.Building.BuildingState state, Postprocess? postprocess)
+    {
+        if (string.IsNullOrEmpty(entityId) || !_artifacts.TryGetValue(entityId, out var value)) return false;
+        value.States.EntityId = value.EntityId;
+        value.States.BuildingState = state;
+        value.States.Postprocess = postprocess;
+        _artifacts[entityId] = value;
+        RaiseStateUpdated(entityId, value.States);
+        return true;
+    }
+
+    /// <summary>ตั้งหน้าตาของช่องหนึ่ง (โมเดลที่ขึ้นกับวัสดุที่ผู้เล่นเลือกใส่) แล้วกระจายให้ทุกคน</summary>
+    public bool SetDisplayPart(string entityId, string slotId, string modelKey)
+    {
+        if (string.IsNullOrEmpty(entityId) || string.IsNullOrEmpty(slotId) || string.IsNullOrEmpty(modelKey)) return false;
+        if (!_artifacts.TryGetValue(entityId, out var value)) return false;
+        value.Display.Parts ??= new Dictionary<string, string>();
+        if (value.Display.Parts.TryGetValue(slotId, out string current) && current == modelKey) return false;
+        value.Display.Parts[slotId] = modelKey;
+        value.Display.EntityId = value.EntityId;
+        _artifacts[entityId] = value;
+        ArtifactDisplayUpdated?.Invoke(value.Display);
+        return true;
+    }
+
     private void RaiseStateUpdated(string entityId, ArtifactState state)
     {
         state.EntityId = entityId;

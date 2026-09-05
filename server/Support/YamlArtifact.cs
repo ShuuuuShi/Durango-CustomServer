@@ -125,6 +125,16 @@ public class Blueprint
     public BlueprintSlot[] slots;
     public string season;
     public string required_blueprint;
+
+    // ── [6 ก.ย. 2026] ฟิลด์ที่ไฟล์มีจริงแต่คลาสนี้ยังไม่เคยอ่าน ─────────────────────
+    // ต้องใช้ตอนทำระบบ "สร้างสิ่งปลูกสร้าง" (Core/Player.Building.cs) — ก่อนหน้านี้ไม่มีใคร
+    // อ่านเพราะเซิร์ฟยังสร้างของไม่ได้ ใช้แต่ cheat วางสำเร็จรูป
+    // ตัวอย่างจริง bed_01: energy "23" · effort "46" · postprocess_time 5400 · postprocess_helper_max 2
+    public string energy;                    // พลังงานที่เสียตอนลงมือสร้าง (สตริงตัวเลข เหมือน recipes.json)
+    public string effort;                    // แรงที่ใช้ — ยังไม่มีระบบความเหนื่อยแยก จึงยังไม่ได้ใช้
+    public int postprocess_helper_max;       // คนอื่นมาช่วย "มาร์มูรี" ได้กี่คน (Postprocess.MaxHelperCount)
+    public int required_ability;             // Shared.Ability.Derived ที่ต้องมี — ยังไม่บังคับ (ไม่มีระบบ ability)
+    public string required_ability_value;    // ค่าขั้นต่ำของ ability นั้น เช่น "0.5 * level"
 }
 
 public class BlueprintSlot
@@ -133,6 +143,8 @@ public class BlueprintSlot
     public Gettext slot_name;
     public string size_factor;
     public int count;
+    public int weight;                       // น้ำหนักของช่องนี้ตอนเฉลี่ยเลเวลของหลัง (ไฟล์จริงเป็น 1 แทบทุกช่อง)
+    public Gettext description;
     public Dictionary<string, int> required_tags;
     public Dictionary<string, int> required_materials;
     public Dictionary<string, ArtifactLook> looks;

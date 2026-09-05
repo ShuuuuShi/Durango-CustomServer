@@ -1037,6 +1037,33 @@ public partial class Player
                 msg.EntityName = blueprint.Name;
                 var list = new List<Shared.System.Interaction>();
                 if (flag) list.Add(Shared.System.Interaction.DestructArtifact);
+
+                // [6 ก.ย. 2026] เมนูก่อสร้าง — ผูกกับ **สถานะของหลัง** ไม่ใช่โหมดเกาะ
+                //
+                // ⚠️ ไม่ใส่สองบรรทัดนี้ = ผู้เล่นจองพื้นที่ได้แล้วแตะดู **ไม่มีปุ่มอะไรขึ้นเลย**
+                // เพราะฝั่งเกมไม่ได้ตัดสินใจเอง มันเชื่อรายการที่เซิร์ฟส่งมาล้วน ๆ
+                // (เหตุผลเดียวกับเมนูกรง/สัตว์ที่เคยหายไปทั้งระบบ)
+                //
+                // ⚠️ ห้ามใช้ `flag` มาคุมตัวนี้: flag คือ Mode.Editable (เกาะสร้างสรรค์ของโหมดออฟไลน์)
+                // แต่การสร้างบ้านเป็นแกนหลักของเกมที่ต้องใช้ได้ทุกเกาะ — ผูกกับ flag แล้ว
+                // เซิร์ฟที่รันโหมด Online (ค่าปัจจุบันใน data/config.json) จะสร้างอะไรไม่ได้เลย
+                if (_world.ArtifactManager.Get(touch.EntityId) is { } building)
+                {
+                    switch (building.States.BuildingState)
+                    {
+                        case Shared.Building.BuildingState.Occupied:
+                            // "건설" — เปิดหน้าต่างใส่วัสดุ (client/BuildSystem.cs InteractionBuildArtifact)
+                            list.Add(Shared.System.Interaction.BuildArtifact);
+                            break;
+                        case Shared.Building.BuildingState.Built:
+                            // "완성" — โผล่เฉพาะตอนมาร์มูรีครบแล้ว ฝั่งเกมเดินหลอดเองจาก Postprocess.EndsAt
+                            if (building.States.Postprocess is not { } pp || Gauge.CurrentTime >= pp.EndsAt)
+                            {
+                                list.Add(Shared.System.Interaction.CompleteArtifact);
+                            }
+                            break;
+                    }
+                }
                 if (blueprint.Components.Contains("Washable")) list.Add(Shared.System.Interaction.Wash);
                 if (blueprint.Components.Contains("Shelter")) list.Add(Shared.System.Interaction.Rest);
                 // [5 ก.ย. 2026] ท่าเรือ — เมนู "เส้นทางเดินเรือ" ของเกมผูกกับ interaction นี้

@@ -68,6 +68,23 @@ public class WorldContext
     [JsonProperty("artifact_owners", NullValueHandling = NullValueHandling.Ignore)]
     public Dictionary<string, string> ArtifactOwners;
 
+    /// <summary>
+    /// [6 ก.ย. 2026] วัสดุที่ใส่ค้างไว้ในหลังที่ยังสร้างไม่เสร็จ — หลัง → ช่อง → ของที่ใส่แล้ว
+    ///
+    /// ⚠️ ต้องจำแยกเพราะ <c>Messages.AppearArtifact</c> ไม่มีช่องเก็บวัสดุระหว่างก่อสร้าง
+    /// (เหตุผลเดียวกับ <see cref="Plantings"/> — แก้ไฟล์ใน GameCode/Messages ไม่ได้)
+    ///
+    /// ฝั่งเกมถามของพวกนี้กลับมาทุกครั้งที่เปิดหน้าต่างก่อสร้าง ผ่าน
+    /// <c>GetArtifact</c>(2018) → <c>ArtifactMaterials</c>(2091)
+    /// (client/BuildSystem.cs:366-388 RequestArtifactMaterials → SetPrevMaterial)
+    /// ⇒ ไม่เก็บลงไฟล์ = รีสตาร์ตเซิร์ฟแล้ว **ของที่ผู้เล่นใส่ไปหายเกลี้ยง** แต่หลังยังค้างอยู่
+    /// เท่ากับกินของฟรี ซึ่งแย่กว่าการไม่มีระบบก่อสร้างเสียอีก
+    ///
+    /// ล้างทิ้งเมื่อหลังนั้นสร้างเสร็จหรือถูกรื้อ (ดู ArtifactManager)
+    /// </summary>
+    [JsonProperty("build_materials", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, Dictionary<string, List<Item>>> BuildMaterials;
+
     // ของในตู้/คลังของสิ่งปลูกสร้างบนเกาะนี้ (ดู Player.WarehouseStore)
     // เดิมอยู่ในหน่วยความจำอย่างเดียว รีสตาร์ตแล้วของหายเกลี้ยง
     [JsonProperty("warehouses", NullValueHandling = NullValueHandling.Ignore)]
@@ -83,6 +100,7 @@ public class WorldContext
         ArtifactMannequins ??= new Dictionary<string, Messages.Mannequin>();
         Plantings ??= new Dictionary<string, string>();
         ArtifactOwners ??= new Dictionary<string, string>();
+        BuildMaterials ??= new Dictionary<string, Dictionary<string, List<Item>>>();
         AddedNatural ??= new List<NaturalInfo>();
         RemovedNatural ??= new List<Point2>();
         GrazedPetList ??= new List<Pet>();
@@ -116,6 +134,26 @@ public class WorldContext
                     addons._AddOns[slot] = ItemExtRepair.Fix(addons._AddOns[slot], "ของติดบ้าน");
                 }
                 ArtifactAddOns[entityId] = addons;
+            }
+        }
+
+        // วัสดุก่อสร้างเป็น Item ที่ผ่าน JSON เหมือนกัน ⇒ Ext กลับมาเป็น JObject ต้องซ่อมด้วย
+        // ไม่ซ่อม = ของที่ใส่ค้างไว้ในหลังที่สร้างไม่เสร็จ ส่งกลับไปให้เกมแล้วแพ็กเก็ตเพี้ยนทั้งใบ
+        if (BuildMaterials != null)
+        {
+            foreach (string entityId in new List<string>(BuildMaterials.Keys))
+            {
+                Dictionary<string, List<Item>> slots = BuildMaterials[entityId];
+                if (slots == null) continue;
+                foreach (string slotId in new List<string>(slots.Keys))
+                {
+                    List<Item> items = slots[slotId];
+                    if (items == null) continue;
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        items[i] = ItemExtRepair.Fix(items[i], "วัสดุก่อสร้าง");
+                    }
+                }
             }
         }
 

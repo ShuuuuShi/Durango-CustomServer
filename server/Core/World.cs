@@ -94,7 +94,8 @@ public class World
     {
         _context = context;
         ArtifactManager = new ArtifactManager(_context.Artifacts, _context.ArtifactAddOns,
-            _context.ArtifactMannequins, _context.Plantings, _context.ArtifactOwners);
+            _context.ArtifactMannequins, _context.Plantings, _context.ArtifactOwners,
+            _context.BuildMaterials);
         ArtifactManager.ArtifactStateUpdated += ArtifactManager_ArtifactStateUpdated;
         ArtifactManager.ArtifactDisplayUpdated += ArtifactManager_ArtifactDisplayUpdated;
         _addedNatural = _context.AddedNatural;

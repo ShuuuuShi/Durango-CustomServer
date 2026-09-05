@@ -32,6 +32,7 @@ public partial class Player
         RegisterTutorialHandlers();    // Player.Tutorial.cs  — คำสั่งจัดฉากของบทเรียนเริ่มเกม
         RegisterPetSaveHandlers();     // Player.PetSave.cs   — โหลด/เซฟสัตว์เลี้ยง+จำนวนครั้งที่ตาย
         RegisterMapHandlers();         // Player.Map.cs       — หมุดจุดสำคัญบนแผนที่ (ทับ handler เดิมใน Player.cs)
+        RegisterBuildingHandlers();    // Player.Building.cs  — จองพื้นที่/ใส่วัสดุ/สร้าง/ทำให้สมบูรณ์
 
         // ── หลังทุกระบบพร้อมแล้ว ─────────────────────────────────────────────────
         ReviveIfDeadOnLogin();         // Player.Hunting.cs   — กันตัวละครค้างตายถาวร
