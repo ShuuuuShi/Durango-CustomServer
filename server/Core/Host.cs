@@ -152,6 +152,12 @@ public class Host
     /// </summary>
     public string AdminToken { get; set; }
 
+    /// <summary>เวอร์ชันตัวเกมต่ำสุดที่ยอมให้เข้า — null = รับทุกเวอร์ชัน (ดู Gateway /knock)</summary>
+    public string MinClientVersion { get; set; }
+
+    /// <summary>ลิงก์โหลดตัวเกมใหม่ — ต้องมีถ้าจะเปิดด่านเวอร์ชัน</summary>
+    public string DownloadUrl { get; set; }
+
     public Host(string clusterKey)
     {
         _clusterKey = string.IsNullOrEmpty(clusterKey) ? "nx" : clusterKey;
@@ -221,6 +227,8 @@ public class Host
         }
 
         Console.WriteLine($"[host] cluster '{_clusterKey}': ผู้เล่น {_contexts.Count} สล็อต โหลดจาก {AppData.CombinePath(basePath)}");
+        // รายชื่อที่ถูกแบน — เก็บข้างไฟล์เซฟของ cluster นี้ (คนละ cluster คนละรายชื่อ)
+        BanList.Load(System.IO.Path.Combine(AppData.CombinePath(basePath), "bans.json"));
     }
 
     public void Start(int gamePort, int gatewayPort, string publicHost, string androidBundlesDir, string assetsDir)
@@ -239,7 +247,9 @@ public class Host
             PublicHost = publicHost,
             AssetBundleAndroidDir = androidBundlesDir,
             AssetsDir = assetsDir,
-            AdminToken = this.AdminToken
+            AdminToken = this.AdminToken,
+            MinClientVersion = this.MinClientVersion,
+            DownloadUrl = this.DownloadUrl
         };
         Gateway.Start(gatewayPort);
     }
@@ -447,6 +457,81 @@ public class Host
     /// ค่าตั้งต้นจึงเป็นปิด และเซิร์ฟจะเตือนทุกครั้งที่บูตขึ้นมาพร้อมสวิตช์นี้
     /// </summary>
     public static bool AdoptOrphans { get; set; }
+
+    /// <summary>
+    /// โหมดปิดปรับปรุง — คนใหม่เข้าไม่ได้ แต่คนที่เล่นอยู่ยังเล่นต่อได้
+    ///
+    /// ตั้งใจไม่เตะคนที่เล่นอยู่ทันที เพื่อให้ประกาศก่อนแล้วรอคนทยอยออกเองได้
+    /// (audit: เดิมไม่มีสวิตช์อะไรเลย จะปิดปรับปรุงต้องดับทั้งเซิร์ฟทันที)
+    /// </summary>
+    public static bool Maintenance { get; set; }
+
+    /// <summary>ใครออนไลน์อยู่บ้าง (สำหรับหน้าแอดมิน) — ต้องรู้ก่อนถึงจะเตะถูกคน</summary>
+    public List<Dictionary<string, object>> DescribeOnline()
+    {
+        var result = new List<Dictionary<string, object>>();
+        foreach (World world in WorldsOf())
+        {
+            foreach (Player player in world.PlayersSnapshot())
+            {
+                result.Add(new Dictionary<string, object>
+                {
+                    ["entity_id"] = player.EntityId,
+                    ["name"] = player.Name ?? "",
+                    ["region"] = world.TerrainId ?? "",
+                    ["banned"] = BanList.IsBanned(FindContextByEntityId(player.EntityId)?.OwnerKey)
+                });
+            }
+        }
+        return result;
+    }
+
+    /// <summary>เตะผู้เล่นออกจากเกม — คืน false ถ้าไม่ได้ออนไลน์อยู่</summary>
+    public bool KickPlayer(string entityId, string reason)
+    {
+        if (string.IsNullOrEmpty(entityId)) return false;
+        foreach (World world in WorldsOf())
+        {
+            foreach (Player player in world.PlayersSnapshot())
+            {
+                if (player.EntityId != entityId) continue;
+                Console.WriteLine($"[ดูแล] เตะ {entityId} — {reason}");
+                player.KickWith(reason);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>ประกาศถึงทุกคนที่ออนไลน์ — คืนจำนวนคนที่ได้รับ</summary>
+    public int Announce(string text)
+    {
+        int sent = 0;
+        foreach (World world in WorldsOf())
+        {
+            foreach (Player player in world.PlayersSnapshot())
+            {
+                player.SendNotice(text);
+                sent++;
+            }
+        }
+        Console.WriteLine($"[ดูแล] ประกาศถึง {sent} คน: {text}");
+        return sent;
+    }
+
+    /// <summary>โลกทั้งหมดที่เปิดอยู่ (เกาะเดียวหรือหลายเกาะแล้วแต่โหมด)</summary>
+    private IEnumerable<World> WorldsOf()
+    {
+        if (Worlds != null)
+        {
+            foreach (KeyValuePair<string, World> pair in Worlds.Loaded)
+            {
+                if (pair.Value != null) yield return pair.Value;
+            }
+            yield break;
+        }
+        if (GameServer?.World != null) yield return GameServer.World;
+    }
 
     /// <summary>บัญชีเปล่า — ใช้ตอบคำขอที่ไม่มีกุญแจบัญชี</summary>
     public static Account EmptyAccount() => new() { PlayerSlotCount = 0, MaxPlayerSlotCount = 2 };

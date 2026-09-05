@@ -58,6 +58,15 @@ public class Gateway
     /// </summary>
     public string AdminToken { get; set; }
 
+    /// <summary>
+    /// เวอร์ชันตัวเกมต่ำสุดที่ยอมให้เข้า — <c>null</c> = รับทุกเวอร์ชัน (ค่าตั้งต้น)
+    /// ตั้งด้วย <c>--min-client-version</c> · ดูเหตุผลที่ยังไม่บังคับโดยปริยายที่เส้น /knock
+    /// </summary>
+    public string MinClientVersion { get; set; }
+
+    /// <summary>ลิงก์ให้ผู้เล่นไปโหลดตัวเกมใหม่ — ต้องมีถ้าจะเปิดด่านเวอร์ชัน</summary>
+    public string DownloadUrl { get; set; }
+
     private string _bundleIndexAndroidCache;
 
     public Gateway(Host host, GameServer gameServer, WorldContext worldCtx, PlayerContext playerCtx)
@@ -85,11 +94,32 @@ public class Gateway
         _webServer.GetRoute["/knock"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
         {
             string platform = PlatformKey(request.QueryString.Get("platform"));
+
+            // [6 ก.ย. 2026] ด่านเวอร์ชัน — ตอบ compatible ตามที่ตัวเกมส่งมาจริง ไม่ใช่ true ตายตัว
+            //
+            // ⚠️ เดิมตอบ true เสมอและไม่เคยอ่าน ?version= ที่เกมส่งมาเลย ⇒ ตัวเกมเวอร์ชันเก่า
+            // ต่อเข้ามาได้ แล้วค่าที่ unpack เพี้ยนถูกเขียนลงไฟล์เซฟเงียบ ๆ
+            //
+            // ⚠️ **ค่าตั้งต้นยังเป็น "รับทุกเวอร์ชัน"** เพราะทุก build ของเราปัจจุบันรายงานตัวเองว่า
+            // 5.2.1 เหมือนกันหมด (ยังไม่มีเลข build แยก) ⇒ เปิดด่านตอนนี้จะกันคนที่ควรเข้าได้ด้วย
+            // ตั้ง --min-client-version เมื่อไรค่อยเริ่มบังคับ (ดู Program.cs)
+            string clientVersion = request.QueryString.Get("version");
+            bool compatible = MinClientVersion == null
+                              || string.IsNullOrEmpty(clientVersion)
+                              || string.CompareOrdinal(clientVersion, MinClientVersion) >= 0;
+            if (!compatible)
+            {
+                Console.WriteLine($"[เวอร์ชัน] ปฏิเสธตัวเกม {clientVersion} (ต้องอย่างน้อย {MinClientVersion})");
+            }
+
             JObject jObject = new()
             {
                 // ต้นฉบับ: CurrentBundleVersion.GetClientVersion() = "5.2.1"
                 ["server_version"] = "5.2.1",
-                ["compatible"] = true,
+                ["compatible"] = compatible,
+                // ⚠️ ต้องมีลิงก์โหลดคู่กับ compatible=false เสมอ ไม่งั้นผู้เล่นตันที่หน้า error
+                // โดยไม่รู้ว่าต้องไปโหลดที่ไหน (audit ระบุไว้เป็นข้อ high แยกต่างหาก)
+                ["download_url"] = DownloadUrl ?? "",
                 ["assetbundle_index_url"] = $"{RootUrl(request)}/live/{platform}/Info.5.2.1.json",
                 ["assetbundle_url_root"] = $"{RootUrl(request)}/live/{platform}/"
             };
@@ -113,6 +143,23 @@ public class Gateway
                 Console.WriteLine($"[gateway] /sessions ปฏิเสธ {remoteIp} — ไม่มีกุญแจบัญชี (ตัวเกมเก่า?)");
                 return new WebServer.JsonResponse(
                     new JObject { ["error"] = "no_account_key" }.ToString(), HttpStatusCode.Unauthorized);
+            }
+
+            if (BanList.IsBanned(ownerKey))
+            {
+                Console.WriteLine($"[แบน] ปฏิเสธ {remoteIp} — บัญชี {AccountKeys.ForLog(ownerKey)} ถูกแบน");
+                return new WebServer.JsonResponse(new JObject
+                {
+                    ["error"] = "banned",
+                    ["reason"] = BanList.ReasonOf(ownerKey) ?? ""
+                }.ToString(), HttpStatusCode.Forbidden);
+            }
+
+            if (Host.Maintenance)
+            {
+                Console.WriteLine($"[ดูแล] ปฏิเสธ {remoteIp} — กำลังปิดปรับปรุง");
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "maintenance" }.ToString(), HttpStatusCode.ServiceUnavailable);
             }
 
             // เส้นทางต้นฉบับ: LAN joiner ส่ง PlayerContext JSON ของตัวเองมาในฟิลด์ "player"
@@ -305,6 +352,86 @@ public class Gateway
         //
         // ⚠️ route นี้รันบนลูปเกม (Gateway.Process ถูกเรียกใน Host.Process) ⇒ ต้องเบา
         // งานหนักสุดคือ sort ตัวอย่างเวลา 512 ตัว ซึ่งทำเฉพาะตอนมีคนเรียกเท่านั้น
+        // ══ เครื่องมือดูแลเซิร์ฟ ══════════════════════════════════════════════════
+        // audit: "ไม่มีเครื่องมือเตะ/แบน/ปิดปากเลยแม้แต่ตัวเดียว — เจอคนป่วนแล้วทำได้อย่างเดียว
+        // คือปิดทั้งเซิร์ฟ" · ทุกเส้นใช้ด่านเดียวกับ /health (--admin-token หรือเรียกจากเครื่องเซิร์ฟเอง)
+
+        // ใครออนไลน์อยู่บ้าง — ต้องรู้ก่อนถึงจะเตะถูกคน
+        _webServer.GetRoute["/admin/who"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            return new WebServer.JsonResponse(Json.Write(_host.DescribeOnline()));
+        };
+
+        // เตะออกจากเกม (ยังเข้าใหม่ได้) — ใช้ตอนคนค้างหรือมีปัญหาชั่วคราว
+        _webServer.PostRoute["/admin/kick"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string entityId = postData.Get("entity_id");
+            string reason = postData.Get("reason") ?? "ถูกเตะโดยผู้ดูแล";
+            bool done = _host.KickPlayer(entityId, reason);
+            return new WebServer.JsonResponse(new JObject { ["kicked"] = done }.ToString());
+        };
+
+        // แบนบัญชี (เตะออกด้วย) — แบนที่กุญแจบัญชี ไม่ใช่ตัวละคร เพราะสร้างตัวใหม่ได้ฟรี
+        _webServer.PostRoute["/admin/ban"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string entityId = postData.Get("entity_id");
+            string reason = postData.Get("reason") ?? "ถูกแบนโดยผู้ดูแล";
+            PlayerContext target = _host.FindContextByEntityId(entityId);
+            if (target == null || string.IsNullOrEmpty(target.OwnerKey))
+            {
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "ไม่พบตัวละคร หรือตัวละครยังไม่มีเจ้าของ" }.ToString(),
+                    HttpStatusCode.NotFound);
+            }
+            BanList.Add(target.OwnerKey, reason);
+            _host.KickPlayer(entityId, reason);
+            return new WebServer.JsonResponse(new JObject { ["banned"] = true }.ToString());
+        };
+
+        _webServer.PostRoute["/admin/unban"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string entityId = postData.Get("entity_id");
+            PlayerContext target = _host.FindContextByEntityId(entityId);
+            bool done = target != null && BanList.Remove(target.OwnerKey);
+            return new WebServer.JsonResponse(new JObject { ["unbanned"] = done }.ToString());
+        };
+
+        _webServer.GetRoute["/admin/bans"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            return new WebServer.JsonResponse(Json.Write(BanList.Describe()));
+        };
+
+        // ประกาศถึงทุกคนที่ออนไลน์ — ใช้บอกก่อนปิดปรับปรุง
+        _webServer.PostRoute["/admin/announce"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string text = postData.Get("text");
+            if (string.IsNullOrEmpty(text))
+            {
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "ต้องมี text" }.ToString(), HttpStatusCode.BadRequest);
+            }
+            int sent = _host.Announce(text);
+            return new WebServer.JsonResponse(new JObject { ["sent"] = sent }.ToString());
+        };
+
+        // ปิดปรับปรุง — คนที่เล่นอยู่ยังเล่นต่อได้ แต่คนใหม่เข้าไม่ได้
+        // (ไม่เตะคนที่เล่นอยู่ทันที เพื่อให้ประกาศก่อนแล้วรอคนทยอยออกได้)
+        _webServer.PostRoute["/admin/maintenance"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            Host.Maintenance = postData.Get("on") == "1";
+            Console.WriteLine(Host.Maintenance
+                ? "[ดูแล] เปิดโหมดปิดปรับปรุง — คนใหม่เข้าไม่ได้ (คนที่เล่นอยู่ยังเล่นต่อได้)"
+                : "[ดูแล] ปิดโหมดปิดปรับปรุง — เปิดรับคนใหม่ตามปกติ");
+            return new WebServer.JsonResponse(new JObject { ["maintenance"] = Host.Maintenance }.ToString());
+        };
+
         _webServer.GetRoute["/health"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
         {
             if (!IsAdminAllowed(request))
@@ -458,6 +585,9 @@ public class Gateway
     }
 
     /// <summary>หา context จาก Authorization header (session token — client ใส่ทุก request แบบ auth)</summary>
+    private static WebServer.Response Forbidden() =>
+        new WebServer.TextResponse("text/plain", "403 Forbidden", HttpStatusCode.Forbidden);
+
     private PlayerContext ResolveBySession(HttpListenerRequest request)
     {
         string token = request?.Headers?["Authorization"];

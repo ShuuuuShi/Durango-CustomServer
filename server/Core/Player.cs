@@ -1284,6 +1284,27 @@ public partial class Player
     ///
     /// เรียกได้ซ้ำโดยไม่พัง (ปิดคอนเนกชันกับถูกถอดออกจากโลกอาจเกิดคนละจังหวะ)
     /// </summary>
+    /// <summary>ชื่อตัวละคร — หน้าแอดมินใช้แสดงว่ากำลังจะเตะใคร</summary>
+    public string Name => _context?.PlayerInfo?.PlayerName;
+
+    /// <summary>
+    /// เตะออกจากเกมพร้อมบอกเหตุผล
+    ///
+    /// ส่ง <c>Abort</c> ก่อนปิดสาย เพื่อให้ฝั่งเกมขึ้นข้อความแทนที่จะค้างแล้วหลุดเงียบ ๆ
+    /// (client รับ Abort เป็นข้อความระบบทั่วไป — เส้นทางเดียวกับที่เซิร์ฟใช้ปฏิเสธคำสั่งอื่น)
+    /// </summary>
+    public void KickWith(string reason)
+    {
+        try { Send(new Abort { Text = reason }); } catch (Exception) { }
+        try { _connection.Close(); } catch (Exception) { }
+    }
+
+    /// <summary>ประกาศจากผู้ดูแลถึงผู้เล่นคนนี้</summary>
+    public void SendNotice(string text)
+    {
+        try { Send(new Info { Text = text }); } catch (Exception) { }
+    }
+
     public void Detach()
     {
         if (_detached) return;

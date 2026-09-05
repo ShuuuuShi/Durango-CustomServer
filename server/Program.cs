@@ -78,6 +78,8 @@ internal static class Program
         // token ของ /health — เอาจาก env ได้ด้วย จะได้ไม่ต้องโผล่ในบรรทัดคำสั่ง (ps เห็นหมด)
         string adminToken = Environment.GetEnvironmentVariable("DURANGO_ADMIN_TOKEN");
         string admins = Environment.GetEnvironmentVariable("DURANGO_ADMINS");
+        string minClientVersion = null;
+        string downloadUrl = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -121,6 +123,8 @@ internal static class Program
                 // รายชื่อผู้ดูแล (entity id ของตัวละคร คั่นด้วยจุลภาค) — คนเดียวที่ใช้คำสั่ง cheat ได้
                 // ไม่ตั้ง = ไม่มีใครใช้ได้เลย ซึ่งเป็นค่าที่ปลอดภัยตอนเปิดให้คนนอกเล่น
                 case "--admins": admins = args[++i]; break;
+                case "--min-client-version": minClientVersion = args[++i]; break;
+                case "--download-url": downloadUrl = args[++i]; break;
                 case "--admin-token": adminToken = args[++i]; break;
                 case "--tps": _ticksPerSecond = int.Parse(args[++i]); break;
                 case "--cluster-mode":
@@ -134,6 +138,8 @@ internal static class Program
                     Console.WriteLine("  --admin-token <t>   token ของ /health (หรือ env DURANGO_ADMIN_TOKEN) — ไม่ตั้ง = เรียกได้เฉพาะเครื่องตัวเอง");
                     Console.WriteLine("  --adopt-orphans     ให้บัญชีแรกที่เข้ามารับตัวละครที่ยังไม่มีเจ้าของ (ใช้ตอนย้ายข้อมูลครั้งเดียว ห้ามเปิดค้าง)");
                     Console.WriteLine("  --admins <id,id>    entity id ของผู้ดูแล (หรือ env DURANGO_ADMINS) — ไม่ตั้ง = คำสั่ง cheat ปิดสนิท");
+                    Console.WriteLine("  --min-client-version <v>  เวอร์ชันตัวเกมต่ำสุดที่ยอมให้เข้า — ไม่ตั้ง = รับทุกเวอร์ชัน");
+                    Console.WriteLine("  --download-url <url>      ลิงก์โหลดตัวเกมใหม่ (ต้องมีถ้าเปิดด่านเวอร์ชัน)");
                     return 0;
             }
         }
@@ -172,6 +178,8 @@ internal static class Program
         // เพดานสาย TCP คิดจากเพดานผู้เล่น — --max-players กันได้แค่ประตู HTTP
         GameServer.MaxPlayersHint = maxPlayers;
         host.AdminToken = adminToken;
+        host.MinClientVersion = minClientVersion;
+        host.DownloadUrl = downloadUrl;
         host.Load();
 
         try

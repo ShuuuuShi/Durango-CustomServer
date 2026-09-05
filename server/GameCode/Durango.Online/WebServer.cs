@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
+using System.Threading;
 using System.Net.Sockets;
 using System.Text;
 
@@ -134,6 +135,13 @@ public class WebServer
 	///    วัดจริงบนเซิร์ฟ: ผู้เล่น 13 คน + มือถือโหลด bundle = 2 tps
 	///    สตรีมทีละ 64 KB แทน — หน่วยความจำคงที่ ไม่แตะ LOH
 	/// </summary>
+	/// <summary>
+	/// จำนวนไฟล์ที่ยอมให้ส่งพร้อมกันจากเธรดอื่น — **ค่าของเรา**
+	/// มากไป = ThreadPool บวมจนงานอื่นไม่ได้คิว · น้อยไป = คนโหลดพร้อมกันต้องรอ
+	/// 8 พอสำหรับ 50 คน เพราะฝั่งเกมแคชไฟล์ไว้แล้วโหลดแค่ครั้งแรกครั้งเดียว
+	/// </summary>
+	private static readonly SemaphoreSlim _fileSendSlots = new SemaphoreSlim(8, 8);
+
 	public class FileResponse : Response
 	{
 		private readonly string _path;
@@ -538,7 +546,54 @@ public class WebServer
 				long? directLength = value3.DirectLength;
 				if (directLength.HasValue)
 				{
-					key.Response.ContentLength64 = directLength.Value;
+					// [แก้เอง] 6 ก.ย. 2026 — **ส่งไฟล์ใหญ่จากเธรดอื่น ไม่ใช่บนลูปเกม**
+					//
+					// ⚠️ ปัญหาเดิม: value3.Write(OutputStream) ของไฟล์ = file.CopyTo(output)
+					// ซึ่ง **บล็อกจนกว่าหน้าต่าง TCP ของเครื่องนั้นจะระบาย** และลูปนี้คือลูปเดียวกับที่
+					// เดินเกมทั้งใบ (Connection.Process · World.Process · Player.Process อยู่ใต้ host.Process)
+					// ⇒ มือถือเน็ตช้าเครื่องเดียวโหลด bundle ค้าง = **เกมหยุดเดินทั้งเกาะ**
+					// (วัดจริง: ผู้เล่น 13 คน + โหลด bundle = 2 tps)
+					//
+					// HttpListenerResponse เขียนจากเธรดอื่นได้ และแต่ละ response เป็นของตัวมันเอง
+					// ไม่แชร์สถานะกับลูปเกม ⇒ โยนลง ThreadPool แล้วปล่อยลูปเดินต่อทันที
+					//
+					// ⚠️ จำกัดจำนวนที่ส่งพร้อมกัน — ไม่จำกัด = คนโหลดพร้อมกันเยอะ ๆ ทำให้ ThreadPool
+					// บวมจนงานอื่นของเซิร์ฟไม่ได้คิว (ยังพอสำหรับ 50 คน เพราะไฟล์ถูกแคชฝั่งเกม)
+					HttpListenerContext ctx = key;
+					Response body = value3;
+					long length = directLength.Value;
+					string logLine = string.Format("[web] {0} {1} -> {2}",
+						ctx.Request.HttpMethod, ctx.Request.Url.PathAndQuery, (int)body.StatusCode);
+
+					if (_fileSendSlots.Wait(0))
+					{
+						ThreadPool.QueueUserWorkItem(delegate
+						{
+							try
+							{
+								ctx.Response.ContentLength64 = length;
+								body.Write(ctx.Response.OutputStream);
+								Console.WriteLine(logLine);
+							}
+							catch (Exception e)
+							{
+								Console.WriteLine("[web] ส่งไฟล์ไม่สำเร็จ (client หลุดไปแล้ว?): " + e.Message);
+							}
+							finally
+							{
+								try { ctx.Response.Close(); } catch (Exception) { }
+								_fileSendSlots.Release();
+							}
+						});
+						// ส่งต่อให้เธรดอื่นแล้ว — ห้ามให้ลูปนี้ Close() ซ้ำ
+						LinkedListNode<KeyValuePair<HttpListenerContext, Response>> sent = linkedListNode;
+						linkedListNode = linkedListNode.Next;
+						_responseList.Remove(sent);
+						continue;
+					}
+
+					// คิวเต็ม — ส่งบนลูปนี้เหมือนเดิม (ช้ากว่าแต่ไม่ทิ้งคำขอ)
+					key.Response.ContentLength64 = length;
 					value3.Write(key.Response.OutputStream);
 				}
 				else

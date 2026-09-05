@@ -281,6 +281,14 @@ public class World
         };
     }
 
+    /// <summary>
+    /// สำเนารายชื่อผู้เล่นในโลกนี้ — คืนสำเนาเสมอ ไม่ใช่ลิสต์จริง
+    ///
+    /// เพราะการเตะ/ประกาศทำให้ผู้เล่นหลุดออกจากลิสต์ระหว่างวน (Closed → _players.Remove)
+    /// ⇒ วนลิสต์จริงแล้วแก้ไปด้วยจะพัง (เคยทำเซิร์ฟดับมาแล้วที่ Process — ดูคอมเมนต์ข้างล่าง)
+    /// </summary>
+    public List<Player> PlayersSnapshot() => new(_players);
+
     public void Process()
     {
         for (int num = _players.Count - 1; num >= 0; num--)
