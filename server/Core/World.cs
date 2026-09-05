@@ -342,6 +342,8 @@ public class World
     {
         player.Closed += delegate
         {
+            // ถอด event ให้แน่ใจอีกชั้น — Player.Detach() เรียกซ้ำได้ไม่พัง
+            player.Detach();
             _players.Remove(player);
             PlayerDisappeared?.Invoke(player);
         };

@@ -81,26 +81,37 @@ public partial class Player
         // ต้องสร้างก่อน Send(_context.AppearPlayer) ท้าย ctor เพราะ AppearPlayer พก Survival (182)
         // ไปด้วยเป็นลำดับที่ 11 ⇒ เส้นแนวโน้มต้องถูกสร้างใหม่ตามเวลาปัจจุบันก่อนถูกส่ง
         _survival = new SurvivalState(_context, live: true);
+        // ⚠️ **ต้องเก็บ delegate ไว้ในฟิลด์ ห้ามใช้ lambda ลอย ๆ** — ไม่งั้นถอดออกไม่ได้
+        // แล้ว World (ซึ่งอยู่ยาวกว่าผู้เล่น) จะถือ Player ที่หลุดไปแล้วไว้ตลอด
+        // ⇒ Connection พร้อมบัฟเฟอร์ ~4 MB ไม่ถูกคืนสักไบต์ (ดู Detach)
+        _onArtifactDisplayUpdated = msg => Send(msg);
+        _onArtifactStateUpdated = msg => Send(msg);
+        _onNaturalAdded = (chunk, bytes) => Send(new GardenDiff { Chunk = chunk, _GardenDiff = bytes });
+        _onNaturalDestroyed = tile => Send(new DisappearEntityOnTile { Tile = tile });
+
         _world.ArtifactAppeared += World_ArtifactAppeared;
         _world.ArtifactDisappeared += World_ArtifactDisappeared;
         _world.PlayerAppeared += World_PlayerAppeared;
         _world.PlayerDisappeared += World_PlayerDisappeared;
-        _world.ArtifactManager.ArtifactDisplayUpdated += delegate(ArtifactDisplay msg) { Send(msg); };
-        _world.ArtifactManager.ArtifactStateUpdated += delegate(ArtifactState msg) { Send(msg); };
-        _world.NaturalAdded += delegate(Point2 chunk, byte[] bytes)
-        {
-            Send(new GardenDiff { Chunk = chunk, _GardenDiff = bytes });
-        };
-        _world.NaturalDestroyed += delegate(Point2 tile)
-        {
-            Send(new DisappearEntityOnTile { Tile = tile });
-        };
+        _world.ArtifactManager.ArtifactDisplayUpdated += _onArtifactDisplayUpdated;
+        _world.ArtifactManager.ArtifactStateUpdated += _onArtifactStateUpdated;
+        _world.NaturalAdded += _onNaturalAdded;
+        _world.NaturalDestroyed += _onNaturalDestroyed;
         _connection.Recv(delegate(SetChunk msg, PacketHeader header)
         {
             SetCenterChunks(msg.Chunk.x, msg.Chunk.y);
         });
         _connection.Recv(delegate(Move msg, PacketHeader header)
         {
+            // ⚠️ เดิมกระจายก้อนที่รับมา **ดิบ ๆ** ให้ทุกคนบนเกาะก่อนตรวจอะไรเลย
+            // ⇒ ผู้เล่นคนเดียวยัด Movements ให้ใหญ่ ~400-500 KB หนึ่งก้อน แล้วทุก connection
+            // แพ็กไม่ลงบัฟเฟอร์ 512 KB (Connection.cs:21 BufferCapacity) พร้อมกัน
+            // ⇒ **ทุกคนบนเกาะหลุดพร้อมกันในเฟรมเดียว** และทำซ้ำได้ไม่จำกัด
+            if (!IsSaneMove(msg))
+            {
+                Console.WriteLine($"[เดิน] ปฏิเสธก้อนผิดขนาดจาก {Short(EntityId)}");
+                return;
+            }
             _world.BroadCast(msg);
             HandleMoveMsg(msg.Movements);
         });
@@ -419,8 +430,7 @@ public partial class Player
         });
         _connection.Recv(delegate(SetStorageItem msg, PacketHeader header)
         {
-            _context.Storage[msg.Key] = msg.Value;
-            OnContextChanged();
+            HandleSetStorageItemMsg(msg);
         });
         _connection.Recv(delegate(TurnOnMusic msg, PacketHeader header)
         {
@@ -487,6 +497,7 @@ public partial class Player
             // แช่หลอดไว้ที่ค่าปัจจุบันก่อนปล่อย context — ไม่งั้นเส้นแนวโน้มที่ส่งไปแล้วจะเดินต่อ
             // อีกจนสุด horizon แล้วรอบเซฟอัตโนมัติจะเขียนค่าที่เดินไปแล้วลงไฟล์ (ดู SurvivalState._live)
             _survival.Freeze(Gauge.CurrentTime);
+            Detach();
             Closed?.Invoke();
         };
         RegisterSystemHandlers();
@@ -733,6 +744,33 @@ public partial class Player
                 _chunkVisited[i, j] = World.ChunkVisit.Visit;
             }
         }
+    }
+
+    /// <summary>
+    /// เพดานก้อนการเคลื่อนที่ — **ค่าของเรา** ตั้งจากพฤติกรรมจริงของตัวเกม
+    ///
+    /// ฝั่งเกมยุบก้อนก่อนส่งเสมอ (client/MoveMsgGenerator.cs:152 CompactMovement) ⇒ ปกติได้ไม่กี่ชิ้น
+    /// ตั้งเผื่อไว้กว้างมากแล้ว แต่ยังต่ำกว่าที่จะทำให้แพ็กเก็ตล้นบัฟเฟอร์ 512 KB หลายเท่า
+    /// (จุดของ path หนึ่งจุด ~30 ไบต์ ⇒ 512 จุด ≈ 15 KB)
+    /// </summary>
+    private const int MaxMovementsPerMessage = 16;
+    private const int MaxPathNodesPerMessage = 512;
+
+    /// <summary>ก้อนนี้มีขนาดสมเหตุสมผลพอจะกระจายต่อไหม</summary>
+    private static bool IsSaneMove(Move msg)
+    {
+        Movement[] movements = msg.Movements;
+        if (movements == null || movements.Length == 0) return false;
+        if (movements.Length > MaxMovementsPerMessage) return false;
+
+        int nodes = 0;
+        foreach (Movement movement in movements)
+        {
+            if (movement.Path == null || movement.Path.Length == 0) return false;
+            nodes += movement.Path.Length;
+            if (nodes > MaxPathNodesPerMessage) return false;
+        }
+        return true;
     }
 
     private void HandleMoveMsg(Movement[] movements)
@@ -1169,6 +1207,97 @@ public partial class Player
 
     private static string Short(string id) =>
         string.IsNullOrEmpty(id) ? "(ว่าง)" : id[..Math.Min(8, id.Length)];
+
+    /// <summary>เนมสเปซคีย์ที่ **เซิร์ฟเป็นเจ้าของ** — client เขียนไม่ได้</summary>
+    private const string ServerStoragePrefix = "server_";
+
+    /// <summary>
+    /// เพดานขนาดของช่องเก็บของ client (ไบต์) — **ค่าของเรา**
+    ///
+    /// ข้อมูลที่ client เก็บจริงเป็นของเล็ก ๆ (ช่องแชทที่เปิดไว้ · อิโมติคอนที่ปักหมุด ·
+    /// ตำแหน่งที่ชอบ · สมุดบันทึก) รวมกันไม่ถึงหลักสิบ KB ⇒ 256 KB ต่อคีย์ / 2 MB รวม เหลือเฟือ
+    /// ไม่จำกัด = ยิง SetStorageItem รัว ๆ ทำ RAM เซิร์ฟหมดและไฟล์เซฟบวมจนเขียนไม่ไหว
+    /// </summary>
+    private const int MaxStorageValueBytes = 256 * 1024;
+    private const int MaxStorageTotalBytes = 2 * 1024 * 1024;
+
+    /// <summary>
+    /// client ขอเก็บค่าลงช่องเก็บของตัวเอง (การตั้งค่า UI · สมุดบันทึก · อิโมติคอน)
+    ///
+    /// ⚠️ เดิมเขียนทับได้ **ทุกคีย์** รวมคีย์ที่เซิร์ฟใช้เก็บสถานะจริง
+    /// (<c>server_skills</c> — Player.Skills.cs:119) ⇒ client ที่ถูกแก้ตั้งเลเวล/สกิลของตัวเองได้
+    /// **แม้จะปิดคำสั่ง cheat ไปแล้ว** เพราะเส้นนี้ไม่ใช่ cheat แต่เป็นช่องเก็บของปกติ
+    ///
+    /// วิธีกัน: จองเนมสเปซ <c>server_</c> ไว้ให้เซิร์ฟฝ่ายเดียว (เผื่อคีย์ใหม่ในอนาคตด้วย)
+    /// ส่วนคีย์อื่นปล่อยให้เขียนได้ตามเดิม เพราะฝั่งเกมใช้เก็บของจริง เช่น
+    /// <c>encyclopedia</c> (client/MemoSystem.cs:186) · ช่องแชท · อิโมติคอน
+    /// </summary>
+    private void HandleSetStorageItemMsg(SetStorageItem msg)
+    {
+        if (string.IsNullOrEmpty(msg.Key)) return;
+
+        if (msg.Key.StartsWith(ServerStoragePrefix, StringComparison.Ordinal))
+        {
+            Console.WriteLine($"[เก็บของ] ปฏิเสธ {Short(EntityId)}: คีย์ '{msg.Key}' เป็นของเซิร์ฟ");
+            return;
+        }
+
+        int size = msg.Value?.Length ?? 0;
+        if (size > MaxStorageValueBytes)
+        {
+            Console.WriteLine($"[เก็บของ] ปฏิเสธ {Short(EntityId)}: คีย์ '{msg.Key}' ใหญ่ {size} ไบต์");
+            return;
+        }
+
+        _context.Storage ??= new Dictionary<string, byte[]>();
+        int total = size;
+        foreach (KeyValuePair<string, byte[]> pair in _context.Storage)
+        {
+            if (pair.Key == msg.Key) continue;              // ตัวที่กำลังจะเขียนทับ ไม่นับของเดิม
+            total += pair.Value?.Length ?? 0;
+        }
+        if (total > MaxStorageTotalBytes)
+        {
+            Console.WriteLine($"[เก็บของ] ปฏิเสธ {Short(EntityId)}: รวมแล้วเกินเพดาน ({total} ไบต์)");
+            return;
+        }
+
+        _context.Storage[msg.Key] = msg.Value;
+        OnContextChanged();
+    }
+
+    private Action<ArtifactDisplay> _onArtifactDisplayUpdated;
+    private Action<ArtifactState> _onArtifactStateUpdated;
+    private Action<Point2, byte[]> _onNaturalAdded;
+    private Action<Point2> _onNaturalDestroyed;
+    private bool _detached;
+
+    /// <summary>
+    /// ถอดตัวเองออกจาก event ของโลกทั้งหมด — **ตัวที่กันหน่วยความจำรั่ว**
+    ///
+    /// ⚠️ อาการเดิม: ผู้เล่น subscribe event ของ World 8 ตัวตอนสร้าง แล้ว**ไม่เคยถอดเลย**
+    /// World อยู่ยาวกว่าผู้เล่นมาก ⇒ ทุกครั้งที่ใครต่อเข้ามาแล้วหลุด Player ตัวนั้นยังถูก World
+    /// ถือไว้ผ่าน delegate ⇒ <c>Connection</c> ที่พ่วงบัฟเฟอร์ ~4 MB ไม่ถูกคืนสักไบต์
+    ///
+    /// เกมมือถือหลุด/กลับเข้าบ่อยมาก — 50 คน × reconnect 10 ครั้ง/วัน = **~2 GB/วัน**
+    /// จนกว่าเซิร์ฟจะถูกรีสตาร์ต
+    ///
+    /// เรียกได้ซ้ำโดยไม่พัง (ปิดคอนเนกชันกับถูกถอดออกจากโลกอาจเกิดคนละจังหวะ)
+    /// </summary>
+    public void Detach()
+    {
+        if (_detached) return;
+        _detached = true;
+
+        _world.ArtifactAppeared -= World_ArtifactAppeared;
+        _world.ArtifactDisappeared -= World_ArtifactDisappeared;
+        _world.PlayerAppeared -= World_PlayerAppeared;
+        _world.PlayerDisappeared -= World_PlayerDisappeared;
+        if (_onArtifactDisplayUpdated != null) _world.ArtifactManager.ArtifactDisplayUpdated -= _onArtifactDisplayUpdated;
+        if (_onArtifactStateUpdated != null) _world.ArtifactManager.ArtifactStateUpdated -= _onArtifactStateUpdated;
+        if (_onNaturalAdded != null) _world.NaturalAdded -= _onNaturalAdded;
+        if (_onNaturalDestroyed != null) _world.NaturalDestroyed -= _onNaturalDestroyed;
+    }
 
     private void HandleDestructMsg(DestructArtifact msg)
     {

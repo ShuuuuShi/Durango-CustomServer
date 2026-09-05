@@ -169,6 +169,8 @@ internal static class Program
         // [5 ก.ย. 2026] ค่าพวกนี้ต้องตั้ง **ก่อน** host.Start() เพราะ Start เป็นคนสร้าง Gateway
         // แล้วส่ง AdminToken ต่อให้ตอนนั้น (เดิม --max-players ถูกพิมพ์ออกจอเฉย ๆ ไม่มีใครใช้)
         host.MaxPlayers = maxPlayers;
+        // เพดานสาย TCP คิดจากเพดานผู้เล่น — --max-players กันได้แค่ประตู HTTP
+        GameServer.MaxPlayersHint = maxPlayers;
         host.AdminToken = adminToken;
         host.Load();
 

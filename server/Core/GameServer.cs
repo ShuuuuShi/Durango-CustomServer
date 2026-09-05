@@ -93,7 +93,36 @@ public class GameServer
         {
             _connections[num].Process();
         }
+        DropStaleUnauthenticated();
         if (Worlds != null) Worlds.ProcessAll(); else World.Process();
+    }
+
+    /// <summary>
+    /// ตัดสายที่ต่อเข้ามาแล้วไม่ยอมผ่าน Auth ภายในเวลาที่กำหนด
+    ///
+    /// ⚠️ ไม่มีตัวนี้ = เปิด TCP ค้างไว้เฉย ๆ ก็จองบัฟเฟอร์ ~4 MB ต่อเส้นได้ตลอดกาล
+    /// โดยไม่ต้องมี token ไม่ต้องมีบัญชี ไม่ต้องทำอะไรเลย
+    /// </summary>
+    private void DropStaleUnauthenticated()
+    {
+        if (_pendingAuth.Count == 0) return;
+        double now = Gauge.CurrentTime;
+
+        List<Connection> stale = null;
+        foreach (KeyValuePair<Connection, double> pair in _pendingAuth)
+        {
+            if (now - pair.Value < UnauthenticatedTimeoutSeconds) continue;
+            (stale ??= new List<Connection>()).Add(pair.Key);
+        }
+        if (stale == null) return;
+
+        foreach (Connection connection in stale)
+        {
+            Console.WriteLine("[auth] ตัดสายที่ไม่ผ่าน Auth ภายในเวลาที่กำหนด");
+            _pendingAuth.Remove(connection);
+            try { connection.Close(); } catch (Exception) { }
+            _connections.Remove(connection);
+        }
     }
 
     /// <summary>ลงทะเบียน context (สล็อตจริงหรือชั่วคราว) — /sessions เรียก</summary>
@@ -174,8 +203,38 @@ public class GameServer
     [CanBeNull]
     public PlayerContext GetPlayerContext(string entityId) => _playerContexts.Get(entityId);
 
+    /// <summary>
+    /// เพดานจำนวนสายที่เปิดค้างพร้อมกัน — **ค่าของเรา**
+    ///
+    /// ⚠️ <c>--max-players</c> กันได้แค่ประตูหน้า (HTTP /entry) แต่ทางเข้าจริงคือ TCP
+    /// ซึ่งเดิม**ไม่มีเพดานเลย** ⇒ เปิดสาย TCP ค้างไว้เฉย ๆ โดยไม่ต้อง Auth ก็จองบัฟเฟอร์
+    /// ~4 MB ต่อเส้นได้ไม่จำกัด (Connection.cs จอง 7 ก้อน ก้อนละ 512 KB ตั้งแต่ตอน accept)
+    /// ⇒ ไม่กี่ร้อยสายก็ทำ RAM หมด
+    ///
+    /// ตั้งเป็น 3 เท่าของเพดานผู้เล่น เผื่อช่วงที่คนกำลังต่อใหม่ทับกับคนเก่าที่ยังไม่หลุด
+    /// </summary>
+    public static int MaxPlayersHint { get; set; } = 200;
+
+    private static int MaxConnections => Math.Max(32, MaxPlayersHint * 3);
+
+    /// <summary>
+    /// เวลาที่ยอมให้สายหนึ่งค้างอยู่โดยยังไม่ผ่าน Auth (วินาที) — **ค่าของเรา**
+    /// ตัวเกมจริงส่ง Auth ทันทีหลังต่อ ⇒ 30 วินาทีเหลือเฟือแม้เน็ตแย่
+    /// </summary>
+    private const double UnauthenticatedTimeoutSeconds = 30.0;
+
+    /// <summary>สายที่ยังไม่ผ่าน Auth → เวลาที่ต่อเข้ามา (ใช้ตัดสายที่จองบัฟเฟอร์ทิ้งไว้เฉย ๆ)</summary>
+    private readonly Dictionary<Connection, double> _pendingAuth = new();
+
     private void Listener_ClientAccepted(Socket socket)
     {
+        if (_connections.Count >= MaxConnections)
+        {
+            Console.WriteLine($"[auth] ปฏิเสธสายใหม่ — เต็มเพดาน ({_connections.Count}/{MaxConnections})");
+            try { socket.Close(); } catch (Exception) { }
+            return;
+        }
+
         Connection connection = new(socket);
         connection.Recv(delegate(GetClock getClock, PacketHeader header)
         {
@@ -207,6 +266,7 @@ public class GameServer
                 return;
             }
             _connectionDict[connection] = entityId;
+            _pendingAuth.Remove(connection);      // ผ่านด่านแล้ว ไม่ต้องนับเวลาอีก
             SendWelcome(connection, entityId, playerContext.PlayerInfo.PlayerName, header.Seq);
         });
         connection.Recv(delegate(Ready ready, PacketHeader readyHeader)
@@ -252,9 +312,11 @@ public class GameServer
         {
             _connections.Remove(connection);
             _connectionDict.Remove(connection);
+            _pendingAuth.Remove(connection);
         };
         connection.StartReceive();
         _connections.Add(connection);
+        _pendingAuth[connection] = Gauge.CurrentTime;
     }
 
     private void SendWelcome(Connection connection, string entityId, string name, uint seq)
