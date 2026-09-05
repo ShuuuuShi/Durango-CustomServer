@@ -41,6 +41,51 @@ public static class CageTypes
 
     private static Dictionary<string, Info> _byPrototype;
 
+    /// <summary>
+    /// ซ่อมค่า <c>ArtifactState.Cage</c> ที่โหลดกลับมาจากไฟล์เซฟให้เป็นชนิดที่ถูกต้อง
+    ///
+    /// ⚠️ **ถ้าไม่ทำ = โปรโตคอลพังทั้งแพ็กเก็ต ไม่ใช่แค่กรงหาย**
+    /// <c>ArtifactState.Cage</c> ประกาศเป็น <c>object</c> (ต้นฉบับของ NEXON) เพราะช่องนี้ใส่ได้
+    /// สองชนิดคือ <c>Cage</c> กับ <c>GrowCage</c> ⇒ Newtonsoft ตอนอ่านกลับไม่รู้ว่าเป็นชนิดไหน
+    /// จึงคืนมาเป็น <c>JObject</c> · แล้ว <c>ArtifactState.Pack</c> (บรรทัด 148-159) เขียนแบบ
+    /// <code>
+    /// if (Cage == null) PackNull(); else if (Cage is Cage) ... else if (Cage is GrowCage) ...
+    /// </code>
+    /// ไม่มี else ⇒ เจอ JObject แล้ว**ไม่เขียนอะไรลงไปเลยสักไบต์** ทำให้ฟิลด์ที่เหลือทั้งหมด
+    /// (DomesticCage / Crack / Effector / Inventory / Stats) เลื่อนตำแหน่งไปหนึ่งช่อง
+    /// ⇒ ฝั่งเกมอ่านสถานะสิ่งปลูกสร้างเพี้ยนทั้งก้อน
+    ///
+    /// แยกสองชนิดด้วยฟิลด์ <c>Tasks</c> ซึ่งมีเฉพาะใน <c>GrowCage</c>
+    /// </summary>
+    public static void NormalizeLoaded(Dictionary<string, AppearArtifact> artifacts)
+    {
+        if (artifacts == null || artifacts.Count == 0) return;
+
+        var keys = new List<string>(artifacts.Keys);
+        int fixedCount = 0;
+        foreach (string key in keys)
+        {
+            AppearArtifact artifact = artifacts[key];
+            if (artifact.States.Cage is not JObject node) continue;
+            try
+            {
+                artifact.States.Cage = node["Tasks"] != null
+                    ? node.ToObject<GrowCage>()
+                    : node.ToObject<Messages.Cage>();
+                artifacts[key] = artifact;
+                fixedCount++;
+            }
+            catch (Exception e)
+            {
+                // อ่านไม่ออกก็ทิ้งไปเลยดีกว่าปล่อย JObject ค้างไว้แล้วแพ็กเก็ตพัง
+                Console.WriteLine($"[กรง] ⚠️ สถานะกรงของ {key} เสีย ({e.Message}) — ล้างทิ้งแล้วสร้างใหม่");
+                artifact.States.Cage = null;
+                artifacts[key] = artifact;
+            }
+        }
+        if (fixedCount > 0) Console.WriteLine($"[กรง] แปลงสถานะกรงจากไฟล์เซฟ {fixedCount} หลัง");
+    }
+
     /// <summary>ความจุกรงที่เลเวลนั้น — คืน 0 ถ้าไม่ใช่กรง</summary>
     public static int CapacityOf(string prototypeId, int level)
     {

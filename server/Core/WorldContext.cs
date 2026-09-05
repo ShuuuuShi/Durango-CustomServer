@@ -60,6 +60,8 @@ public class WorldContext
         GrazedPetList ??= new List<Pet>();
         Path = path;
         Player.WarehouseStore.Import(Warehouses);
+        // ⚠️ ต้องทำก่อนที่ artifact จะถูกส่งออกไปหาใคร — ดูเหตุผลเต็มที่ CageTypes.NormalizeLoaded
+        CageTypes.NormalizeLoaded(Artifacts);
     }
 
     [CanBeNull]
