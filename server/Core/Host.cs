@@ -435,16 +435,57 @@ public class Host
         return context;
     }
 
-    /// <summary>รายชื่อตัวละครสำหรับ /accounts (เทียบเท่า Cluster.OnRequestAccount ต้นฉบับ)</summary>
-    public Account BuildAccount()
+    /// <summary>
+    /// [5 ก.ย. 2026] เปิดให้บัญชีแรกที่เข้ามารับ "ตัวละครกำพร้า" ไปเป็นของตัวเอง
+    ///
+    /// ตัวละครกำพร้า = เซฟที่สร้างไว้ก่อนมีระบบบัญชี จึงไม่มี <c>owner_key</c>
+    /// โดยปริยายมันจะ **มองไม่เห็นและเข้าไม่ได้เลย** ซึ่งถูกต้องด้านความปลอดภัย
+    /// แต่ทำให้เซฟเดิมของเซิร์ฟทดสอบใช้ต่อไม่ได้ ⇒ เปิดสวิตช์นี้ตอนย้ายข้อมูล **ครั้งเดียว**
+    ///
+    /// ⚠️ **ห้ามเปิดค้างไว้ตอนเปิดให้คนนอกเล่น** — เปิดอยู่แปลว่าใครก็ตามที่ต่อเข้ามาเป็นคนแรก
+    /// จะได้ตัวละครที่ยังไม่มีเจ้าของไปทั้งหมด ซึ่งก็คือช่องโหว่เดิมในรูปแบบที่แคบลงเท่านั้น
+    /// ค่าตั้งต้นจึงเป็นปิด และเซิร์ฟจะเตือนทุกครั้งที่บูตขึ้นมาพร้อมสวิตช์นี้
+    /// </summary>
+    public static bool AdoptOrphans { get; set; }
+
+    /// <summary>บัญชีเปล่า — ใช้ตอบคำขอที่ไม่มีกุญแจบัญชี</summary>
+    public static Account EmptyAccount() => new() { PlayerSlotCount = 0, MaxPlayerSlotCount = 2 };
+
+    /// <summary>
+    /// รายชื่อตัวละคร **ของบัญชีนี้เท่านั้น** (เทียบเท่า Cluster.OnRequestAccount ต้นฉบับ)
+    ///
+    /// ⚠️ เดิมคืนตัวละครทุกตัวบนเซิร์ฟให้ทุกคน ⇒ ใครก็กดเข้าเล่นตัวละครคนอื่นได้จากหน้า Title
+    /// (เหตุผลเต็มที่ Core/Gateway.cs เส้น /accounts)
+    ///
+    /// <c>MaxPlayerSlotCount</c> ต้องมากกว่าจำนวนตัวที่มีเสมอ ไม่งั้นปุ่ม "สร้างตัวใหม่" หายไป —
+    /// ฝั่งเกมโชว์ปุ่มนั้นเฉพาะช่องที่ index &lt; availableSlotCount
+    /// (client/Durango.UI/TitlePlayerSelectionGroupBase.cs:89-97)
+    /// </summary>
+    public Account BuildAccount(string ownerKey)
     {
         var account = new Account();
+        if (string.IsNullOrEmpty(ownerKey)) return EmptyAccount();
+
         foreach (Context context in _contexts)
         {
-            account.Players.Add(context.Player.PlayerInfo);
+            PlayerContext player = context.Player;
+
+            // ตัวละครกำพร้า — รับเป็นของบัญชีแรกที่เข้ามา เฉพาะตอนเปิดสวิตช์ย้ายข้อมูล
+            if (string.IsNullOrEmpty(player.OwnerKey) && AdoptOrphans)
+            {
+                player.OwnerKey = ownerKey;
+                player.Save();
+                Console.WriteLine($"[บัญชี] ตัวละครกำพร้า '{player.PlayerInfo.PlayerName}' " +
+                                  $"({player.EntityId}) → บัญชี {AccountKeys.ForLog(ownerKey)}");
+            }
+
+            if (!AccountKeys.Same(player.OwnerKey, ownerKey)) continue;
+            account.Players.Add(player.PlayerInfo);
         }
+
         account.PlayerSlotCount = account.Players.Count;
-        account.MaxPlayerSlotCount = Math.Max(2, account.Players.Count);
+        // +1 เสมอเพื่อให้มีช่องว่างให้กดสร้างตัวใหม่ (ขั้นต่ำ 2 ตามเดิม)
+        account.MaxPlayerSlotCount = Math.Max(2, account.Players.Count + 1);
         return account;
     }
 }

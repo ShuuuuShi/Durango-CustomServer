@@ -19,7 +19,13 @@ public class Platform
 
 	public static Platform Instance { get; private set; }
 
-	public virtual string NPSN => string.Empty;
+	// [แก้เอง 5 ก.ย. 2026] เดิมคืน string.Empty ตายตัว (ช่องบัญชี NEXON ที่เซิร์ฟส่วนตัวไม่มี)
+	// ⇒ เซิร์ฟแยกไม่ออกว่าใครเป็นใคร แล้ว /accounts คืนตัวละครทุกตัวบนเซิร์ฟให้ทุกคน
+	//   ⇒ ผู้เล่นคนที่ 2 เปิดเกมเห็นตัวละครคนที่ 1 ในสล็อตตัวเอง กดเข้าเล่นได้เลย
+	// ตอนนี้คืนกุญแจประจำเครื่องแทน (ดูเหตุผลเต็มที่ DeviceAccount)
+	// ⚠️ ต้องคงที่ตลอดการรัน — Clusters.RequestAccounts:227,231 จำค่านี้ไว้ก่อนยิงคำขอ
+	//    แล้วเทียบตอนคำตอบกลับมา ถ้าเปลี่ยนกลางคันมันจะทิ้งคำตอบเงียบ ๆ
+	public virtual string NPSN => DeviceAccount.Key;
 
 	public virtual string AccountProvider => string.Empty;
 

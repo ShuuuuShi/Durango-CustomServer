@@ -112,6 +112,10 @@ internal static class Program
                     break;
                 }
                 case "--max-players": maxPlayers = int.Parse(args[++i]); break;
+
+                // ย้ายข้อมูลครั้งเดียว — ให้บัญชีแรกที่เข้ามารับตัวละครที่ยังไม่มีเจ้าของไป
+                // ⚠️ ห้ามเปิดค้างตอนเปิดให้คนนอกเล่น (ดู Core/Host.AdoptOrphans)
+                case "--adopt-orphans": Host.AdoptOrphans = true; break;
                 case "--admin-token": adminToken = args[++i]; break;
                 case "--tps": _ticksPerSecond = int.Parse(args[++i]); break;
                 case "--cluster-mode":
@@ -123,11 +127,17 @@ internal static class Program
                     Console.WriteLine("  --name, --gateway-port, --game-port, --data, --terrains, --terrain,");
                     Console.WriteLine("  --assetbundles-android, --public-host, --url-prefix, --max-players, --tps, --cluster-mode,");
                     Console.WriteLine("  --admin-token <t>   token ของ /health (หรือ env DURANGO_ADMIN_TOKEN) — ไม่ตั้ง = เรียกได้เฉพาะเครื่องตัวเอง");
+                    Console.WriteLine("  --adopt-orphans     ให้บัญชีแรกที่เข้ามารับตัวละครที่ยังไม่มีเจ้าของ (ใช้ตอนย้ายข้อมูลครั้งเดียว ห้ามเปิดค้าง)");
                     return 0;
             }
         }
 
         Console.WriteLine("=== DurangoServerNx (เซิร์ฟแท้พอร์ตตรง · มือถือก่อน) ===");
+        if (Host.AdoptOrphans)
+        {
+            Console.WriteLine("[boot] ⚠️⚠️ --adopt-orphans เปิดอยู่ — บัญชีแรกที่ต่อเข้ามาจะได้ตัวละครที่ยังไม่มีเจ้าของไปทั้งหมด");
+            Console.WriteLine("[boot]      ใช้ตอนย้ายข้อมูลครั้งเดียวเท่านั้น **ปิดก่อนเปิดให้คนนอกเล่น**");
+        }
         Console.WriteLine($"[boot] data={dataDir} terrains={TerrainLoader.TerrainDir}");
 
         // ---- game data (เทียบเท่า Loader ของ client) ----

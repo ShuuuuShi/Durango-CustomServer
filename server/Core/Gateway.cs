@@ -101,6 +101,20 @@ public class Gateway
 
         _webServer.PostRoute["/sessions"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
         {
+            string remoteIp = request?.RemoteEndPoint?.Address?.ToString() ?? "?";
+
+            // [5 ก.ย. 2026] กุญแจบัญชี — ตัวเกมส่งมาในช่อง account_id อยู่แล้วทุกคำขอ
+            // (client/Durango.System/Platform.cs:118 BuildSessionForm) แต่ต้นฉบับคืนค่าว่างเสมอ
+            // จึงแพตช์ฝั่งเกมให้คืนกุญแจประจำเครื่อง (ดูเหตุผลเต็มที่ Support/AccountKeys)
+            // ⚠️ ไม่มีกุญแจ = ปฏิเสธ ไม่ใช่ปล่อยผ่านแบบเดิม — ตัวเกมรุ่นเก่าที่ยังไม่แพตช์ต้องเข้าไม่ได้
+            string ownerKey = AccountKeys.Normalize(postData.Get("account_id"));
+            if (ownerKey == null)
+            {
+                Console.WriteLine($"[gateway] /sessions ปฏิเสธ {remoteIp} — ไม่มีกุญแจบัญชี (ตัวเกมเก่า?)");
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "no_account_key" }.ToString(), HttpStatusCode.Unauthorized);
+            }
+
             // เส้นทางต้นฉบับ: LAN joiner ส่ง PlayerContext JSON ของตัวเองมาในฟิลด์ "player"
             string player = postData.Get("player");
             PlayerContext context = null;
@@ -117,7 +131,6 @@ public class Gateway
                 }
             }
 
-            string remoteIp = request?.RemoteEndPoint?.Address?.ToString() ?? "?";
             if (context == null)
             {
                 // ต้นฉบับ: ไม่มี player → ใช้ _playerCtx (โฮสต์) — เซิร์ฟเราไม่มี "โฮสต์" จึงสร้าง context ชั่วคราว
@@ -125,13 +138,27 @@ public class Gateway
             }
             else if (_host.FindContextByEntityId(context.EntityId) is { } known)
             {
-                // ตัวละครที่เคยเซฟไว้ — ใช้เซฟบนดิสก์เป็นหลัก (client ส่งมาแค่บางฟิลด์)
-                context = known;
+                // ⚠️ ช่องโหว่เดิม: เชื่อ entity id ที่ผู้ขอพิมพ์มาเอง แล้วออก token ให้สล็อตจริงบนดิสก์ทันที
+                // ⇒ POST เดียว body player={"player_info":{"player_entity_id":"ของเหยื่อ"}} = ยึดตัวละครได้
+                // ตอนนี้ต้องเป็นเจ้าของก่อนถึงจะหยิบสล็อตจริงมาใช้ได้
+                if (AccountKeys.Same(ownerKey, known.OwnerKey))
+                {
+                    context = known;   // ตัวละครของเราเอง — ใช้เซฟบนดิสก์เป็นหลัก
+                }
+                else
+                {
+                    Console.WriteLine($"[gateway] /sessions {remoteIp} ขอสวมตัวละคร {known.EntityId} " +
+                                      $"ที่ไม่ใช่ของบัญชี {AccountKeys.ForLog(ownerKey)} — ให้ context ใหม่แทน");
+                    context = _host.CreateTemporaryContext(null, null, null);
+                }
             }
+
+            // context ชั่วคราวเป็นของบัญชีที่ขอมาตั้งแต่ต้น — /players จะเซฟค่านี้ลงไฟล์ตอนสร้างจริง
+            context.OwnerKey ??= ownerKey;
 
             _gameServer.Register(context);
             string token = Guid.NewGuid().ToString("N");
-            _gameServer.IssueSession(context.EntityId, token);
+            _gameServer.IssueSession(context.EntityId, token, ownerKey);
             Console.WriteLine($"[gateway] /sessions {remoteIp} → {context.PlayerInfo.PlayerName} ({context.EntityId})" +
                               (string.IsNullOrEmpty(context.Path) ? " [ชั่วคราว]" : ""));
             return new WebServer.JsonResponse(new JObject
@@ -194,12 +221,26 @@ public class Gateway
         _webServer.PostRoute["/players"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
         {
             // ต้นฉบับ (prologue สร้างตัวละคร): name/region/job/gender/model_info → อัปเดต context + ใส่ชุดตามอาชีพ
-            PlayerContext context = ResolveBySession(request) ?? _playerCtx;
-            if (string.IsNullOrEmpty(context.PlayerInfo.PlayerEntityId))
+            // ⚠️ เดิมถอยไปที่ _playerCtx เมื่อไม่มีหัว Authorization ⇒ คนนอกยิง POST /players ว่าง ๆ
+            // ก็เขียนทับชื่อ/เพศ/หน้าตาของตัวละครสล็อตแรกได้ถาวร และเปลี่ยน TerrainId ของโลกหลักด้วย
+            // ⇒ ต้องมี session จริงเท่านั้น
+            string ownerKey = _gameServer.OwnerOfSession(request?.Headers?["Authorization"]);
+            PlayerContext context = ResolveBySession(request);
+            if (context == null || ownerKey == null)
+            {
+                Console.WriteLine("[gateway] /players ปฏิเสธ — ไม่มี session ที่ถูกต้อง");
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "unauthorized" }.ToString(), HttpStatusCode.Unauthorized);
+            }
+
+            // ⚠️ เส้นนี้มีไว้ "สร้างตัวใหม่" เท่านั้น — ตัวที่มี Path แล้วคือตัวที่สร้างเสร็จไปแล้ว
+            // ห้ามให้เขียนทับ (ของเราเองก็ตาม) ไม่งั้นยิงซ้ำ = ตัวละครเดิมโดนรีเซ็ต
+            if (!string.IsNullOrEmpty(context.Path) || string.IsNullOrEmpty(context.PlayerInfo.PlayerEntityId))
             {
                 context = _host.CreateTemporaryContext(null, null, null);
                 _gameServer.Register(context);
             }
+            context.OwnerKey = ownerKey;
             context.PlayerInfo.PlayerName = postData.Get("name");
             List<string> regionTemplateIds = Singleton<Constants>.Instance?.PersonalRegion?.RegionTemplateIds
                                              ?? new List<string> { TerrainLoader.DefaultTerrainFile };
@@ -217,7 +258,10 @@ public class Gateway
             if (item.HasValue)
             {
                 Item value2 = item.Value;
-                if (bodyColor.Length >= 3)
+                // ⚠️ BodyColor เป็น null ได้เมื่อคำขอไม่ได้ส่ง model_info มา — ตัวเกมจริงส่งเสมอ
+                // แต่คำขอที่ประกอบเองไม่ส่งก็ได้ แล้วเดิมจะ NullReference ทั้ง route (ตอบ 500)
+                // เมื่อก่อนไม่เคยเห็นเพราะ route ถอยไปใช้ _playerCtx ซึ่งมีสีค้างจากตัวละครก่อนหน้า
+                if (bodyColor != null && bodyColor.Length >= 3)
                 {
                     value2.ColorR = bodyColor[0];
                     value2.ColorG = bodyColor[1];
@@ -233,8 +277,25 @@ public class Gateway
             return new WebServer.JsonResponse(new JObject { ["entity_id"] = context.EntityId }.ToString());
         };
 
-        _webServer.PostRoute["/accounts"] = (HttpListenerRequest request, Dictionary<string, string> _) =>
-            new WebServer.JsonResponse(Json.Write(_host.BuildAccount()));
+        // [5 ก.ย. 2026] รายชื่อตัวละคร — **ของบัญชีที่ถามเท่านั้น**
+        //
+        // ⚠️ เดิมคืนตัวละครทุกตัวบนเซิร์ฟให้ใครก็ได้ แล้วหน้าเลือกตัวละครในเกมเอามาทำเป็นปุ่ม
+        // (client/Durango.UI/TitlePlayerSelectionGroupBase.cs:94,120) ⇒ ผู้เล่นคนที่ 2 เปิดเกม
+        // เห็นตัวละครของคนที่ 1 ในสล็อตตัวเอง กดเข้าเล่นได้เลยโดยไม่ต้องแฮกอะไร
+        // แถม client ยังตั้งตัวที่ "เพิ่งออกจากเกมล่าสุดของทั้งเซิร์ฟ" เป็นตัวแนะนำให้อัตโนมัติ
+        // (client/Durango.Logic.Clusters/Account.cs:34 MaxBy(DisconnectedAt)) ⇒ กด Confirm รวดเดียวก็ติด
+        //
+        // ตัวเกมส่ง account_id มากับคำขอนี้อยู่แล้ว (Clusters.RequestAccounts ใช้ BuildSessionForm)
+        _webServer.PostRoute["/accounts"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            string key = AccountKeys.Normalize(postData.Get("account_id"));
+            if (key == null)
+            {
+                // ไม่มีกุญแจ = ไม่มีบัญชี ⇒ ไม่มีตัวละคร (ไม่ใช่ "เห็นทุกตัว" แบบเดิม)
+                return new WebServer.JsonResponse(Json.Write(Host.EmptyAccount()));
+            }
+            return new WebServer.JsonResponse(Json.Write(_host.BuildAccount(key)));
+        };
 
         // [5 ก.ย. 2026] /health — ตัวเลขสุขภาพเซิร์ฟสำหรับคนดูแล (ตัวเกมไม่ได้เรียกเส้นนี้)
         //

@@ -51,6 +51,18 @@ public class PlayerContext
     /// (client/GameManager.cs:316-331 EmigratedReceived → Connections.Frontend.Close())
     /// รอบต่อไปที่ต่อเข้ามา เซิร์ฟอ่านค่านี้แล้วส่งเข้าโลกของเกาะปลายทาง
     /// </summary>
+    /// <summary>
+    /// [5 ก.ย. 2026] กุญแจบัญชีของเจ้าของตัวละครตัวนี้ — ว่าง = "ไม่มีเจ้าของ" (ตัวละครกำพร้า)
+    ///
+    /// ⚠️ ไม่มีช่องนี้ = ไม่มีระบบบัญชี ⇒ /accounts แจกตัวละครทุกตัวให้ทุกคน แล้วใครก็กดเข้าเล่น
+    /// ตัวละครคนอื่นได้จากหน้าเลือกตัวละครโดยไม่ต้องแฮกอะไรเลย (ดูเหตุผลเต็มที่ Support/AccountKeys)
+    ///
+    /// ตัวละครกำพร้า (เซฟที่สร้างก่อนมีระบบนี้) จะ **มองไม่เห็นและเข้าไม่ได้** โดยปริยาย
+    /// เปิดให้บัญชีแรกที่เข้ามารับไปได้ด้วย <c>--adopt-orphans</c> ตอนย้ายข้อมูลครั้งเดียว
+    /// </summary>
+    [JsonProperty("owner_key", NullValueHandling = NullValueHandling.Ignore)]
+    public string OwnerKey;
+
     [JsonProperty("region_id")]
     public string RegionId;
 
