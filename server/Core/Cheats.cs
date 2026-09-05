@@ -131,6 +131,35 @@ public static class Cheats
                 Nums = new Dictionary<string, float> { { "pet_entity_type", rein.PetEntityType } },
                 Strs = new Dictionary<string, string> { { "playback_rate", rein.PlaybackRate.ToString(CultureInfo.InvariantCulture) } }
             });
+
+            // ── Item.Ext = Reins — **ไม่ตั้ง = บังเหียนหายไปจากทุกหน้าจอที่เกี่ยวกับสัตว์** ──────
+            //
+            // ฝั่งเกมแยก "ไอเทมนี้เป็นบังเหียน" จาก Item.Ext เท่านั้น ไม่ได้ดูบล็อก Performance เลย:
+            //   client/Durango.Logic.Item/ItemData.cs:293-296  Ext is Reins → ItemData.Reins
+            //   client/Durango.UI.Popup/PetItemInteractionPopup.cs:400 กรองรายการด้วย data.Reins.HasValue
+            //   client/Durango.Logic.Item/Useable.cs:128-135 ตัดสินว่าเมนู "길들이기 / 귀속하기" จะโผล่ไหม
+            // ⇒ ไม่มี Ext = จับสัตว์ป่ามาได้บังเหียนแล้ว (Core/Player.Hunting.cs:418) แต่หน้าต่าง
+            //   "เลือกสัตว์ใส่กรง" ว่างเปล่า และเมนูของไอเทมไม่มีปุ่มอะไรให้กดเลย
+            //
+            // ⚠️ ต้องเป็น Messages.Reins แท้ ๆ เท่านั้น — Item.Pack (GameCode/Messages/Item.cs:213-244)
+            //    เขียนช่องนี้ด้วย if/else-if ที่ **ไม่มี else** ⇒ ใส่ชนิดอื่น (เช่น JObject ที่โหลด
+            //    กลับมาจากไฟล์เซฟ) จะไม่เขียนอะไรลงไปสักไบต์ แล้วฟิลด์ที่เหลือของไอเทมเลื่อนทั้งก้อน
+            value.Ext = new Reins
+            {
+                PetEntityType = (ushort)rein.PetEntityType,
+                VehicleEntityType = (ushort)rein.VehicleEntityType,
+                // ที่ที่กินในกรง — ฝั่งเกมเทียบกับ DomesticCage.RemainSize เพื่อเปิด/ปิดปุ่ม
+                // ก่อนส่งมาถึงเซิร์ฟ (client/Durango.UI.Popup/PetItemInteractionPopup.cs:597-608)
+                Size = (ushort)rein.Size,
+                // บังเหียนที่เพิ่งสร้างยังไม่มีสัตว์อยู่ข้างใน — ได้สัตว์จริงตอนทำให้เชื่องในกรงเสร็จ
+                Pet = null,
+                Domesticated = false,
+                // สองค่านี้ไปโชว์เป็นเวลา/หลอดในหน้าต่างเลือกสัตว์ (DomesticRatioWidget.cs:137-142
+                // ส่ง DomesticateDuration เข้า TimedeltaFormatter ⇒ หน่วยเป็น "วินาที")
+                // ดึงจากตารางเดียวกับที่ระบบกรงใช้นับเวลาจริง ไม่ก๊อบตัวเลขมาไว้ที่นี่
+                DomesticateDuration = (float)Player.BaseDomesticateSecondsOf(rein.VehicleEntityType),
+                DomesticateSuccessRate = Player.BaseDomesticateSuccessRateOf(rein.VehicleEntityType)
+            };
         }
 
         // เติมค่าพลังที่เหลือทั้งหมดจาก performance.json (คิดสูตรที่เลเวลของไอเทมชิ้นนี้)

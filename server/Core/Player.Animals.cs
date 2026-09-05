@@ -99,10 +99,22 @@ public partial class Player
         /// **ค่าของเรา** — อายุขัยสัตว์เลี้ยง (วัน) ก่อนเข้าสถานะ "แก่" (PetStats.IsOld)
         ///
         /// ค้นข้อมูลทั้งชุดแล้วไม่พบตัวเลขอายุขัยฐานเลย (มีแค่แท็ก life_span_plus_5 ใน tags.json
-        /// ที่ "เพิ่ม" อายุ 5 วัน/เลเวลแท็ก แปลว่าฐานต้องมีอยู่ที่ไหนสักที่ที่ไม่ได้แจกมากับ /assets)
+        /// ที่ "เพิ่ม" อายุ 5 หน่วย/เลเวลแท็ก แปลว่าฐานต้องมีอยู่ที่ไหนสักที่ที่ไม่ได้แจกมากับ /assets)
         /// ⇒ ตั้ง 30 วันไว้ก่อน แล้วบวกด้วยแท็ก life_span_plus_5 ตามสูตรจริงในไฟล์
+        ///
+        /// ⚠️ **หน่วยที่คิดในเซิร์ฟกับหน่วยที่ส่งขึ้นสายคนละหน่วยกัน** — คิดเป็น "วัน" ที่นี่
+        /// (หน่วยเดียวกับที่แท็กในไฟล์ใช้) แล้ว <see cref="PetFactory.DerivedOf"/> แปลงเป็นวินาที
+        /// ครั้งเดียวตอนท้าย เพราะช่อง <c>Derived.LifeSpan</c> ที่ฝั่งเกมอ่านเป็น **วินาที**:
+        ///   client/Durango.UI/ItemInfoView.cs:392       ตั้งชื่อตัวแปรว่า seconds แล้วยัดเข้า TimedeltaFormatter
+        ///   client/Durango.UI.Popup/PetItemInteractionPopup.cs:664  เอาไป Math.Min กับ (AgingUntil − GrazedAt)
+        ///   client/TimedeltaFormatter.cs:34-54          ตารางหน่วยเริ่มที่ 86400 วิ/วัน ⇒ อินพุตเป็นวินาที
+        /// ⇒ ส่งเลข 30 ดิบ ๆ ขึ้นไป ป้ายอายุขัยจะขึ้นว่า "30초" (30 วินาที) และเพราะ Math.Min
+        /// กับเวลาที่เหลือจริง (2,592,000 วิ) จอจะค้างที่ "30초 MAX" ตลอดกาลทั้งที่สัตว์ยังไม่แก่
         /// </summary>
         public const double LifeSpanDaysBase = 30.0;
+
+        /// <summary>ตัวแปลงหน่วยวัน → วินาที (ไม่ใช่ค่าที่ตั้งเอง — เป็นนิยามของหน่วยเวลา)</summary>
+        public const double SecondsPerDay = 24.0 * 3600.0;
 
         /// <summary>
         /// **ค่าของเรา** — จำนวนช่อง milestone ที่สัตว์ได้ตามแรงก์
@@ -1540,7 +1552,33 @@ public partial class Player
                 if (def.IsRatio) d[def.Target] = d.GetValueOrDefault(def.Target) * (1f + amount);
                 else d[def.Target] = d.GetValueOrDefault(def.Target) + amount;
             }
+            ToWireUnits(d);
             return d;
+        }
+
+        /// <summary>
+        /// แปลงหน่วยของค่าที่ "หน่วยในไฟล์ข้อมูล" ต่างจาก "หน่วยในโปรโตคอล"
+        ///
+        /// ⚠️ ตอนนี้มีตัวเดียวคือ <c>LifeSpan</c> — ในไฟล์ข้อมูลเป็น **วัน**
+        /// (<c>tags.json → life_span_plus_5 → "5 * level"</c> = เพิ่มทีละ 5 วัน) แต่ฝั่งเกมอ่านเป็น **วินาที**:
+        ///   client/Durango.UI/ItemInfoView.cs:392                    ตั้งชื่อตัวแปรว่า seconds แล้วยัดเข้า TimedeltaFormatter
+        ///   client/Durango.UI.Popup/PetItemInteractionPopup.cs:664   Math.Min กับ (AgingUntil − GrazedAt) ซึ่งเป็นวินาที
+        ///   client/TimedeltaFormatter.cs:34-54                       ตารางหน่วยเริ่มที่ 86400 วิ/วัน ⇒ อินพุตเป็นวินาที
+        /// ⇒ ส่งเลข 30 ดิบ ๆ ขึ้นไป ป้ายอายุขัยขึ้นว่า "30초" แล้วค้างที่ค่านั้นตลอดกาล
+        /// ทั้งที่สัตว์ยังมีอายุเหลืออีก 2,592,000 วินาที
+        ///
+        /// **ต้องแปลงตรงนี้ที่เดียว** (ท้ายสุด หลังบวกแท็กครบแล้ว) เพราะ:
+        ///   • ค่าที่คืนไปถูกยัดลง <c>PetStatistics.DerivedAbilities</c> ตรง ๆ (RecalcPetStats)
+        ///     ซึ่งเป็นก้อนที่ส่งขึ้นสายจริง
+        ///   • ถ้าไปแปลงตอนตั้งค่าฐานแทน แท็ก <c>life_span_plus</c> ที่บวกทีหลังจะบวกเป็น "วินาที"
+        ///     (+5 วิ แทนที่จะเป็น +5 วัน) ⇒ แท็กแทบไม่มีผลเลย
+        /// </summary>
+        private static void ToWireUnits(Dictionary<Derived, float> d)
+        {
+            if (d.TryGetValue(Derived.LifeSpan, out float days))
+            {
+                d[Derived.LifeSpan] = (float)(days * PetTuning.SecondsPerDay);
+            }
         }
 
         /// <summary>
@@ -1586,10 +1624,16 @@ public partial class Player
             });
         }
 
+        /// <summary>
+        /// อายุขัยเป็นวินาที — ค่าใน <paramref name="derived"/> ถูกแปลงเป็นวินาทีแล้วโดย
+        /// <see cref="ToWireUnits"/> ⇒ **ห้ามคูณ 86400 ซ้ำอีก** (เคยคูณซ้ำจนอายุกลายเป็น 7 แสนปี)
+        /// ค่าสำรองยังเป็น "วัน" เพราะเป็นค่าคงที่ดิบก่อนผ่านตัวแปลง
+        /// </summary>
         private static double LifeSpanSeconds(Dictionary<Derived, float> derived)
         {
-            float days = derived.GetValueOrDefault(Derived.LifeSpan, (float)PetTuning.LifeSpanDaysBase);
-            return days * 24.0 * 3600.0;
+            return derived.TryGetValue(Derived.LifeSpan, out float seconds)
+                ? seconds
+                : PetTuning.LifeSpanDaysBase * PetTuning.SecondsPerDay;
         }
     }
 

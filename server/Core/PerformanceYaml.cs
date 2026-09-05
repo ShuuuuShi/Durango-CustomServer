@@ -90,6 +90,18 @@ public static class PerformanceYaml
         public float Vigor;
     }
 
+    /// <summary>
+    /// บังเหียน — performance.json → reins → &lt;prototype&gt; → "[1, 60]"
+    ///
+    /// ต้นฉบับฝั่งเกม (client/Durango.Online/PerformanceYaml.cs:65-75) อ่านแค่ 3 คีย์แรก
+    /// เพราะฝั่งเกมใช้คลาสนี้เฉพาะโหมด offline · แต่ **เซิร์ฟต้องใช้มากกว่านั้น** เพราะเป็นคนประกอบ
+    /// ก้อน <c>Item.Ext = Messages.Reins</c> ให้ ซึ่งมีช่อง VehicleEntityType กับ Size อยู่ในโปรโตคอล
+    /// (server/GameCode/Messages/Reins.cs:9-13) ⇒ ไฟล์จริงมี 10 คีย์ ตรวจแล้วครบทั้ง 101 รายการ
+    ///
+    /// ไม่มี <c>size</c> ⇒ ส่ง Size = 0 ให้ฝั่งเกม แล้วหน้าต่างใส่สัตว์เข้ากรงจะโชว์ "크기 0"
+    /// และเช็ค "กรงมีที่ว่างพอไหม" ผ่านตลอด (client/Durango.UI.Popup/PetItemInteractionPopup.cs:597-608
+    /// เทียบ <c>target.Value.Size &gt; cage.RemainSize</c>) ⇒ ยัดสัตว์เข้ากรงได้ไม่จำกัด
+    /// </summary>
     public class Rein
     {
         [JsonProperty("pet_name")]
@@ -100,6 +112,45 @@ public static class PerformanceYaml
 
         [JsonProperty("playback_rate")]
         public float PlaybackRate;
+
+        /// <summary>
+        /// ชนิด entity ของ "ตัวสัตว์" ที่เอาไปหาโมเดล/รูปหน้า — คนละเลขกับ pet_entity_type
+        /// (เช่น reins_retriever_labrador: pet 3072 / vehicle 2131)
+        ///
+        /// ฝั่งเกมหาโมเดลด้วย <c>Yaml.Pet.VehicleEntityType</c> ที่ค้นจาก pet_entity_type อีกที
+        /// (client/Durango.UI.Popup/PetItemInteractionPopup.cs:573-575) แต่ช่องนี้ยังต้องส่งให้ตรง
+        /// เพราะเซิร์ฟเองใช้แยกสัตว์ยาก/ง่ายจาก constants.json → pet → advanced_tameable
+        /// ซึ่งเป็นรายการของ vehicle_entity_type ไม่ใช่ pet_entity_type
+        /// </summary>
+        [JsonProperty("vehicle_entity_type")]
+        public int VehicleEntityType;
+
+        /// <summary>ที่ที่สัตว์ตัวนี้กินในกรง (7-130) — ไม่ใช่ขนาดไอเทมในกระเป๋า</summary>
+        [JsonProperty("size")]
+        public int Size;
+
+        /// <summary>ความเร็ววิ่ง — ลง Derived.Speed ของสัตว์เลี้ยง</summary>
+        [JsonProperty("speed")]
+        public float Speed;
+
+        /// <summary>ช่องกระเป๋าของสัตว์ — ฝั่งเกมโชว์ที่ไอคอนไอเทม (client/Durango.UI/ItemIconWidget.cs:528)</summary>
+        [JsonProperty("capacity")]
+        public float Capacity;
+
+        /// <summary>
+        /// เพดานหลอดอิ่ม — ในไฟล์เป็น **สตริง** ("300.0" ทั้ง 101 รายการ) เพราะช่องนี้เป็นสูตรตามเลเวล
+        /// ⇒ ประกาศเป็น string แล้วให้ผู้เรียกคิดสูตรเอง (ประกาศเป็น float ไว้ วันหน้าเจอสูตรจริงจะ throw)
+        /// </summary>
+        [JsonProperty("hungry_max")]
+        public string HungryMaxExpr;
+
+        /// <summary>อัตราหิวต่อวินาที (ค่าติดลบ เช่น -0.05)</summary>
+        [JsonProperty("hungry_velocity")]
+        public float HungryVelocity;
+
+        /// <summary>Carnivore / Herbivore — ฝั่งเกมเอาไปโชว์เป็น "รสนิยม" (client/Durango.UI/PetUtil.cs:PetTasteToString)</summary>
+        [JsonProperty("type")]
+        public string Type;
     }
 
     private static PerformanceRoot _performances;

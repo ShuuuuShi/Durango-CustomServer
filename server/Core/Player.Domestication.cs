@@ -108,6 +108,22 @@ public partial class Player
         public const float MaxSuccessRate = 1.0f;
     }
 
+    // ── ทางเข้าให้ Core/Cheats.cs ใช้ค่าชุดเดียวกัน ────────────────────────────────────
+    //
+    // Cheats.MakeItem เป็นโรงงานไอเทมตัวเดียวของทั้งเซิร์ฟ (จับสัตว์ · คราฟต์ · ร้านค้า · cheat)
+    // และต้องเติม Item.Ext = Reins ให้บังเหียนตั้งแต่ตอนสร้าง ⇒ ต้องรู้เวลา/โอกาสฐานด้วย
+    // ถ้าไปก๊อบตัวเลขไปไว้อีกที่ ผู้เล่นจะเห็นเวลาทำให้เชื่องในหน้าต่างเลือกสัตว์ (ที่อ่านจาก
+    // Reins.DomesticateDuration — client/Durango.UI/DomesticRatioWidget.cs:137-142)
+    // ไม่ตรงกับเวลาที่นับจริงตอนกดเริ่ม ⇒ เปิดทางเข้ามาที่ตารางเดียวกันแทนการทำสำเนา
+
+    /// <summary>เวลาฐานในการทำให้เชื่อง (วินาที) ของสัตว์ที่ใช้ vehicle_entity_type นี้</summary>
+    internal static double BaseDomesticateSecondsOf(int vehicleEntityType) =>
+        DomesticationTables.BaseSecondsOf(vehicleEntityType);
+
+    /// <summary>โอกาสสำเร็จตั้งต้น (ยังไม่ป้อนอาหาร) ของสัตว์ที่ใช้ vehicle_entity_type นี้</summary>
+    internal static float BaseDomesticateSuccessRateOf(int vehicleEntityType) =>
+        DomesticationTables.BaseSuccessRateOf(vehicleEntityType);
+
     // ══════════════════════════════════════════════════════════════════════════════════
     //  ลงทะเบียน handler — ไฟล์นี้ถูกเรียกหลัง RegisterAnimalHandlers()/RegisterInventoryHandlers()
     //  จึง "ทับ" ตัวที่ตอบ Abort ค้างไว้ได้เลย (Connection.Recv ลบของเดิมก่อนเสมอ —
@@ -783,7 +799,8 @@ public partial class Player
     /// (client/Durango.UI.Popup/PetItemInteractionPopup.cs:400) และ <c>ItemData.Reins</c> มาจาก
     /// <c>Item.Ext</c> เท่านั้น (client/Durango.Logic.Item/ItemData.cs:293-296)
     /// ⇒ บังเหียนที่ไม่มี Ext จะ **ไม่โผล่ในรายการเลย** ทั้งที่อยู่ในกระเป๋า
-    /// ตอนนี้ Core/Cheats.cs:120-130 แนบให้แค่ Performance "reins" ยังไม่ได้ตั้ง Ext (ดูรายงาน)
+    /// (Core/Cheats.cs:MakeItem ตั้ง Ext ให้ตั้งแต่ตอนสร้างแล้ว — ตัวกวาดนี้ยังต้องมีเพราะไอเทม
+    ///  ที่อยู่ในไฟล์เซฟเก่าก่อนหน้านั้นยังไม่มี Ext และเพราะเหตุผล JObject ข้างล่าง)
     ///
     /// ⚠️ อีกเหตุผลที่ต้องกวาดทุกครั้งที่เข้าเกม: <c>Item.Ext</c> ประกาศเป็น <c>object</c> พอเซฟลง
     /// ไฟล์แล้วอ่านกลับ Newtonsoft คืนมาเป็น <c>JObject</c> · <c>Item.Pack</c> (บรรทัด 213-244)
@@ -832,10 +849,10 @@ public partial class Player
     /// <summary>
     /// อ่าน <c>performance.json</c> (reins / pet_food) กับ <c>constants.json → pet</c>
     ///
-    /// ทำไมไม่ใช้ <c>Core/PerformanceYaml.cs</c> ที่มีอยู่แล้ว: คลาส <c>Rein</c> ในนั้นมีแค่
-    /// pet_name / pet_entity_type / playback_rate ไม่มี <c>vehicle_entity_type</c> กับ <c>size</c>
-    /// ที่ระบบนี้ต้องใช้ และ <c>PetFood</c> มีแค่ vigor — ไฟล์นั้นอยู่นอกขอบเขตงานนี้
-    /// จึงอ่านไฟล์เดียวกันซ้ำเป็นของตัวเอง (เหตุผลเดียวกับที่ PetTables ใน Player.Animals.cs ทำ)
+    /// ทำไมยังอ่านไฟล์เดียวกันซ้ำเป็นของตัวเองแทนที่จะใช้ <c>Core/PerformanceYaml.cs</c>:
+    /// ระบบนี้ต้องค้นย้อนจาก <c>pet_entity_type</c> → ขนาดที่กินในกรง (<see cref="SizeOfPet"/>)
+    /// ตอนคืนที่ว่างให้กรง แต่ PerformanceYaml ทำดัชนีด้วย prototype ของไอเทมอย่างเดียว
+    /// (เหตุผลเดียวกับที่ PetTables ใน Player.Animals.cs ทำ) — ตัวเลขมาจากไฟล์เดียวกันจึงตรงกันเสมอ
     /// </summary>
     private static class DomesticationTables
     {
@@ -951,7 +968,8 @@ public partial class Player
         ///
         /// อ่านจาก <c>Item.Performance</c> ของไอเทมก่อน (เป็นชุดเดียวกับที่ฝั่งเกมใช้ทำนายผลให้
         /// ผู้เล่นเห็นก่อนกดยืนยัน) ถ้าไอเทมไม่ได้พกมา ค่อยเปิด performance.json เอง —
-        /// จำเป็นเพราะ Core/Cheats.cs แนบ pet_food ให้แค่ vigor (ดูรายงาน)
+        /// ปกติ Support/ItemPerformance.cs:MergeInto เติมคีย์ pet_food ครบทุกตัวให้ตั้งแต่ตอนสร้าง
+        /// ไอเทมแล้ว ทางสำรองนี้ไว้กันไอเทมเก่าในไฟล์เซฟที่ประกอบก่อนมี MergeInto
         /// </summary>
         public static Dictionary<string, double> SumPerformanceReference(IReadOnlyList<Item> items)
         {
