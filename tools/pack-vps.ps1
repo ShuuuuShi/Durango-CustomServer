@@ -6,16 +6,18 @@
 #   3. เขียน run.sh + systemd unit + README ภาษาไทย
 #   4. ก๊อปตัวเกมเป็นชุดแจก แล้วชี้ clusters.json ไปที่ VPS
 #
-# ⚠️ พอร์ตต้องไม่ชนกับเซิร์ฟเก่าบนเครื่องเดียวกัน (ของเดิมใช้ 8190/8191, 8290/8291, 8390/8391)
-#    ชุดนี้ใช้ 8590 (gateway/HTTP) กับ 8591 (game/TCP)
+# ⚠️ พอร์ตต้องไม่ชนกับเซิร์ฟเก่าบนเครื่องเดียวกัน — เช็คด้วย ss -lnt บน VPS ก่อนเสมอ
+#    5 ก.ย. 2026 เซิร์ฟเก่ากินไปแล้ว: 8190-8192 · 8290/8291 · 8390-8392 · 8490-8492 ·
+#    8590-8592 · 8690-8692  (ยังมี 8080 AMP · 8443/8790 nginx · 8787 node)
+#    ⇒ ชุดนี้ใช้ 8890 (gateway/HTTP) กับ 8891 (game/TCP)
 #
 #   powershell -File tools\pack-vps.ps1
 #   powershell -File tools\pack-vps.ps1 -VpsHost 1.2.3.4 -GatewayPort 8590 -SkipGame
 
 param(
     [string]$VpsHost      = '187.53.129.69',
-    [int]$GatewayPort     = 8590,
-    [int]$GamePort        = 8591,
+    [int]$GatewayPort     = 8890,
+    [int]$GamePort        = 8891,
     [string]$ServerName   = 'lasthuman',
     [string[]]$Islands    = @('ri18tp01', 'ri35de', 'ri50sn'),
     [string]$StartIsland  = 'ri18tp01',
@@ -64,7 +66,8 @@ Say "`n3) เขียนสคริปต์รัน" Cyan
 $runSh = @"
 #!/bin/sh
 # เปิดเซิร์ฟ Durango LastHuman
-# ⚠️ พอร์ตชุดนี้แยกจากเซิร์ฟเก่าบนเครื่องเดียวกัน (เก่า: 8190/8290/8390)
+# ⚠️ พอร์ตชุดนี้แยกจากเซิร์ฟเก่าบนเครื่องเดียวกัน
+# (เก่ากินไปแล้ว 8190-8192 · 8290/8291 · 8390-8392 · 8490-8492 · 8590-8592 · 8690-8692)
 cd "`$(dirname "`$0")/server"
 chmod +x ./DurangoServer 2>/dev/null
 exec ./DurangoServer \
@@ -75,7 +78,7 @@ exec ./DurangoServer \
   --public-host $VpsHost \
   --cluster-mode Online \
   --max-players 50
-"@
+"@ + "`n"
 [System.IO.File]::WriteAllText((Join-Path $VpsOut 'run.sh'), ($runSh -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding $false))
 
 $unit = @"
@@ -169,6 +172,24 @@ rsync -a --exclude AppData-nx dist/vps/server/ root@$($VpsHost):/opt/durango-las
 systemctl start durango-lasthuman
 ``````
 
+## หน้าโหลดตัวเกม (nginx พอร์ต 8892)
+
+ชุดเกมวางไว้ที่ ``/opt/durango-lasthuman/download/`` แล้ว nginx เสิร์ฟด้วยไฟล์คอนฟิกของตัวเอง
+``/etc/nginx/sites-available/lasthuman-download.conf`` — **แยกจาก durango-bundles.conf ของโปรเจกต์เก่า**
+ไม่ได้แตะของเดิมเลย
+
+* ลิงก์: ``http://$($VpsHost):8892/download/DurangoLastHuman-test.zip``
+* หน้ารายการ: ``http://$($VpsHost):8892/download/``
+* เช็ค md5 ได้ที่ไฟล์ ``.md5`` ข้าง ๆ
+
+อัปชุดเกมใหม่:
+``````sh
+scp dist/DurangoLastHuman-test.zip root@$($VpsHost):/opt/durango-lasthuman/download/
+ssh root@$($VpsHost) 'cd /opt/durango-lasthuman/download && md5sum DurangoLastHuman-test.zip > DurangoLastHuman-test.zip.md5'
+``````
+
+ปิดหน้าโหลดชั่วคราว: ``rm /etc/nginx/sites-enabled/lasthuman-download.conf && systemctl reload nginx``
+
 ## จะเพิ่มเกาะทีหลัง
 
 ก๊อป ``.zip`` ของเกาะจาก ``server/data/terrains/`` ขึ้นไปวางที่
@@ -220,7 +241,13 @@ if (-not $SkipGame) {
 * ชุดนี้เป็น **รอบทดสอบ** ของหาย/โลกรีเซ็ตได้ตลอด
 * เครื่องมือทดสอบ (BotBridge) **ปิดอยู่** ในชุดนี้ — เปิดได้ด้วย env ``DURANGO_BOT=1`` เฉพาะเครื่องที่ใช้เทส
 "@
-        [System.IO.File]::WriteAllText((Join-Path $GameOut 'อ่านก่อนเล่น.md'), $note, (New-Object System.Text.UTF8Encoding $false))
+        # ⚠️ ชื่อไฟล์ต้องเป็น ASCII — tar/zip ของ Windows แปลชื่อไทยเป็น CP437 ไม่ได้
+        #    ("Can't translate Pathname ... to CP437") แล้วไฟล์นั้นหายไปจาก zip เงียบ ๆ
+        [System.IO.File]::WriteAllText((Join-Path $GameOut 'READ-ME-FIRST.md'), $note, (New-Object System.Text.UTF8Encoding $false))
+        # ไฟล์ชื่อไทยที่ติดมากับตัวเกมเดิมก็เจอปัญหาเดียวกัน — เปลี่ยนชื่อให้เป็น ASCII
+        Get-ChildItem $GameOut -File | Where-Object { $_.Name -match '[^ -]' } | ForEach-Object {
+            Rename-Item $_.FullName ('readme-th' + $_.Extension) -ErrorAction SilentlyContinue
+        }
 
         $gsize = (Get-ChildItem $GameOut -Recurse -File | Measure-Object Length -Sum).Sum
         Say ("   ชุดเกม {0:N0} MB ที่ {1}" -f ($gsize / 1MB), $GameOut) Green
