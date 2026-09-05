@@ -69,9 +69,14 @@ public static class CageTypes
             if (artifact.States.Cage is not JObject node) continue;
             try
             {
+                // ⚠️ ต้องใช้ serializer ชุดเดียวกับที่เขียนไฟล์ (Json.Setting)
+                // ToObject() เปล่า ๆ ใช้ JsonSerializer.CreateDefault() ซึ่ง **ไม่มี GaugeConverter**
+                // ⇒ หลอด Life/Hungry ของสัตว์ในกรงกลับมาเป็นก้อนเปล่า (Get() = 0) แบบไม่มี error
+                // ผลจริง: สั่งงานสัตว์ไม่ได้เพราะเซิร์ฟคิดว่ามันตายและหิวตลอดเวลา
+                var serializer = Newtonsoft.Json.JsonSerializer.Create(Json.Setting);
                 artifact.States.Cage = node["Tasks"] != null
-                    ? node.ToObject<GrowCage>()
-                    : node.ToObject<Messages.Cage>();
+                    ? node.ToObject<GrowCage>(serializer)
+                    : node.ToObject<Messages.Cage>(serializer);
                 artifacts[key] = artifact;
                 fixedCount++;
             }

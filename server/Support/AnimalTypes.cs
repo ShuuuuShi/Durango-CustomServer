@@ -29,6 +29,15 @@ public static class AnimalTypes
         public int MinCombatLevel = 1;
         public int MaxCombatLevel = 99;
         public bool Tamable;
+
+        /// <summary>
+        /// จับแล้วได้บังเหียนชนิดไหน — <c>animal.json → taming_result</c>
+        ///
+        /// เป็นตัวเชื่อม "สัตว์ป่าบนเกาะ" กับ "ระบบสัตว์เลี้ยง": มี 67 ชนิดที่มีค่านี้ ตรงกับ
+        /// บังเหียนจริงใน performance.json 66 ชนิด และ 43 ชนิดในนั้นเกิดบนเกาะอยู่แล้ว
+        /// ⇒ ถ้าไม่มีตัวนี้ บังเหียนจะหาได้จากร้านเงินจริงทางเดียว (คราฟต์ไม่ได้เลยสักสูตร)
+        /// </summary>
+        public string TamingResult;
         public string PreferredFoodTag;
         public string DropItem;
         public string Kind;            // Herbivore / Carnivore / Omnivore …
@@ -83,6 +92,7 @@ public static class AnimalTypes
                 Attack = (string)o["attack"],
                 Defense = (string)o["defense"],
                 Tamable = (bool?)o["tamable"] ?? false,
+                TamingResult = (string)o["taming_result"],
                 PreferredFoodTag = (string)o["preferred_food_tag"],
                 DropItem = (string)o["drop_item"],
                 Kind = (string)o["type"],

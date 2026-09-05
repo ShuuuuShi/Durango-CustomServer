@@ -25,6 +25,11 @@ public partial class Player
         RegisterAnimalHandlers();      // Player.Animals.cs   — สัตว์/สัตว์เลี้ยง/กรง/ทำให้เชื่อง
         RegisterSkillHandlers();       // Player.Skills.cs    — สกิล/เลเวล/exp (ทับ GetStatistics+GetSkills ของ Player.cs)
         RegisterGatheringHandlers();   // Player.Gathering.cs — เก็บเกี่ยวของธรรมชาติ (ตัดไม้/เก็บพืช/ทุบหิน)
+        RegisterCageHandlers();        // Player.Cage.cs      — โรงเลี้ยงสัตว์ (ทับ handler กรงที่ตอบ Abort ไว้)
+        RegisterDomesticationHandlers(); // Player.Domestication.cs — ทำให้เชื่อง (ทับ Abort ของ Animals/Inventory)
+
+        RegisterHuntingHandlers();     // Player.Hunting.cs   — จับสัตว์ป่าเป็นบังเหียน
+        RegisterPetSaveHandlers();     // Player.PetSave.cs   — โหลด/เซฟสัตว์เลี้ยง+จำนวนครั้งที่ตาย
 
         // ── หลังทุกระบบพร้อมแล้ว ─────────────────────────────────────────────────
         ReviveIfDeadOnLogin();         // Player.Hunting.cs   — กันตัวละครค้างตายถาวร

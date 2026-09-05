@@ -1363,6 +1363,24 @@ public partial class Player
     /// </summary>
     public static class PetStore
     {
+        /// <summary>
+        /// ค่า CageInfo ของสัตว์ที่ **ไม่ได้อยู่ในกรง** — ก้อนว่าง ไม่ใช่ null
+        ///
+        /// ดีไซน์จริงของ NEXON คือฟิลด์นี้มีค่าเสมอ แล้วใช้ <c>RegionId</c> ว่าง/ไม่ว่างเป็นตัวชี้
+        /// ว่าอยู่ในกรงไหม — หลักฐาน 3 จุดที่ต้องเป็นจริงพร้อมกัน:
+        ///   client/Durango.UI/PetGroup.cs:587      ต้อง <c>HasValue &amp;&amp; RegionId ว่าง</c> ถึงจะปล่อยเล็มหญ้าได้
+        ///   client/Durango.UI/GrowCageGroup.cs:230 ใช้ <c>!HasValue || RegionId ว่าง</c>
+        ///   client/Durango.UI/PetInfoWidget.cs:309 ใช้เงื่อนไขเดียวกันคุมปุ่ม Spawn/Reinify/Release
+        /// ⇒ ส่ง null รายการปล่อยเล็มหญ้าจะว่างตลอดกาล กดปุ่มแล้วเด้งว่า "ไม่มีสัตว์ที่ปล่อยได้"
+        /// ทั้งที่มีสัตว์อยู่ (ฟีเจอร์หายในสายตาผู้เล่น)
+        /// </summary>
+        public static CageInfo NotInCage => new()
+        {
+            RegionId = string.Empty,
+            RegionName = string.Empty,
+            Tile = default
+        };
+
         /// <summary>สัตว์หนึ่งตัว = ข้อมูลที่ส่งให้ client (Pet) + สถานะฝั่งเซิร์ฟที่ client ไม่ต้องรู้</summary>
         public sealed class Entry
         {
@@ -1477,7 +1495,11 @@ public partial class Player
                     MilestonesInformation = BuildMilestones(rank, null),
                     AvailableActiveSkill = Array.Empty<Messages.PetActiveSkill>()
                 },
-                CageInfo = null
+                // ⚠️ ห้ามเป็น null — ดีไซน์จริงของ NEXON คือ CageInfo มีเสมอ แล้วใช้ RegionId
+                // ว่าง/ไม่ว่างเป็นตัวชี้ว่าอยู่ในกรงไหม (client/Durango.UI/PetGroup.cs:587
+                // กรอง `pet.CageInfo.HasValue && string.IsNullOrEmpty(RegionId)` สำหรับปุ่ม
+                // "ปล่อยเล็มหญ้า") ⇒ ส่ง null รายการนั้นจะว่างตลอดกาล ปุ่มกดแล้วเด้งว่าไม่มีสัตว์
+                CageInfo = PetStore.NotInCage
             };
         }
 

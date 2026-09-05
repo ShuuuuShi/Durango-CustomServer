@@ -86,6 +86,58 @@ public class ArtifactManager
         return null;
     }
 
+    // ══════════════════════════════════════════════════════════════════════════════════
+    //  กรงสัตว์ — อ่าน/แก้สถานะแล้วบอกทุกคนบนเกาะ
+    //
+    //  ทำไมต้องมี API แยก: หน้าจอกรงฝั่งเกม **อ่านสถานะจากตัว artifact ตรง ๆ**
+    //  (client/Durango.UI/PetUtil.cs → GetGrowCage(artifact)) ไม่ได้ถามเซิร์ฟเป็น message
+    //  ⇒ ตอบ OK ให้ PutInCage/StartPetTask เฉย ๆ หน้าจอจะไม่เปลี่ยนอะไรเลย
+    //  ต้องแก้ ArtifactState.Cage / .DomesticCage แล้วยิง ArtifactStateUpdated ออกไปด้วย
+    //
+    //  ⚠️ ArtifactState.Cage เป็น object ที่ใส่ได้ทั้ง Cage และ GrowCage — ในเซิร์ฟนี้ใช้
+    //  GrowCage อย่างเดียว (โรงเลี้ยงที่สั่งงานได้) ดู Support/CageTypes.cs
+    // ══════════════════════════════════════════════════════════════════════════════════
+
+    public GrowCage? GetGrowCage(string entityId) =>
+        entityId != null && _artifacts.TryGetValue(entityId, out var a) && a.States.Cage is GrowCage cage
+            ? cage
+            : null;
+
+    public DomesticCage? GetDomesticCage(string entityId) =>
+        entityId != null && _artifacts.TryGetValue(entityId, out var a) ? a.States.DomesticCage : null;
+
+    /// <summary>
+    /// แก้สถานะโรงเลี้ยงแล้วกระจายให้เห็นทั้งเกาะ — คืน false ถ้าไม่ใช่โรงเลี้ยง
+    ///
+    /// รับเป็นฟังก์ชันแปลงค่าเพื่อให้ "อ่าน-แก้-เขียนกลับ" อยู่ในที่เดียว ผู้เรียกจะลืมเขียนกลับไม่ได้
+    /// (AppearArtifact เป็น struct — แก้ตัวที่ดึงออกมาแล้วไม่เขียนกลับ = ไม่มีอะไรเกิดขึ้น
+    ///  ซึ่งเป็นกับดักที่เงียบมาก)
+    /// </summary>
+    public bool UpdateGrowCage(string entityId, Func<GrowCage, GrowCage> mutate)
+    {
+        if (mutate == null || entityId == null) return false;
+        if (!_artifacts.TryGetValue(entityId, out var artifact)) return false;
+        if (artifact.States.Cage is not GrowCage cage) return false;
+
+        artifact.States.Cage = mutate(cage);
+        _artifacts[entityId] = artifact;
+        ArtifactStateUpdated?.Invoke(artifact.States);      // → Player ส่งต่อให้ client + World เซฟ
+        return true;
+    }
+
+    /// <summary>แก้สถานะกรงฝึกให้เชื่องแล้วกระจายให้เห็นทั้งเกาะ — คืน false ถ้าไม่ใช่กรงฝึก</summary>
+    public bool UpdateDomesticCage(string entityId, Func<DomesticCage, DomesticCage> mutate)
+    {
+        if (mutate == null || entityId == null) return false;
+        if (!_artifacts.TryGetValue(entityId, out var artifact)) return false;
+        if (!artifact.States.DomesticCage.HasValue) return false;
+
+        artifact.States.DomesticCage = mutate(artifact.States.DomesticCage.Value);
+        _artifacts[entityId] = artifact;
+        ArtifactStateUpdated?.Invoke(artifact.States);
+        return true;
+    }
+
     public void SeedPlant(string entityId, string prototypeId)
     {
         Crop crop = CropYaml.Get(prototypeId);

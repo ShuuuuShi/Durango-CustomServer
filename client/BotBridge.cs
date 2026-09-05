@@ -287,6 +287,12 @@ public static class BotBridge
                 case "log": return CmdLog(args);
                 case "equip": return CmdEquip(args);
                 case "touch": return CmdTouch(args);
+                case "tame": return CmdTame(args);
+                case "shot": return CmdShot(args);
+                case "revive": return CmdRevive();
+                case "travel": return CmdTravel(args);
+                case "animdump": return CmdAnimDump(args);
+                case "animdumpstat": return CmdAnimDumpStat();
                 case "menus": return CmdMenus();
                 default: return Err("unknown cmd: " + cmd);
             }
@@ -553,6 +559,303 @@ public static class BotBridge
     }
 
     /// <summary>รายการเมนูที่เซิร์ฟส่งมาจากการแตะครั้งล่าสุด — ใช้ดูว่ามีปุ่มอะไรให้กดบ้าง</summary>
+    /// <summary>
+    /// จับสัตว์ป่าที่เลือดต่ำแล้ว — <c>tame [id=herd_land_7]</c>
+    ///
+    /// ทำแบบเดียวกับปุ่มจับบนหน้าจอต่อสู้ (client/Durango.UI/CombatGroup.cs:440-458):
+    /// เลือกเครื่องมือแท็ก capturable ที่เลเวลสูงสุดในกระเป๋า แล้วสั่ง CombatSystem
+    /// เรียกตรงแทนที่จะกดผ่าน UI เพราะหน้าจอต่อสู้ต้องเปิดอยู่ก่อนถึงจะมีปุ่ม
+    /// </summary>
+    private static string CmdTame(Dictionary<string, string> args)
+    {
+        if (PlayerBehavior.LocalPlayer == null) return Err("no local player");
+        if (!GameSystem<CombatSystem>.HasInstance()) return Err("no combat system");
+
+        ItemData tool = null;
+        foreach (ItemData it in GameSystem<InventorySystem>.Instance().PlayerItemList)
+        {
+            if (it != null && it.IsCapturable() && (tool == null || tool.Level < it.Level)) tool = it;
+        }
+        if (tool == null) return Err("ไม่มีเครื่องมือจับสัตว์ (แท็ก capturable) ในกระเป๋า");
+
+        var objs = new List<GameObject>();
+        InteractionSystem.SearchCombatTargetObjects(objs);
+        args.TryGetValue("id", out string wantId);
+
+        GameObject best = null;
+        float bestDist = float.MaxValue;
+        foreach (GameObject go in objs)
+        {
+            if (go == null) continue;
+            if (!string.IsNullOrEmpty(wantId) && ObjectIdentifier.GetEntityId(go) != wantId) continue;
+            float d = InteractionObject.GetDistance(go);
+            if (d < bestDist) { bestDist = d; best = go; }
+        }
+        if (best == null) return Err("no target near");
+
+        var target = best.GetComponent<DamageableEntity>();
+        if (target == null) return Err("เป้าหมายไม่ใช่สิ่งมีชีวิตที่ตีได้");
+
+        GameSystem<CombatSystem>.Instance().SelectTarget(ObjectIdentifier.GetEntityId(best));
+        GameSystem<CombatSystem>.Instance().UseTamingAction(target, tool);
+        return Ok();
+    }
+
+    /// <summary>
+    /// ถ่ายรูปหน้าจอเกม (รวม UI) — <c>shot file=C:\path\out.png</c>
+    ///
+    /// ใช้ UnityEngine.ScreenCapture ตรง ๆ ไม่ใช่ Durango.Render.Screen.ScreenCapture ของเกม
+    /// เพราะตัวของเกมเป็น MonoBehaviour ที่ทำงานใน OnPostRender และต้องมี component อยู่ในฉาก
+    /// ⇒ ใช้ไม่ได้ในบางฉาก (Title/Loading) ส่วนตัวของ Unity ใช้ได้ทุกที่
+    ///
+    /// ⚠️ เป็นการถ่ายแบบ **ไม่พร้อมทันที** — ไฟล์จะโผล่หลังเฟรมถัดไป ผู้เรียกต้องรอสัก 1 วินาที
+    /// (Unity ไม่มี callback ให้ในเวอร์ชันนี้)
+    /// </summary>
+    private static string CmdShot(Dictionary<string, string> args)
+    {
+        if (!args.TryGetValue("file", out string file) || file.Length == 0) return Err("shot needs file=");
+        try
+        {
+            string dir = System.IO.Path.GetDirectoryName(file);
+            if (!string.IsNullOrEmpty(dir) && !System.IO.Directory.Exists(dir))
+            {
+                System.IO.Directory.CreateDirectory(dir);
+            }
+            if (System.IO.File.Exists(file)) System.IO.File.Delete(file);
+
+            // เรียกผ่าน reflection เพราะ UnityEngine.ScreenCapture อยู่ใน assembly แยก
+            // (UnityEngine.ScreenCaptureModule) และถ้าเพิ่ม reference เข้า csproj จะไปชนกับ
+            // Durango.Render.Screen.ScreenCapture ของ NEXON เอง (ชื่อคลาสซ้ำ → CS0104)
+            // ⇒ ไม่แตะซอร์สต้นฉบับ · DLL ตัวนี้มากับเกมอยู่แล้วจึงหาเจอตอนรันแน่นอน
+            Type t = Type.GetType("UnityEngine.ScreenCapture, UnityEngine.ScreenCaptureModule");
+            if (t == null) return Err("หา UnityEngine.ScreenCapture ไม่เจอ");
+            var m = t.GetMethod("CaptureScreenshot", new[] { typeof(string) });
+            if (m == null) return Err("หาเมธอด CaptureScreenshot ไม่เจอ");
+            m.Invoke(null, new object[] { file });
+            return "{\"ok\":true,\"file\":" + Quote(file) + "}";
+        }
+        catch (Exception e)
+        {
+            return Err("ถ่ายรูปไม่สำเร็จ: " + e.Message);
+        }
+    }
+
+    private static string Quote(string s)
+    {
+        var sb = new StringBuilder(s.Length + 8);
+        JStr(sb, s);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// ขอคืนชีพกลับจุดเกิดของเกาะ — ทางเดียวกับปุ่ม "กลับและคืนชีพ" บนเมนูตาย
+    /// (client/PlayerController.cs:496 ResurrectionRequest)
+    ///
+    /// จำเป็นเวลาบังคับจากนอกเกม เพราะเมนูตายเป็นวงกลม กดพิกัดพลาดง่ายมาก
+    /// และตอนตาย <c>state</c> ยังโชว์เลือดเพิ่มขึ้นเรื่อย ๆ (หลอดไหลขึ้นเองแม้ตายแล้ว)
+    /// ทำให้เข้าใจผิดว่าฟื้นแล้ว — ดูฟิลด์ alive ใน state แทน
+    /// </summary>
+    private static string CmdRevive()
+    {
+        if (PlayerBehavior.LocalPlayer == null) return Err("no local player");
+        Durango.Utils.Singleton<PlayerController>.Instance().ResurrectionRequest();
+        return Ok();
+    }
+
+    /// <summary>
+    /// ล่องเรือไปเกาะอื่น — <c>travel id=ri25tp01</c>
+    ///
+    /// ส่ง TravelByRegion(2029) ตรง ๆ แบบเดียวกับ client/ExploreSystem.cs:178
+    /// ข้ามขั้นตอน UI (แตะท่าเรือ → เปิดแผนที่ → เลือกเกาะ → ยืนยัน) ซึ่งกดพิกัดพลาดง่ายมาก
+    ///
+    /// ⚠️ เซิร์ฟตอบด้วย Emigrated ⇒ ตัวเกมจะตัดการเชื่อมต่อแล้วกลับหน้า Title เอง
+    /// ต้องกด "เริ่ม" ใหม่ถึงจะเข้าเกาะปลายทาง (นี่คือกลไกจริงของเกม ไม่ใช่บั๊ก)
+    /// </summary>
+    private static string CmdTravel(Dictionary<string, string> args)
+    {
+        if (!args.TryGetValue("id", out string regionId) || regionId.Length == 0) return Err("travel needs id=<regionId>");
+        Durango.Network.Connections.Frontend.Send(new Messages.TravelByRegion { RegionId = regionId });
+        return Ok();
+    }
+
+
+    // ---------------------------------------------------------------- ดึงตารางท่าทางสัตว์
+
+    /// <summary>
+    /// ดึงชื่อ clip ท่าทางของสัตว์ทุกชนิดออกจาก asset ของเกม แล้วเขียนเป็น JSON
+    ///
+    /// ═══ ทำไมต้องดึงจากตรงนี้ ═══
+    /// <c>Movement.MotionName</c> ในโปรโตคอลคือ **ชื่อ AnimationClip จริง** ไม่ใช่คีย์
+    /// (ยืนยันจากฝั่งผู้เล่นเอง: client/LocalMoveOperator.cs:185 GetCurrentMotionClip
+    ///  → MoveMsgGenerator.MotionChanged → Movement.MotionName)
+    /// และ <c>AnimalBehavior.PlayAnimationMovement</c> ส่งต่อเข้า <c>Anim.CrossFade(ชื่อ clip)</c> ตรง ๆ
+    ///
+    /// ชื่อ clip เก็บอยู่ใน <c>AnimalFrameworkResource</c> ซึ่งเป็น ScriptableObject **ในตัว prefab
+    /// ของสัตว์แต่ละชนิด** ⇒ ไม่มีทางรู้จากไฟล์ JSON ที่เซิร์ฟมี
+    /// ⇒ ให้ตัวเกมโหลด prefab แล้วอ่านออกมาให้ = ได้ข้อมูลต้นฉบับเป๊ะ ไม่ต้องเดาชื่อ
+    ///
+    ///   animdump file=C:\path\animal_motions.json        ทุกชนิดที่ animal.json มี
+    ///   animdump file=... types=2013,2020                เฉพาะที่ระบุ
+    ///   animdumpstat                                     ดูความคืบหน้า (โหลด asset ไม่พร้อมทันที)
+    ///
+    /// ⚠️ เป็นเครื่องมือทดสอบ ลบพร้อม BotBridge.cs ก่อนเปิดจริง
+    /// </summary>
+    private static readonly Dictionary<int, string> _animDump = new Dictionary<int, string>();
+    private static int _animDumpWanted;
+    private static string _animDumpFile;
+    private static bool _animDumpWritten;
+
+    /// <summary>คีย์ท่าที่เซิร์ฟต้องใช้ — ชุดเดียวกับที่ AnimalFrameworkResource ประกาศไว้</summary>
+    private static readonly string[] _animKeys =
+    {
+        "stand", "idle", "eat", "alert", "dead",
+        "battle_idle", "battle_stand", "groggy", "blow",
+        "attack_normal", "attack_strong"
+    };
+
+    private static string CmdAnimDump(Dictionary<string, string> args)
+    {
+        if (!args.TryGetValue("file", out string file) || file.Length == 0) return Err("animdump needs file=");
+        _animDumpFile = file;
+        _animDump.Clear();
+        _animDumpWritten = false;
+
+        var types = new List<int>();
+        if (args.TryGetValue("types", out string list) && list.Length > 0)
+        {
+            foreach (string part in list.Split(','))
+            {
+                if (int.TryParse(part.Trim(), out int t)) types.Add(t);
+            }
+        }
+        else
+        {
+            // ทุกชนิดที่ตาราง Animal ของเกมรู้จัก
+            foreach (var pair in Yaml.Util.SingletonDict<int, Yaml.Animal>.Instance)
+            {
+                types.Add(pair.Key);
+            }
+        }
+
+        _animDumpWanted = types.Count;
+        foreach (int entityType in types)
+        {
+            RequestAnimalFramework(entityType);
+        }
+        return "{\"ok\":true,\"requested\":" + _animDumpWanted + "}";
+    }
+
+    private static void RequestAnimalFramework(int entityType)
+    {
+        string prefabPath = Yaml.AnimalYaml.GetPrefabPath(entityType);
+        if (string.IsNullOrEmpty(prefabPath))
+        {
+            lock (_animDump) { _animDump[entityType] = null; }
+            return;
+        }
+        Durango.Utils.Singleton<AssetBundleManager>.Instance().RequestAsset(prefabPath, typeof(GameObject),
+            delegate (UnityEngine.Object asset)
+            {
+                string json = null;
+                try
+                {
+                    var go = asset as GameObject;
+                    var behavior = (go == null) ? null : go.GetComponent<AnimalBehavior>();
+                    var fw = (behavior == null) ? null : behavior.AnimalFrameworkResource;
+                    if (fw != null) json = DumpFramework(fw);
+                }
+                catch (Exception e)
+                {
+                    UnityEngine.Debug.LogWarning("[BotBridge] animdump " + entityType + ": " + e.Message);
+                }
+                lock (_animDump) { _animDump[entityType] = json; }
+                TryWriteAnimDump();
+            });
+    }
+
+    /// <summary>อ่านชื่อ clip ของทุกคีย์ที่สนใจออกมาเป็น JSON object</summary>
+    private static string DumpFramework(AnimalFrameworkResource fw)
+    {
+        var sb = new StringBuilder(256);
+        sb.Append('{');
+        bool first = true;
+        foreach (string key in _animKeys)
+        {
+            AnimationElemBase elem = fw.GetAnimationElements(key);
+            if (elem == null) continue;
+            string clip = null;
+            foreach (AnimationSequenceClip c in elem)
+            {
+                if (!string.IsNullOrEmpty(c.Clip)) { clip = c.Clip; break; }
+            }
+            if (string.IsNullOrEmpty(clip)) continue;
+            if (!first) sb.Append(',');
+            first = false;
+            JStr(sb, key);
+            sb.Append(':');
+            JStr(sb, clip);
+        }
+
+        // ชุดท่าเดิน — เก็บ clip ตัวแรกของเซ็ตแรกไว้ใช้ตอนสัตว์เดิน
+        AnimationElemBase moveSet = fw.GetAnimationElements("move_motion_sets");
+        if (moveSet != null)
+        {
+            foreach (AnimationSequenceClip c in moveSet)
+            {
+                if (string.IsNullOrEmpty(c.Clip)) continue;
+                if (!first) sb.Append(',');
+                first = false;
+                JStr(sb, "move");
+                sb.Append(':');
+                JStr(sb, c.Clip);
+                break;
+            }
+        }
+        sb.Append('}');
+        return sb.ToString();
+    }
+
+    private static void TryWriteAnimDump()
+    {
+        lock (_animDump)
+        {
+            if (_animDumpWritten || _animDump.Count < _animDumpWanted) return;
+            _animDumpWritten = true;
+            try
+            {
+                var sb = new StringBuilder(1 << 16);
+                sb.Append("{\n");
+                bool first = true;
+                foreach (var pair in _animDump)
+                {
+                    if (pair.Value == null) continue;
+                    if (!first) sb.Append(",\n");
+                    first = false;
+                    sb.Append("  \"").Append(pair.Key).Append("\": ").Append(pair.Value);
+                }
+                sb.Append("\n}\n");
+                string dir = System.IO.Path.GetDirectoryName(_animDumpFile);
+                if (!string.IsNullOrEmpty(dir) && !System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.WriteAllText(_animDumpFile, sb.ToString(), new System.Text.UTF8Encoding(false));
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogWarning("[BotBridge] เขียนไฟล์ animdump ไม่ได้: " + e.Message);
+            }
+        }
+    }
+
+    private static string CmdAnimDumpStat()
+    {
+        lock (_animDump)
+        {
+            int ok = 0;
+            foreach (var p in _animDump) { if (p.Value != null) ok++; }
+            return "{\"ok\":true,\"done\":" + _animDump.Count + ",\"wanted\":" + _animDumpWanted
+                 + ",\"withMotions\":" + ok + ",\"written\":" + (_animDumpWritten ? "true" : "false") + "}";
+        }
+    }
+
     private static string CmdMenus()
     {
         if (!GameSystem<InteractionSystem>.HasInstance()) return Err("no interaction system");
@@ -689,6 +992,9 @@ public static class BotBridge
         sb.Append(Time.time.ToString("F1", CultureInfo.InvariantCulture));
         sb.Append(",\"scene\":");
         JStr(sb, UnityEngine.SceneManagement.SceneManager.GetActiveScene().name);
+        sb.Append(",\"alive\":");
+        // ⚠️ ต้องมีฟิลด์นี้: ตอนตาย หลอดเลือดยังไหลขึ้นเรื่อย ๆ ทำให้ดูเหมือนยังไม่ตาย
+        sb.Append((PlayerBehavior.LocalPlayer != null && PlayerBehavior.LocalPlayer.IsAlive) ? "true" : "false");
         sb.Append(",\"screen\":[");
         sb.Append(Screen.width).Append(',').Append(Screen.height);
         sb.Append(']');
@@ -826,6 +1132,13 @@ public static class BotBridge
                 sb.Append(world.z.ToString("F1", CultureInfo.InvariantCulture)).Append(']');
                 sb.Append(",\"alive\":").Append(a.IsAlive ? "true" : "false");
                 sb.Append(",\"lootable\":").Append(a.IsLootable ? "true" : "false");
+                // สถานะอนิเมชั่นจริงในตัวเกม — ใช้ตรวจว่าเซิร์ฟส่งชื่อ clip มาถูกไหม
+                // แม่นกว่าดูจากรูป เพราะไม่ขึ้นกับแสง/มุมกล้อง/หน้าต่างที่มาบัง
+                sb.Append(",\"animPlaying\":").Append(a.IsAnimPlaying ? "true" : "false");
+                var st = a.GetCurAnimState();
+                sb.Append(",\"animClip\":");
+                JStr(sb, (st == null) ? null : st.name);
+                sb.Append(",\"animSpeed\":").Append((st == null ? 0f : st.speed).ToString("F2", CultureInfo.InvariantCulture));
                 sb.Append('}');
             }
         }

@@ -187,10 +187,15 @@ public class World
     {
         for (int num = _players.Count - 1; num >= 0; num--)
         {
-            _players[num].Process();
+            // ⚠️ ต้องหยิบตัวผู้เล่นเก็บไว้ก่อน ห้ามอ้าง _players[num] ซ้ำ:
+            // Process() ทำให้ผู้เล่นหลุดออกจากลิสต์ได้ (คอนเนกชันปิด → event Closed → _players.Remove)
+            // แล้ว _players[num] บรรทัดถัดมาจะหลุดขอบทันทีเมื่อ num == Count
+            // (เคยทำเซิร์ฟดับมาแล้วจริง — ArgumentOutOfRangeException ใน WorldRegistry.ProcessAll)
+            Player player = _players[num];
+            player.Process();
             // สัตว์รอบตัว — ตัวเกมทำลายสัตว์ที่อยู่ไกลทิ้งเอง เซิร์ฟจึงต้องส่งใหม่ตอนเดินกลับเข้าระยะ
             // (ตัวมันเองหน่วงเวลาอยู่แล้ว ไม่ได้ทำงานจริงทุกเฟรม — ดู Player.Hunting.cs)
-            _players[num].SyncAnimalVisibility();
+            player.SyncAnimalVisibility();
         }
     }
 

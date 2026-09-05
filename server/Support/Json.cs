@@ -20,7 +20,12 @@ public static class Json
         set => _dataDir = value;
     }
 
-    private static JsonSerializerSettings Setting { get; } = new()
+    /// <summary>
+    /// ค่าตั้งของ Newtonsoft ที่ใช้ทั้งโปรเจกต์ — **ต้องเป็น public** เพราะที่อื่นต้องกู้ค่าจาก
+    /// JObject ด้วยชุดเดียวกัน ไม่งั้นจะไม่ได้ converter ที่จำเป็น (เช่น GaugeConverter)
+    /// แล้วได้อ็อบเจกต์เปล่าแบบเงียบ ๆ (ดู Support/CageTypes.NormalizeLoaded)
+    /// </summary>
+    public static JsonSerializerSettings Setting { get; } = new()
     {
         Converters =
         {

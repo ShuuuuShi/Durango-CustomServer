@@ -17,7 +17,7 @@ namespace Durango.Online;
 ///
 /// ไวยากรณ์ที่รองรับ — สำรวจจากไฟล์จริงแล้วว่าใช้แค่นี้:
 /// ตัวเลข · ตัวแปรที่ผู้เรียกส่งเข้ามา · <c>+ - * / **</c> · วงเล็บ · เครื่องหมายลบหน้าตัว
-/// · ฟังก์ชัน <c>int() abs() round()</c> และ <c>min(a,b) max(a,b)</c>
+/// · ฟังก์ชัน <c>int() abs() round() exp() sqrt()</c> และ <c>min(a,b) max(a,b) pow(a,b)</c>
 /// (สำรวจไฟล์จริง: animal.json ใช้แค่ <c>* + **</c> · performance.json เพิ่ม <c>- / int()</c>
 ///  และสูตรขนาดกรงใช้ <c>min(150, 60 + 15 * int(level/10))</c>)
 ///
@@ -185,6 +185,12 @@ public static class StatFormula
                     // min/max สองตัว — ใช้ในสูตรขนาดกรง เช่น "min(150, 60 + 15 * int(level/10))"
                     "min" when args.Count == 2 => Math.Min(args[0], args[1]),
                     "max" when args.Count == 2 => Math.Max(args[0], args[1]),
+                    // สูตรจับสัตว์ใน constants.json → taming ใช้สองตัวนี้
+                    //   success_ratio      = "2 * (1 / (1 + exp(-(2.2 / 6 * d_l + 2.2))) - 0.5)"
+                    //   adjust_by_life_ratio = "1 - 0.8 * pow(r / R, 2)"
+                    "exp" when args.Count == 1 => Math.Exp(args[0]),
+                    "sqrt" when args.Count == 1 => Math.Sqrt(args[0]),
+                    "pow" when args.Count == 2 => Math.Pow(args[0], args[1]),
                     _ => throw new FormatException()                    // ฟังก์ชันที่ไม่รู้จัก = ไม่เดา
                 };
             }

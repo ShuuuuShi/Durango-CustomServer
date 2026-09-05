@@ -7,6 +7,8 @@ using Durango.Utils;
 using JetBrains.Annotations;
 using Messages;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using Shared.Animal;
 using UnityEngine;
 
 namespace Durango.Online;
@@ -52,6 +54,33 @@ public class PlayerContext
     [JsonProperty("region_id")]
     public string RegionId;
 
+    /// <summary>
+    /// [5 ก.ย. 2026] สัตว์เลี้ยงของผู้เล่นคนนี้
+    ///
+    /// ก่อนหน้านี้อยู่แต่ใน <c>Player.PetStore</c> (Core/Player.Animals.cs) ซึ่งเป็น static dict
+    /// ในหน่วยความจำล้วน ⇒ รีสตาร์ตเซิร์ฟทีเดียวสัตว์ที่ผู้เล่นทำให้เชื่องมาหายเกลี้ยง
+    /// ตัวเชื่อมสองทาง (โหลดตอนเข้าเกม / เขียนกลับก่อนเซฟ) อยู่ที่ <c>Core/Player.PetSave.cs</c>
+    ///
+    /// **ไฟล์เซฟเก่าไม่มีคีย์ "pets"** ⇒ Newtonsoft คืน null แล้ว <see cref="Initialize"/>
+    /// สร้างลิสต์ว่างให้ ⇒ อ่านไฟล์รุ่นก่อนได้ตามปกติ ไม่ต้องแปลงไฟล์
+    /// </summary>
+    [JsonProperty("pets")]
+    [CanBeNull]
+    public List<PetSaveData> Pets;
+
+    /// <summary>
+    /// [5 ก.ย. 2026] ตายมาแล้วกี่ครั้ง — ใช้เปิดแถวตาราง constants.json → death_penalty
+    /// (<c>gauge_ratio_by_death_count</c> / <c>fatigue_recovery_ratio_by_death_count</c>)
+    ///
+    /// เดิม <c>Core/Player.Combat.cs:_deathCount</c> อยู่ในหน่วยความจำต่อ connection ⇒ ต่อใหม่แล้ว
+    /// นับ 0 ใหม่ทุกครั้ง บทลงโทษไม่สะสม (ตายแล้วออกแล้วเข้าใหม่ = ฟื้นเต็ม 60% ตลอด)
+    ///
+    /// จงใจใช้ <c>int</c> ไม่ใช่ <c>int?</c> เพราะ "ไฟล์เก่าที่ยังไม่มีช่องนี้" กับ "ยังไม่เคยตาย"
+    /// มีความหมายเดียวกันคือ 0 อยู่แล้ว ⇒ ค่า default ของชนิดทำหน้าที่ migration ให้ในตัว
+    /// </summary>
+    [JsonProperty("death_count")]
+    public int DeathCount;
+
     [JsonIgnore]
     public string Path { get; private set; }
 
@@ -90,6 +119,15 @@ public class PlayerContext
         }
         InventoryItems ??= new List<Item>();
         EquippedItems ??= new Dictionary<string, string>();
+        // [5 ก.ย. 2026] ช่องใหม่ของรอบนี้ — ไฟล์เซฟเก่าไม่มีคีย์นี้จึงโหลดมาเป็น null
+        Pets ??= new List<PetSaveData>();
+        // ⚠️ ซ่อม Item.Ext ที่โหลดกลับมาเป็น JObject **ก่อน** ที่ใครจะเอาไอเทมไปแพ็กลงแพ็กเก็ต
+        // (เหตุผลเต็ม ๆ ดูที่หัวคลาส ItemExtRepair ท้ายไฟล์ — ไม่ทำ = ไอเทมทั้งชิ้นเลื่อนช่อง)
+        ItemExtRepair.Normalize(InventoryItems, "กระเป๋าผู้เล่น");
+        foreach (PetSaveData pet in Pets)
+        {
+            if (pet != null) ItemExtRepair.Normalize(pet.Bag, "กระเป๋าสัตว์");
+        }
         // [5 ก.ย. 2026] สร้าง/ซ่อมหลอดสถานะจากข้อมูลจริงทุกครั้งที่เปิด context ไม่ใช่แค่ตอนสร้างใหม่
         //
         // ทำไมต้องทำตอนโหลดด้วย: GaugeConverter ย่อ Gauge เป็น {min,max,cur} ตอนเขียนไฟล์เซฟ
@@ -122,5 +160,152 @@ public class PlayerContext
     public static string MakePath(int slot, string clusterKey)
     {
         return System.IO.Path.Combine(AppData.CombinePath(WorldContext.GetBasePath(clusterKey)), slot + ".player");
+    }
+}
+
+/// <summary>
+/// สัตว์เลี้ยงหนึ่งตัวในไฟล์เซฟ — โครงตรงกับ <c>Player.PetStore.Entry</c> ทีละฟิลด์
+///
+/// ═══ ทำไมเซฟ <c>Messages.Pet</c> ทั้งก้อนได้ (ไม่ต้องแตกเป็น DTO ทีละฟิลด์) ═══
+/// ไล่เช็คทั้งกิ่งแล้วไม่มีฟิลด์ไหนประกาศเป็น <c>object</c> หรือ interface เลย จึงไม่มีทางกลาย
+/// เป็น <c>JObject</c> ตอนอ่านกลับ (ต่างจาก <c>ArtifactState.Cage</c> และ <c>Item.Ext</c>):
+///   Pet            → EntityId/EntityType/TamerEntityId/Name/Rank/Generation/IsBoarding/IsSpawned
+///                    + Stat(PetStats) + Statistics(PetStatistics) + CageInfo(CageInfo?)
+///   PetStats       → Gauge Life/Hungry · Money? RetryCost · string[]/Dictionary&lt;string,int&gt; ล้วน
+///   PetStatistics  → Dictionary&lt;Derived,float&gt; · MilestoneInfo[] · PetActiveSkill[] (struct ทั้งหมด)
+/// การเซฟทั้งก้อนยังได้เปรียบตรงที่ ถ้า Core/Player.Animals.cs เพิ่มฟิลด์ใน Pet วันหน้า
+/// ไฟล์เซฟจะตามไปเองโดยไม่ต้องแก้ที่นี่ (ถ้าแตกเป็น DTO มือ จะตกหล่นแบบเงียบ ๆ)
+///
+/// ═══ สองช่องที่ round-trip ไม่ครบ และซ่อมที่ไหน (Core/Player.PetSave.cs: FromSave) ═══
+///   1. <c>Gauge Life/Hungry</c> — GaugeConverter ย่อเหลือ {min,max,cur} ⇒ เส้นแนวโน้มหาย
+///      ⇒ สร้างหลอดใหม่ตอนโหลดจาก LifeMax/HungryMax/HungryVelocity ที่เก็บไว้ในนี้
+///   2. <c>Money? RetryCost</c> — Money มีแต่ฟิลด์ <c>readonly</c> ⇒ Newtonsoft เขียนได้แต่อ่านกลับไม่ได้
+///      (ได้ Money(0, TStone) = โชว์ราคาหมุนซ้ำเป็น 0) ⇒ คิดใหม่จาก costs.json ตอนโหลด
+/// </summary>
+public class PetSaveData
+{
+    /// <summary>เผื่ออนาคตต้องแปลงรูปแบบเซฟ (แนวเดียวกับ SkillSave ใน Core/Player.Skills.cs)</summary>
+    [JsonProperty("v")] public int Version = 1;
+
+    [JsonProperty("pet")] public Messages.Pet Pet;
+
+    [JsonProperty("grazing")] public bool Grazing;
+
+    [JsonProperty("bag")] public List<Item> Bag;
+
+    /// <summary>เพดานหลอด + อัตราหิว — ต้องเก็บ เพราะใช้ประกอบ Gauge ใหม่ตอนโหลด</summary>
+    [JsonProperty("life_max")] public float LifeMax;
+
+    [JsonProperty("hungry_max")] public float HungryMax;
+
+    [JsonProperty("hungry_velocity")] public float HungryVelocity;
+
+    [JsonProperty("pending_milestone_tag")] public string PendingMilestoneTag;
+
+    [JsonProperty("pending_milestone_tag_level")] public int PendingMilestoneTagLevel;
+
+    /// <summary>ค่าเริ่มต้น -1 ตรงกับ PetStore.Entry (0 คือ "ช่องแรก" ซึ่งคนละความหมายกับ "ไม่มี")</summary>
+    [JsonProperty("pending_milestone_slot")] public int PendingMilestoneSlot = -1;
+
+    [JsonProperty("milestone_redraw")] public int MilestoneRedrawCount;
+
+    [JsonProperty("skill_redraw")] public int SkillRedrawCount;
+
+    [JsonProperty("pending_rank")] public PetRank? PendingRank;
+
+    [JsonProperty("pending_rank_tag")] public string PendingRankTag;
+}
+
+/// <summary>
+/// ซ่อม <c>Item.Ext</c> ที่โหลดกลับมาจากไฟล์เซฟให้เป็นชนิดจริง
+///
+/// ⚠️ **ไม่ทำ = แพ็กเก็ตไอเทมพังทั้งชิ้น ไม่ใช่แค่ช่อง Ext หาย**
+/// <c>Messages/Item.cs:51</c> ประกาศ <c>public object Ext;</c> เพราะช่องนี้ใส่ได้ 7 ชนิด
+/// ⇒ Newtonsoft อ่านกลับมาเป็น <c>JObject</c> เสมอ · แล้ว <c>Item.Pack</c> (บรรทัด 213-244) เขียนแบบ
+/// <code>if (Ext == null) PackNull(); else if (Ext is DeodorantItem) … else if (Ext is Reins) …</code>
+/// **ไม่มี else** ⇒ เจอ JObject แล้วไม่เขียนอะไรลงไปเลยสักไบต์ ทำให้ 6 ฟิลด์ที่เหลือ
+/// (CollectibleId / GeneratorId / EmotionalMotions / PioneerCost / Tradable / ReformSlots)
+/// เลื่อนตำแหน่งไปหนึ่งช่องทั้งหมด — อาการเดียวกับบั๊กสถานะกรงใน Support/CageTypes.NormalizeLoaded
+///
+/// ทำไมต้องอยู่ที่นี่ ทั้งที่ Core/Player.Domestication.cs:NormalizeReinItems ก็กวาดบังเหียนอยู่แล้ว:
+///   • ตัวนั้นกวาดเฉพาะ <c>InventoryItems</c> และเฉพาะ "ไอเทมที่เป็นบังเหียน" — ของในกระเป๋าสัตว์
+///     (PetSaveData.Bag ที่เพิ่งเริ่มเซฟรอบนี้) กับ Ext ชนิดอื่นยังค้างเป็น JObject อยู่ดี
+///   • ตัวนั้นเจอ Ext ชนิดที่ไม่รู้จักแล้วได้แต่พิมพ์เตือน (บรรทัด 818-823) แล้วปล่อยผ่าน
+///   ⇒ ที่นี่ซ่อมให้ครบทุกชนิดตั้งแต่ตอนโหลดไฟล์ · ของที่ซ่อมแล้วจะเป็น <c>Reins</c> จริง
+///     ทำให้ NormalizeReinItems ข้ามไปเอง (<c>if (item.Ext is Reins) continue;</c>) — ไม่ตีกัน
+///
+/// **วิธีแยกชนิดเป็นการตัดสินใจของเรา** (ไฟล์เซฟไม่ได้เขียนชื่อชนิดกำกับไว้ และแก้ Messages/Item.cs
+/// ซึ่งเป็นซอร์สของ NEXON ไม่ได้) ⇒ ดูจาก "ชื่อฟิลด์ที่มีเฉพาะในชนิดนั้น" แบบเดียวกับที่
+/// Support/CageTypes.NormalizeLoaded ใช้ฟิลด์ Tasks แยก GrowCage ออกจาก Cage
+/// </summary>
+internal static class ItemExtRepair
+{
+    public static void Normalize([CanBeNull] List<Item> items, string where)
+    {
+        if (items == null || items.Count == 0) return;
+        int repaired = 0;
+        int dropped = 0;
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (items[i].Ext is not JObject node) continue;
+            Item item = items[i];
+            object rebuilt = Rebuild(node);
+            if (rebuilt == null) dropped++;
+            else repaired++;
+            item.Ext = rebuilt;
+            items[i] = item;
+        }
+        if (repaired > 0)
+        {
+            Console.WriteLine($"[เซฟ] ซ่อมข้อมูลเสริมของไอเทมใน{where} {repaired} ชิ้น");
+        }
+        if (dropped > 0)
+        {
+            // ล้างเป็น null ดีกว่าปล่อย JObject ค้าง: null ทำให้ Item.Pack เขียน PackNull ซึ่งฟอร์แมต
+            // ยังถูกต้อง เสียแค่ข้อมูลเสริมของชิ้นนั้น ส่วน JObject ทำให้ทั้งแพ็กเก็ตอ่านผิดตำแหน่ง
+            Console.WriteLine($"[เซฟ] ⚠️ ข้อมูลเสริมของไอเทมใน{where} {dropped} ชิ้นระบุชนิดไม่ได้ — ล้างทิ้งกันแพ็กเก็ตเลื่อนช่อง");
+        }
+    }
+
+    /// <summary>แปลง JObject กลับเป็นชนิดจริง — null = ระบุชนิดไม่ได้ (ผู้เรียกล้างทิ้ง)</summary>
+    [CanBeNull]
+    private static object Rebuild(JObject node)
+    {
+        // เรียงจากชนิดที่มีฟิลด์เฉพาะตัวชัดที่สุดลงมา (ดูชื่อฟิลด์จริงใน server/GameCode/Messages/)
+        if (node["PetEntityType"] != null && node["VehicleEntityType"] != null) return To<Reins>(node);
+        if (node["StatusEffectId"] != null) return To<DeodorantItem>(node);
+        if (node["RewardId"] != null) return To<LootBoxItem>(node);
+        if (node["Contents"] != null && node["Capacity"] != null) return To<Container>(node);
+        if (node["Artifacts"] != null && node["Status"] != null) return To<ArtifactPackage>(node);
+        // ArtifactCapsule กับ BlueprintItem มี BlueprintId เหมือนกัน — ตัวแรกมี EntityId ด้วย
+        if (node["BlueprintId"] != null && node["EntityId"] != null) return RebuildCapsule(node);
+        if (node["BlueprintId"] != null) return To<BlueprintItem>(node);
+        return null;
+    }
+
+    /// <summary>
+    /// <c>ArtifactCapsule</c> มี <c>ArtifactState.Cage</c> ที่เป็น <c>object</c> ซ้อนอยู่ข้างในอีกชั้น
+    /// ⇒ กับดักเดิมซ้อนกันสองชั้น · แยกชนิดด้วยฟิลด์ <c>Tasks</c> เหมือน Support/CageTypes.cs:58
+    /// </summary>
+    private static object RebuildCapsule(JObject node)
+    {
+        ArtifactCapsule capsule = Json.Read<ArtifactCapsule>(node.ToString(Formatting.None));
+        if (node["State"]?["Cage"] is JObject cage)
+        {
+            capsule.State.Cage = cage["Tasks"] != null
+                ? Json.Read<GrowCage>(cage.ToString(Formatting.None))
+                : Json.Read<Messages.Cage>(cage.ToString(Formatting.None));
+        }
+        return capsule;
+    }
+
+    /// <summary>
+    /// อ่านผ่าน <see cref="Json.Read{T}(string,bool)"/> ไม่ใช่ <c>node.ToObject&lt;T&gt;()</c>
+    /// เพราะ ToObject ใช้ serializer เปล่า ⇒ ไม่ผ่าน GaugeConverter/GettextConverter
+    /// แล้วหลอด (เช่น Reins.Pet.Stat.Life) จะอ่านกลับมาเพี้ยน
+    /// </summary>
+    private static object To<T>(JObject node)
+    {
+        return Json.Read<T>(node.ToString(Formatting.None));
     }
 }

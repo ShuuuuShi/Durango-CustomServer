@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Durango.Network;
 using Durango.Utils;
 using Messages;
 using Shared.Battle;
@@ -251,6 +252,14 @@ public partial class Player
         animal.Life = Math.Max(0f, animal.Life - value);
         animal.AggroTargetId = EntityId;      // ตีมันแล้วมันสู้กลับ แม้เป็นสัตว์กินพืช
 
+        // ⚠️ ต้องส่งหลอดเลือดชุดใหม่ตามไปด้วย ไม่งั้น**หลอดเลือดของเป้าไม่ขยับเลย**
+        // ข้อความ Damaged(12) ทำแค่เอฟเฟกต์ตอนโดน (client/Durango.Logic.Combat/DamagedProcesser.cs:155
+        // → OnTakeDamage → เล่นอนุภาค) มันไม่ได้ไปแตะหลอดเลือด
+        // หลอดของเป้าอ่านจาก DamageableEntity.GetLife() (client/Durango.UI/CombatTargetWidget.cs:62)
+        // ซึ่งอัปเดตจาก Survival(182) เท่านั้น (client/ObjectManager.cs:47-67)
+        // ⇒ ไม่ส่ง = ตีเท่าไรหลอดก็เต็มอยู่อย่างนั้น ดูเหมือนดาเมจไม่เข้า
+        BroadcastAnimalSurvival(animal);
+
         AnimalTypes.Info hit = AnimalTypes.Get(animal.EntityType);
         Console.WriteLine($"[ล่าสัตว์] ตี {hit?.Name ?? animal.EntityType.ToString()} lv{animal.CombatLevel} " +
                           $"−{value} เลือดเหลือ {animal.Life:F0}/{animal.LifeMax:F0}");
@@ -283,5 +292,189 @@ public partial class Player
         }
 
         return true;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════
+    //  จับสัตว์ป่าเป็น "บังเหียน" — ขั้นแรกสุดของการมีสัตว์เลี้ยง
+    //
+    //  ═══ ทำไมขั้นนี้สำคัญ ═══
+    //  ตรวจข้อมูลแล้วพบว่า **บังเหียนคราฟต์ไม่ได้เลยสักสูตร** มีขายแต่ในร้านเงินจริง 16 ชนิด
+    //  (data/assets/purchaser/commodities.json) ⇒ ถ้าไม่มีขั้นตอนจับสัตว์ ระบบสัตว์เลี้ยงทั้งชุด
+    //  จะถูกล็อกอยู่หลังร้านค้าที่เซิร์ฟนี้ยังไม่มี
+    //  แต่ข้อมูลบอกทางไว้ครบแล้ว: animal.json → taming_result ชี้จากสัตว์ป่าไปหาบังเหียน
+    //  67 ชนิด (ตรงกับบังเหียนจริงใน performance.json 66 ชนิด) และ **43 ชนิดในนั้นเกิดบนเกาะอยู่แล้ว**
+    //  ส่วนเครื่องมือจับ (ไอเทมที่มีแท็ก "capturable") มี 3 ระดับและ **คราฟต์ได้ทั้งหมด**
+    //  ⇒ วงจรครบโดยไม่ต้องพึ่งร้านเงินจริง: คราฟต์เครื่องมือ → ตีสัตว์ให้เลือดต่ำ → จับ → ได้บังเหียน
+    //
+    //  ═══ ลำดับที่ฝั่งเกมคาดหวัง (client/Durango.Logic.Combat/UsingAction.cs:246-256) ═══
+    //    client → UseTamingAction(1900) { EntityId, ToolItemId }
+    //    server → Timer(1134) ที่ seq เดิม   ⇒ หลอดความคืบหน้าเริ่มเดิน
+    //             ไม่ตอบ = .Rest() ทำงาน หลอดหยุดทันที กดแล้วเหมือนไม่มีอะไรเกิดขึ้น
+    //    server → Rewarded(2065) { Effect = TamingCompletedEffect } เมื่อจับติด
+    //             เป็น push ทั่วไป ไม่ผูก seq (client/Durango.UI/AlarmGroup.cs:293)
+    //
+    //  ═══ เงื่อนไขที่ฝั่งเกมเช็คก่อนโชว์ปุ่ม (client/Durango.UI/BattleActionButtons.cs:560-585) ═══
+    //    1. ชนิดสัตว์ต้อง tamable        2. ในกระเป๋าต้องมีของแท็ก "capturable"
+    //    3. เลือดสัตว์ ≤ tamable_hp_rate  4. เว้นระยะตาม taming_cooltime
+    //  เซิร์ฟตรวจซ้ำทั้งหมด เพราะ client กันได้แค่ปุ่ม ไม่ได้กันแพ็กเก็ตที่ปลอมมา
+    // ══════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>เวลาที่เริ่มจับครั้งล่าสุด — ใช้กับ taming_cooltime</summary>
+    private double _lastTamingAt;
+
+    /// <summary>ตัวสุ่มของระบบจับสัตว์ — main loop เส้นเดียว ไม่ต้องล็อก</summary>
+    private static readonly Random TamingRng = new();
+
+    private void RegisterHuntingHandlers()
+    {
+        _connection.Recv(delegate(UseTamingAction msg, PacketHeader header)
+        {
+            HandleUseTamingActionMsg(msg, header.Seq);
+        });
+    }
+
+    private void HandleUseTamingActionMsg(UseTamingAction msg, uint seq)
+    {
+        AnimalManager.Animal animal = _world.AnimalManager?.Get(msg.EntityId);
+        if (animal == null || !animal.IsAlive)
+        {
+            RejectTaming(seq, "ไม่เจอสัตว์ตัวนี้ หรือมันตายไปแล้ว");
+            return;
+        }
+
+        AnimalTypes.Info info = AnimalTypes.Get(animal.EntityType);
+        if (info == null || !info.Tamable || string.IsNullOrEmpty(info.TamingResult))
+        {
+            RejectTaming(seq, $"สัตว์ชนิด {info?.Name ?? animal.EntityType.ToString()} ทำให้เชื่องไม่ได้");
+            return;
+        }
+
+        // เครื่องมือต้องอยู่ในกระเป๋าจริงและมีแท็ก capturable (client/Durango.Logic.Item/Util.cs:92)
+        int toolIndex = _context.InventoryItems.FindIndex(item => item.Id == msg.ToolItemId);
+        if (toolIndex < 0 || !HasItemTag(_context.InventoryItems[toolIndex], "capturable"))
+        {
+            RejectTaming(seq, "ไม่มีเครื่องมือจับสัตว์ในกระเป๋า");
+            return;
+        }
+
+        double now = Gauge.CurrentTime;
+        if (now - _lastTamingAt < TamingTuning.Cooltime)
+        {
+            RejectTaming(seq, "เพิ่งจับไปเมื่อกี้ ยังไม่พ้นเวลารอ");
+            return;
+        }
+
+        // เลือดต้องต่ำพอ — ค่าจริงจาก constants.json → taming → tamable_hp_rate
+        float lifeRatio = animal.LifeMax > 0f ? animal.Life / animal.LifeMax : 1f;
+        if (lifeRatio > TamingTuning.TamableHpRate)
+        {
+            RejectTaming(seq, $"เลือดสัตว์ยังสูงไป ({lifeRatio:P0} ต้องไม่เกิน {TamingTuning.TamableHpRate:P0})");
+            return;
+        }
+
+        _lastTamingAt = now;
+        Send(new Messages.Timer { Duration = TamingTuning.TamingTime }, seq);
+
+        float chance = TamingChance(animal, lifeRatio);
+        bool success = TamingRng.NextDouble() < chance;
+        Console.WriteLine($"[จับสัตว์] {EntityId[..Math.Min(8, EntityId.Length)]} จับ {info.Name} " +
+                          $"lv{animal.CombatLevel} เลือด {lifeRatio:P0} โอกาส {chance:P0} → " +
+                          (success ? "สำเร็จ" : "หลุด"));
+
+        if (!success)
+        {
+            // ล้มเหลว: สัตว์ยังอยู่ เครื่องมือยังอยู่ ลองใหม่ได้เมื่อพ้น cooltime
+            // **การตีความของเรา** — ข้อมูลไม่ได้บอกว่าจับพลาดแล้วเสียอะไรไหม
+            // เลือกทางที่ผู้เล่นไม่เสียของ เพราะถ้าเราตีความผิดแล้วของหาย กู้คืนไม่ได้
+            return;
+        }
+
+        Item? rein = Cheats.MakeItem(info.TamingResult, Math.Max(1, animal.CombatLevel));
+        if (rein == null)
+        {
+            Console.WriteLine($"[จับสัตว์] ⚠️ ไม่พบ prototype ของบังเหียน '{info.TamingResult}' — ยกเลิก");
+            return;
+        }
+
+        // สัตว์หายจากโลก แล้วบังเหียนเข้ากระเป๋า
+        animal.IsAlive = false;
+        animal.DiedAt = now;
+        _world.BroadCast(new EntityDied { EntityId = animal.EntityId, At = now });
+
+        var items = new List<Item> { rein.Value };
+        AddItems(items);
+        Send(new InventoryUpdated { EntityId = EntityId, Items = items.ToArray() });
+        Send(new Rewarded
+        {
+            Effect = new TamingCompletedEffect
+            {
+                Type = Shared.System.RewardEffect.AnimalTamed,
+                AnimalEntityId = animal.EntityId,
+                AnimalEntityType = animal.EntityType,
+                ReinsId = rein.Value.Id
+            }
+        });
+        OnContextChanged();
+    }
+
+    /// <summary>
+    /// โอกาสจับติด — สูตรจริงทั้งสองตัวจาก constants.json → taming
+    ///
+    ///   success_ratio        = "2 * (1 / (1 + exp(-(2.2 / 6 * d_l + 2.2))) - 0.5)"   d_l = ส่วนต่างเลเวล
+    ///   adjust_by_life_ratio = "1 - 0.8 * pow(r / R, 2)"                             r/R = เลือดที่เหลือ
+    ///
+    /// **การตีความของเราคือเอาสองค่ามาคูณกัน** — ไฟล์ข้อมูลไม่ได้บอกว่าประกอบกันยังไง
+    /// แต่ชื่อ adjust_by_life_ratio อ่านว่าเป็น "ตัวปรับ" ของค่าหลัก และช่วงค่าของมัน
+    /// (เลือดเต็ม = 0.2 · เลือดหมด = 1.0) เข้ากับการเป็นตัวคูณพอดี
+    ///
+    /// d_l เป็นบวกเมื่อผู้เล่นเลเวลสูงกว่าสัตว์ — ทิศนี้ทำให้สัตว์ที่แรงกว่าจับยากกว่า
+    /// ซึ่งเป็นทิศเดียวที่สมเหตุสมผล (ที่ d_l = 0 ได้ราว 60%)
+    /// </summary>
+    private float TamingChance(AnimalManager.Animal animal, float lifeRatio)
+    {
+        int playerLevel = Math.Max(1, _context.AppearPlayer.Level);
+        var vars = new Dictionary<string, double>
+        {
+            ["d_l"] = playerLevel - animal.CombatLevel,
+            ["r"] = animal.Life,
+            ["R"] = Math.Max(1f, animal.LifeMax)
+        };
+
+        double baseChance = StatFormula.EvalOr(TamingTuning.SuccessRatio, vars, 0.5);
+        double adjust = StatFormula.EvalOr(TamingTuning.AdjustByLifeRatio, vars, 1.0);
+        return (float)Math.Clamp(baseChance * adjust, 0.0, 1.0);
+    }
+
+    /// <summary>
+    /// ส่งหลอดเลือดชุดใหม่ของสัตว์ให้ทุกคนบนเกาะ
+    ///
+    /// รูปแบบเดียวกับที่แนบไปกับ AppearAnimal ตอนสัตว์โผล่ (ดู AnimalManager.Animal.ToMessage)
+    /// — ใช้ Gauge ที่มีค่าสูงสุด/ต่ำสุดครบ ไม่ใช่แค่ค่าปัจจุบัน ไม่งั้นฝั่งเกมคำนวณสัดส่วนหลอดไม่ได้
+    /// </summary>
+    private void BroadcastAnimalSurvival(AnimalManager.Animal animal)
+    {
+        _world.BroadCast(new Survival
+        {
+            EntityId = animal.EntityId,
+            Life = new Gauge(animal.LifeMax, 0f, new[] { new GaugeNode(Gauge.CurrentTime, animal.Life) }),
+            Gauges = new Dictionary<string, Gauge>()
+        });
+    }
+
+    /// <summary>ปฏิเสธคำขอจับ + เขียนเหตุผลลง log (ฝั่งเกมแค่หยุดหลอดเงียบ ๆ ไม่โชว์อะไรเลย)</summary>
+    private void RejectTaming(uint seq, string reason)
+    {
+        Console.WriteLine($"[จับสัตว์] ปฏิเสธ: {reason}");
+        Send(new Abort { Text = reason }, seq);
+    }
+
+    private static bool HasItemTag(Item item, string tagId)
+    {
+        if (item.Tags == null) return false;
+        foreach (Messages.Tag tag in item.Tags)
+        {
+            if (tag.Id == tagId) return true;
+        }
+        return false;
     }
 }

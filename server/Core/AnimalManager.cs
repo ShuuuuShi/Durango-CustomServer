@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Durango.Network;
 using Messages;
 
 namespace Durango.Online;
@@ -56,6 +57,13 @@ public class AnimalManager
     /// <summary>1 ช่อง = 200 หน่วยพิกัดโลก (ค่าเดียวกับ Player.cs:534 และ Player.Gathering.cs:351)</summary>
     private const float TileSize = 200f;
 
+    /// <summary>
+    /// ความเร็วหมุนตัวของสัตว์ — ค่าเดียวกับที่ตัวเกมใช้กับสัตว์ที่มันขยับเอง
+    /// (client/ClientAnimalActor.cs:31 <c>_rotateSpeed = 100f</c>)
+    /// ส่ง 0 ไปฝั่งเกมจะ fallback เป็น 300 (AnimalBehavior.SetRotateSpeed) ซึ่งหมุนเร็วผิดปกติ
+    /// </summary>
+    private const float DefaultRotateSpeed = 100f;
+
     /// <summary>สัตว์ป่าหนึ่งตัวบนเกาะ</summary>
     public class Animal
     {
@@ -101,7 +109,15 @@ public class AnimalManager
                 {
                     new Movement
                     {
-                        Path = new[] { new Location { Position = Position } }
+                        // ⚠️ ต้องมี MotionName เป็น **ชื่อ AnimationClip จริง** ไม่งั้นสัตว์นิ่งสนิท
+                        // client/AnimalBehavior.cs:1007-1011 PlayAnimationMovement return ทันที
+                        // ถ้าชื่อว่าง และ AnimalBehavior.Update() ไม่มีตรรกะเล่นท่ายืนเองเลย
+                        // ชื่อ clip ถอดจาก asset ของเกมเอง — ดู Support/AnimalMotions.cs
+                        MotionName = AnimalMotions.StandOf(EntityType),
+                        MotionOption = (byte)MotionOption.LOOPING,   // ท่ายืนต้องวนซ้ำ ไม่งั้นเล่นจบแล้วค้าง
+                        PlaybackRate = 1f,                          // 0 = หยุดนิ่ง (ค่าปริยายของ struct)
+                        RotSpeed = DefaultRotateSpeed,
+                        Path = new[] { new Location { Position = Position, Time = Gauge.CurrentTime } }
                     }
                 }
             },
