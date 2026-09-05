@@ -128,6 +128,11 @@ public partial class Player
         if (now < animal.NextAttackAt) return;
 
         animal.NextAttackAt = now + Math.Max(0.5f, info.AttackCooltime);
+        if (string.IsNullOrEmpty(animal.AggroTargetId))
+        {
+            animal.AggroTargetId = EntityId;
+            _world.BroadCast(animal.ToMotionMessage());   // เข้าโหมดสู้ — เปลี่ยนท่ายืน
+        }
         animal.AggroTargetId = EntityId;
 
         // ป้องกันของผู้เล่น: players.json → player.defense (ข้อมูลจริงเป็น 0 ⇒ กินเต็ม ๆ)
@@ -250,7 +255,10 @@ public partial class Player
         int value = Math.Max(CombatTuning.MinDamage, (int)Math.Round(raw - defense));
 
         animal.Life = Math.Max(0f, animal.Life - value);
+        bool justAngered = string.IsNullOrEmpty(animal.AggroTargetId);
         animal.AggroTargetId = EntityId;      // ตีมันแล้วมันสู้กลับ แม้เป็นสัตว์กินพืช
+        // เพิ่งโกรธ ⇒ เปลี่ยนเป็นท่ายืนแบบเตรียมสู้ ให้เห็นบนจอว่ามันตอบสนอง
+        if (justAngered && animal.IsAlive) _world.BroadCast(animal.ToMotionMessage());
 
         // ⚠️ ต้องส่งหลอดเลือดชุดใหม่ตามไปด้วย ไม่งั้น**หลอดเลือดของเป้าไม่ขยับเลย**
         // ข้อความ Damaged(12) ทำแค่เอฟเฟกต์ตอนโดน (client/Durango.Logic.Combat/DamagedProcesser.cs:155
@@ -285,6 +293,9 @@ public partial class Player
             animal.IsAlive = false;
             animal.DiedAt = Times.UnixTimeNow();
             _world.BroadCast(new EntityDied { EntityId = animal.EntityId, At = animal.DiedAt });
+            // ⚠️ EntityDied อย่างเดียวไม่พอ — client/AnimalBehavior.cs:830 OnDie ไม่เล่นท่าตายให้
+            // (แค่เปลี่ยน layer กับไล่สีจาง) ⇒ ไม่ส่งท่ามา สัตว์ตายแล้วยังยืนท่าเดิม
+            _world.BroadCast(animal.ToMotionMessage());
 
             Console.WriteLine($"[ล่าสัตว์] {EntityId[..Math.Min(8, EntityId.Length)]} ล้ม " +
                               $"{hit?.Name ?? animal.EntityType.ToString()} lv{animal.CombatLevel} " +
@@ -400,6 +411,7 @@ public partial class Player
         animal.IsAlive = false;
         animal.DiedAt = now;
         _world.BroadCast(new EntityDied { EntityId = animal.EntityId, At = now });
+        _world.BroadCast(animal.ToMotionMessage());
 
         var items = new List<Item> { rein.Value };
         AddItems(items);

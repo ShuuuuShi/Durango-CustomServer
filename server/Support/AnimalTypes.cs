@@ -31,6 +31,19 @@ public static class AnimalTypes
         public bool Tamable;
 
         /// <summary>
+        /// ขนาดที่ต้องส่งไปกับ <c>AppearAnimal.Display.BaseScale</c>
+        ///
+        /// ⚠️ **ส่ง 1.0 ตายตัวไม่ได้** — ฝั่งเกมเอาค่านี้ไปตั้ง <c>transform.localScale</c> ตรง ๆ
+        /// (client/AnimalManager.cs:153) และข้อมูลจริงบอกว่ามีแค่ 29 จาก 214 ชนิดที่เป็น 1.0
+        /// ⇒ ที่เหลือ 185 ชนิดจะตัวผิดขนาดบนจอ เช่น compso_ancora ควร 0.2-0.3 แต่ได้ 1.0
+        /// = ใหญ่เกินจริง 4-5 เท่า (เจอกับตาแล้วตอนวาร์ปไปใกล้ ๆ กล้องมุดเข้าไปในตัว)
+        ///
+        /// ใช้ <c>represent_scale</c> เป็นหลักตามชื่อ ("ขนาดตัวแทนของชนิดนี้")
+        /// ถ้าไม่มีค่อยถอยไปกลางช่วง <c>scale_ranges</c>
+        /// </summary>
+        public float BaseScale = 1f;
+
+        /// <summary>
         /// จับแล้วได้บังเหียนชนิดไหน — <c>animal.json → taming_result</c>
         ///
         /// เป็นตัวเชื่อม "สัตว์ป่าบนเกาะ" กับ "ระบบสัตว์เลี้ยง": มี 67 ชนิดที่มีค่านี้ ตรงกับ
@@ -68,6 +81,22 @@ public static class AnimalTypes
         return _byType.TryGetValue(entityType, out Info info) ? info : null;
     }
 
+    /// <summary>
+    /// ขนาดตัว — <c>represent_scale</c> ก่อน ถ้าไม่มีใช้กลางช่วง <c>scale_ranges</c>
+    /// (ในไฟล์ส่วนใหญ่ scale_ranges เป็นช่วงแคบ ๆ หรือค่าเดียวซ้ำสองครั้ง)
+    /// </summary>
+    private static float ReadScale(JObject o)
+    {
+        if ((float?)o["represent_scale"] is { } rep && rep > 0f) return rep;
+        if (o["scale_ranges"] is JArray range && range.Count == 2)
+        {
+            float lo = (float?)range[0] ?? 0f;
+            float hi = (float?)range[1] ?? 0f;
+            if (lo > 0f && hi > 0f) return (lo + hi) * 0.5f;
+        }
+        return 1f;
+    }
+
     private static void EnsureLoaded()
     {
         if (_byType != null) return;
@@ -92,6 +121,7 @@ public static class AnimalTypes
                 Attack = (string)o["attack"],
                 Defense = (string)o["defense"],
                 Tamable = (bool?)o["tamable"] ?? false,
+                BaseScale = ReadScale(o),
                 TamingResult = (string)o["taming_result"],
                 PreferredFoodTag = (string)o["preferred_food_tag"],
                 DropItem = (string)o["drop_item"],

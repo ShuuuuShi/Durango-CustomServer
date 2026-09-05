@@ -197,6 +197,10 @@ public class World
             // (ตัวมันเองหน่วงเวลาอยู่แล้ว ไม่ได้ทำงานจริงทุกเฟรม — ดู Player.Hunting.cs)
             player.SyncAnimalVisibility();
         }
+
+        // สัตว์เดินเล่น — ต้องอยู่นอกลูปผู้เล่น เพราะเป็นเรื่องของสัตว์ ไม่ใช่ของใครคนใดคนหนึ่ง
+        // (ถ้าไม่มีใครอยู่บนเกาะก็ไม่ต้องเดิน จะได้ไม่เปลืองแรงเปล่า)
+        if (_players.Count > 0) AnimalManager?.Process(Gauge.CurrentTime, BroadCast);
     }
 
     public void Stop()

@@ -1139,6 +1139,8 @@ public static class BotBridge
                 sb.Append(",\"animClip\":");
                 JStr(sb, (st == null) ? null : st.name);
                 sb.Append(",\"animSpeed\":").Append((st == null ? 0f : st.speed).ToString("F2", CultureInfo.InvariantCulture));
+                // ขนาดตัวจริงบนจอ — มาจาก AppearAnimal.Display.BaseScale (client/AnimalManager.cs:153)
+                sb.Append(",\"scale\":").Append(a.transform.localScale.x.ToString("F2", CultureInfo.InvariantCulture));
                 sb.Append('}');
             }
         }

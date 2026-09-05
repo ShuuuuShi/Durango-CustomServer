@@ -86,7 +86,58 @@ public class AnimalManager
         /// <summary>ตีได้อีกครั้งเมื่อไร (Gauge.CurrentTime) — คุมจังหวะด้วย attack_cooltime ของชนิดนั้น</summary>
         public double NextAttackAt;
 
+        /// <summary>จุดที่มันเกิด — เดินเล่นวนอยู่รอบ ๆ จุดนี้ ไม่หลุดไปไกล</summary>
+        public Point2 HomeTile;
+
+        /// <summary>ถึงเวลาออกเดินรอบถัดไปเมื่อไร</summary>
+        public double NextWanderAt;
+
+        /// <summary>ถึงเวลาหยุดเดินแล้วกลับไปยืน (0 = ไม่ได้เดินอยู่)</summary>
+        public double StopWalkingAt;
+
         public WorldPosition Position => new(Tile.x * TileSize, Tile.y * TileSize);
+
+        /// <summary>
+        /// ท่าที่ควรเล่นตามสถานะตอนนี้ — ชื่อ clip จริงจาก asset (ดู Support/AnimalMotions.cs)
+        ///
+        /// ตายแล้วต้องส่งท่าตายมาเอง: <c>AnimalBehavior.OnDie</c> (client บรรทัด 830-846)
+        /// **ไม่ได้เล่นท่าตายให้** มันแค่เปลี่ยน layer กับไล่สีจาง ⇒ ถ้าไม่ส่ง สัตว์ตายแล้วยังยืนท่าเดิม
+        /// (ตัวที่เล่นท่าตายคือ SetAsDead ซึ่งใช้กับซากที่ terrain วางไว้เท่านั้น — AnimalNaturalObject.cs:9)
+        ///
+        /// กำลังโกรธใครอยู่ ⇒ ท่ายืนแบบเตรียมสู้ ให้เห็นว่ามันไม่ได้ยืนเฉย ๆ แล้ว
+        /// </summary>
+        public string CurrentMotion
+        {
+            get
+            {
+                AnimalMotions.Motions m = AnimalMotions.Of(EntityType);
+                if (m == null) return null;
+                if (!IsAlive) return m.Dead ?? m.Stand;
+                if (!string.IsNullOrEmpty(AggroTargetId)) return m.BattleStand ?? m.Stand;
+                return m.Stand ?? m.Idle;
+            }
+        }
+
+        /// <summary>ท่าตายเล่นครั้งเดียวแล้วค้างท่าสุดท้าย ท่าอื่นวนซ้ำ</summary>
+        public MotionOption CurrentMotionOption =>
+            IsAlive ? MotionOption.LOOPING : MotionOption.NORMAL;
+
+        /// <summary>ข้อความบอกฝั่งเกมให้เปลี่ยนท่า — ใช้ตอนสถานะเปลี่ยน (ตาย/เข้าสู้)</summary>
+        public Move ToMotionMessage() => new()
+        {
+            EntityId = EntityId,
+            Movements = new[]
+            {
+                new Movement
+                {
+                    MotionName = CurrentMotion,
+                    MotionOption = (byte)CurrentMotionOption,
+                    PlaybackRate = 1f,
+                    RotSpeed = DefaultRotateSpeed,
+                    Path = new[] { new Location { Position = Position, Time = Gauge.CurrentTime } }
+                }
+            }
+        };
 
         /// <summary>
         /// แปลงเป็นข้อความที่เกมรอรับ
@@ -113,8 +164,8 @@ public class AnimalManager
                         // client/AnimalBehavior.cs:1007-1011 PlayAnimationMovement return ทันที
                         // ถ้าชื่อว่าง และ AnimalBehavior.Update() ไม่มีตรรกะเล่นท่ายืนเองเลย
                         // ชื่อ clip ถอดจาก asset ของเกมเอง — ดู Support/AnimalMotions.cs
-                        MotionName = AnimalMotions.StandOf(EntityType),
-                        MotionOption = (byte)MotionOption.LOOPING,   // ท่ายืนต้องวนซ้ำ ไม่งั้นเล่นจบแล้วค้าง
+                        MotionName = CurrentMotion,
+                        MotionOption = (byte)CurrentMotionOption,   // ท่ายืนต้องวนซ้ำ ไม่งั้นเล่นจบแล้วค้าง
                         PlaybackRate = 1f,                          // 0 = หยุดนิ่ง (ค่าปริยายของ struct)
                         RotSpeed = DefaultRotateSpeed,
                         Path = new[] { new Location { Position = Position, Time = Gauge.CurrentTime } }
@@ -130,10 +181,27 @@ public class AnimalManager
             Display = new AnimalDisplay
             {
                 EntityId = EntityId,
-                BaseScale = 1f
+                // ⚠️ ห้ามส่ง 1.0 ตายตัว — ฝั่งเกมเอาไปตั้ง transform.localScale ตรง ๆ
+                // (client/AnimalManager.cs:153) มีแค่ 29 จาก 214 ชนิดที่ขนาด 1.0 จริง
+                BaseScale = AnimalTypes.Get(EntityType)?.BaseScale ?? 1f
             }
         };
     }
+
+    /// <summary>
+    /// ค่าเดินเล่น — **เอาจาก client ต้นฉบับตรง ๆ** ไม่ได้ตั้งเอง
+    /// client/ClientAnimalActor.cs:23 <c>_wanderRadius = 500f</c> (2.5 ช่อง)
+    /// client/ClientAnimalActor.cs:28 <c>_movingSpeed = 100f</c> (หน่วยต่อวินาที)
+    /// ข้อมูล entity_types/animal.json ไม่มีความเร็วเดินของสัตว์เลย (มีแต่ *_velocity ของหลอด)
+    /// </summary>
+    private const float WanderRadius = 500f;
+    private const float MovingSpeed = 100f;
+
+    /// <summary>**ค่าของเรา** — หยุดพักกี่วินาทีระหว่างเดินแต่ละรอบ (สุ่มในช่วงนี้)</summary>
+    private const double WanderPauseMin = 4.0;
+    private const double WanderPauseMax = 12.0;
+
+    private readonly Random _rng = new();
 
     private readonly List<Animal> _animals = new();
     private readonly Dictionary<string, Animal> _byId = new(StringComparer.Ordinal);
@@ -145,6 +213,91 @@ public class AnimalManager
     public AnimalManager(TerrainData terrain, RegionCatalog.TemplateInfo template)
     {
         Spawn(terrain, template);
+    }
+
+    /// <summary>
+    /// รอบเดินเล่นของสัตว์ทั้งเกาะ — เรียกจาก World.Process ทุกเฟรม (ทำงานจริงเป็นช่วง ๆ)
+    ///
+    /// ทำไมเซิร์ฟต้องเป็นคนเดินให้: <c>AnimalBehavior.Update()</c> ฝั่งเกมไม่มีตรรกะขยับเองเลย
+    /// (ตัวที่เดินเองคือ ClientAnimalActor ซึ่งใช้กับสัตว์ประดับที่ terrain วาง ไม่ใช่สัตว์จากเซิร์ฟ)
+    /// ⇒ ไม่ส่ง Move มา สัตว์จะยืนแช่อยู่จุดเดิมตลอดกาล
+    ///
+    /// วิธี: เดินไปจุดสุ่มในรัศมีรอบจุดเกิด → พอถึงเวลาก็กลับไปยืน → พักแล้วเดินใหม่
+    /// สัตว์ที่กำลังโกรธใครอยู่ไม่เดินเล่น (มันควรจ้องเป้าหมาย)
+    /// </summary>
+    public void Process(double now, Action<Move> broadcast)
+    {
+        if (broadcast == null) return;
+        foreach (Animal animal in _animals)
+        {
+            if (!animal.IsAlive) continue;
+
+            // ถึงเวลาหยุดเดินแล้ว — กลับไปท่ายืน
+            if (animal.StopWalkingAt > 0.0 && now >= animal.StopWalkingAt)
+            {
+                animal.StopWalkingAt = 0.0;
+                animal.NextWanderAt = now + WanderPauseMin + _rng.NextDouble() * (WanderPauseMax - WanderPauseMin);
+                broadcast(animal.ToMotionMessage());
+                continue;
+            }
+
+            if (animal.StopWalkingAt > 0.0) continue;                 // เดินอยู่ ปล่อยให้เดินต่อ
+            if (!string.IsNullOrEmpty(animal.AggroTargetId)) continue; // โกรธอยู่ ไม่เดินเล่น
+            if (now < animal.NextWanderAt) continue;
+
+            Move msg = BuildWander(animal, now);
+            if (msg.Movements == null) { animal.NextWanderAt = now + WanderPauseMin; continue; }
+            broadcast(msg);
+        }
+    }
+
+    /// <summary>
+    /// สร้างเส้นทางเดินไปจุดสุ่มรอบบ้าน — รูปแบบเดียวกับที่ตัวเกมสร้างเองใน
+    /// client/ClientAnimalActor.cs:172-230 (จุดเริ่ม + จุดจบ พร้อมเวลาที่คำนวณจากระยะ/ความเร็ว)
+    /// </summary>
+    private Move BuildWander(Animal animal, double now)
+    {
+        AnimalMotions.Motions motions = AnimalMotions.Of(animal.EntityType);
+        string walk = motions?.Move;
+        if (string.IsNullOrEmpty(walk)) return default;               // ไม่มีท่าเดิน = อย่าให้ขยับแบบไถลไป
+
+        double angle = _rng.NextDouble() * Math.PI * 2.0;
+        float radius = (float)(_rng.NextDouble() * WanderRadius);
+        var home = new WorldPosition(animal.HomeTile.x * TileSize, animal.HomeTile.y * TileSize);
+        var dest = new WorldPosition(home.x + (float)(Math.Cos(angle) * radius),
+                                     home.y + (float)(Math.Sin(angle) * radius));
+
+        WorldPosition from = animal.Position;
+        float dx = dest.x - from.x, dy = dest.y - from.y;
+        float distance = (float)Math.Sqrt(dx * dx + dy * dy);
+        if (distance < 1f) return default;
+
+        double travel = distance / MovingSpeed;
+        float yaw = (float)(Math.Atan2(dx, dy) * 180.0 / Math.PI);    // ฝั่งเกมนับ yaw จากแกน +Z
+
+        // ขยับตำแหน่งฝั่งเซิร์ฟตามไปด้วย ไม่งั้นระยะไล่กัด/ระยะจับจะอ้างจุดเก่า
+        animal.Tile = new Point2((int)Math.Round(dest.x / TileSize), (int)Math.Round(dest.y / TileSize));
+        animal.StopWalkingAt = now + travel;
+
+        return new Move
+        {
+            EntityId = animal.EntityId,
+            Movements = new[]
+            {
+                new Movement
+                {
+                    MotionName = walk,
+                    MotionOption = (byte)(MotionOption.LOOPING | MotionOption.ALIGN_TO_PATH),
+                    PlaybackRate = 1f,
+                    RotSpeed = DefaultRotateSpeed,
+                    Path = new[]
+                    {
+                        new Location { Position = from, Yaw = yaw, Time = now },
+                        new Location { Position = dest, Yaw = yaw, Time = now + travel }
+                    }
+                }
+            }
+        };
     }
 
     public Animal Get(string entityId) =>
@@ -227,6 +380,7 @@ public class AnimalManager
             EntityType = spawn.EntityType,
             CombatLevel = level,
             Tile = tile,
+            HomeTile = tile,
             LifeMax = lifeMax,
             Life = lifeMax,
             Attack = (float)Math.Max(0.0, StatFormula.EvalOr(info.Attack, vars, 0.0)),
