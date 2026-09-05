@@ -151,7 +151,11 @@ public class PlayerContext
         if (KUtility.GetSize(Storage) != 0) return;
         Storage = new Dictionary<string, byte[]>();
         var data = MemoStorageDefaults.Empty();
-        Storage[MemoStorageDefaults.StorageKey] = Json.WriteToBytes(data);
+        // WriteToBytes คืน null ได้เมื่อ serialize พลาด — ไม่ใส่คีย์ดีกว่าใส่ null ค้างไว้
+        if (Json.WriteToBytes(data) is { } memoBlob)
+        {
+            Storage[MemoStorageDefaults.StorageKey] = memoBlob;
+        }
     }
 
     [CanBeNull]

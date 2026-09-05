@@ -578,7 +578,15 @@ public partial class Player
 
     private void SaveSkillState()
     {
-        _context.Storage[SkillTuning.StorageKey] = Json.WriteToBytes(_skills);
+        // ⚠️ serialize พลาดแล้วเขียน null ทับ = สกิลทั้งชุดของผู้เล่นหายตอนโหลดรอบหน้า
+        // ⇒ เก็บของเดิมไว้ดีกว่าเขียนทับด้วยของว่าง (เหตุผลเดียวกับ Support/SafeSave.WriteAtomic)
+        byte[] blob = Json.WriteToBytes(_skills);
+        if (blob == null)
+        {
+            Console.WriteLine("[skill] ⚠️ แปลงสถานะสกิลเป็นไบต์ไม่สำเร็จ — คงของเดิมไว้ ไม่เขียนทับ");
+            return;
+        }
+        _context.Storage[SkillTuning.StorageKey] = blob;
         OnContextChanged();
     }
 

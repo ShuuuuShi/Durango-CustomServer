@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using JetBrains.Annotations;
 using Newtonsoft.Json;
 
 namespace Durango.Utils;
@@ -82,8 +83,34 @@ public static class Json
         }
     }
 
+    /// <summary>
+    /// แปลงเป็นไบต์สำหรับ "เขียนลงไฟล์" — คืน <c>null</c> เมื่อ serialize ไม่สำเร็จ
+    ///
+    /// ⚠️ **ห้ามคืนอาร์เรย์ว่าง** — ตัวนี้ป้อนตรงเข้า <see cref="SafeSave.WriteAtomic"/>
+    /// ซึ่งเขียนไฟล์แล้ว <c>File.Replace</c> ⇒ ไฟล์ 0 ไบต์จะไปแทนที่ไฟล์เซฟจริง
+    /// **และดันไฟล์ดีเดิมไปเป็น .bak** พอเซฟรอบถัดไปพลาดซ้ำ .bak ก็ถูกทับด้วยไฟล์ว่างอีก
+    /// ⇒ ตัวละคร/เกาะหายเกลี้ยงทั้งไฟล์หลักและไฟล์สำรอง โดยไม่มีอะไรเตือนเลยสักบรรทัด
+    /// (<see cref="Write{T}"/> คืน <c>string.Empty</c> ตอนพลาด ซึ่งใช้ได้กับการตอบ HTTP
+    ///  แต่ใช้กับการเขียนไฟล์ไม่ได้ — จึงแยกทางกันตรงนี้)
+    /// </summary>
+    [CanBeNull]
     public static byte[] WriteToBytes<T>(T data, bool indented = false)
     {
-        return Encoding.UTF8.GetBytes(Write(data, indented));
+        try
+        {
+            string json = JsonConvert.SerializeObject(
+                data, indented ? Formatting.Indented : Formatting.None, Setting);
+            if (string.IsNullOrEmpty(json))
+            {
+                Console.WriteLine("[json] serialize ได้ข้อความว่าง — ไม่เขียนทับไฟล์");
+                return null;
+            }
+            return Encoding.UTF8.GetBytes(json);
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("[json] เขียนไม่สำเร็จ: " + e.Message);
+            return null;
+        }
     }
 }

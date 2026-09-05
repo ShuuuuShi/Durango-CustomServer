@@ -23,8 +23,14 @@ public static class SafeSave
     /// <summary>เขียนไฟล์แบบสลับเข้าที่ — คืน false เมื่อเขียนไม่สำเร็จ (ของเดิมยังอยู่)</summary>
     public static bool WriteAtomic(string path, byte[] data, string what)
     {
-        if (string.IsNullOrEmpty(path) || data == null)
+        // ⚠️ ด่านสำคัญที่สุดของทั้งไฟล์ — ข้อมูลว่าง **ห้ามเขียนเด็ดขาด**
+        // เพราะ File.Replace ข้างล่างจะดันไฟล์เซฟดีเดิมไปเป็น .bak แล้วเอาไฟล์ 0 ไบต์วางแทน
+        // พอรอบถัดไปพลาดซ้ำ .bak ก็โดนทับด้วยไฟล์ว่างอีก ⇒ ของหายทั้งไฟล์หลักและไฟล์สำรอง
+        // โดยไม่มีสัญญาณเตือนใด ๆ (กว่าจะรู้คือตอนผู้เล่นเข้ามาแล้วกลายเป็นตัวละครใหม่)
+        if (string.IsNullOrEmpty(path) || data == null || data.Length == 0)
         {
+            Console.WriteLine($"[{what}] ⚠️ ข้อมูลที่จะเซฟว่างเปล่า — **ไม่เขียนทับไฟล์เดิม** " +
+                              $"(ไฟล์เซฟที่มีอยู่ยังปลอดภัย) path={path}");
             return false;
         }
         string tmp = path + ".tmp";
