@@ -1013,14 +1013,11 @@ public class AnimalBehavior : CharacterBehavior, IMotionPlayable, IAnimationEven
 		float fadeTime = GetFadeTime(motionName);
 		float beginTime = Connections.Frontend.CheckBufferedTimePassed(sequenceBeginTick);
 		CrossFade(motionName, fadeTime, (motionOption & MotionOption.LOOPING) > MotionOption.NORMAL, beginTime, playbackRate);
-		if (CurAnimState != null)
-		{
-			CurAnimState.speed = playbackRate;
-			if ((motionOption & MotionOption.REVERSE) > MotionOption.NORMAL)
+if (CurAnimState != null)
 			{
-				CurAnimState.speed = -1f;
+				// REVERSE ต้องคูณเข้ากับ playbackRate ไม่ใช่ทับเป็น -1 ตรง ๆ
+				CurAnimState.speed = ((motionOption & MotionOption.REVERSE) > MotionOption.NORMAL) ? (0f - playbackRate) : playbackRate;
 			}
-		}
 		base.RootMotionMovable.SetInPlaceMotionMode((motionOption & MotionOption.IN_PLACE_MOTION) > MotionOption.NORMAL);
 		base.RootMotionMovable.SetLocalRootMotionYawMode((motionOption & MotionOption.USE_LOCAL_ROOT_YAW) > MotionOption.NORMAL);
 	}

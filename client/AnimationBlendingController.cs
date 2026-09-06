@@ -32,10 +32,11 @@ public class AnimationBlendingController : MonoBehaviour
 		{
 			return 0.3f;
 		}
-		AnimationBlendingInfo.Data data = Clips.Get(fadeOutClip);
-		AnimationBlendingInfo.Data data2 = Clips.Get(fadeOutClip);
-		float val = data?.FadeOutTime ?? 0.3f;
-		float num = data2?.FadeInTime ?? 0.3f;
+// เดิมเรียก Get(fadeOutClip) สองครั้ง ทำให้ FadeInTime ของคลิปขาเข้าไม่ถูกใช้
+			AnimationBlendingInfo.Data data = Clips.Get(fadeOutClip);
+			AnimationBlendingInfo.Data data2 = Clips.Get(fadeInClip);
+			float val = data?.FadeOutTime ?? 0.3f;
+			float num = data2?.FadeInTime ?? 0.3f;
 		return (!(num <= -1f)) ? Math.Max(val, num) : 0f;
 	}
 }

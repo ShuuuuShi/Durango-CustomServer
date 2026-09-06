@@ -45,6 +45,12 @@ public static class AnimalMotions
         public string BattleStand;
         public string Groggy;
         public string Blow;
+
+        /// <summary>ท่าโจมตีปกติ — ไม่มีตัวนี้ สัตว์จะยืนนิ่งทั้งที่ดาเมจเข้าผู้เล่นจริง</summary>
+        public string AttackNormal;
+
+        /// <summary>ท่าโจมตีหนัก (บางชนิดไม่มี)</summary>
+        public string AttackStrong;
     }
 
     private static Dictionary<ushort, Motions> _byType;
@@ -95,7 +101,9 @@ public static class AnimalMotions
                     Dead = (string)o["dead"],
                     BattleStand = (string)o["battle_stand"],
                     Groggy = (string)o["groggy"],
-                    Blow = (string)o["blow"]
+                    Blow = (string)o["blow"],
+                    AttackNormal = (string)o["attack_normal"],
+                    AttackStrong = (string)o["attack_strong"]
                 };
             }
             Console.WriteLine($"[สัตว์] โหลดชื่อท่าทางของสัตว์ {_byType.Count} ชนิด");

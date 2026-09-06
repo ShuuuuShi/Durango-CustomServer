@@ -87,15 +87,24 @@ public class CurrencyWidgetList : MonoBehaviour, IUIInitializable
 		}
 	}
 
+	// [7 ก.ย. 2026] เซิร์ฟนี้ใช้สกุลเงินเดียวคือ T Stone ⇒ ยุบทุกสกุลมาที่วิดเจ็ตตัวเดียว
+	//
+	// ทำไมต้องบังคับตรงนี้ด้วย ทั้งที่ WalletExtension.Normalize() แปลงสกุลให้แล้ว:
+	// Normalize มีผลกับ "ยอดเงิน/ไอคอน/ข้อความ" เท่านั้น แต่ GetWidget แยกวิดเจ็ตด้วย
+	// CurrencyType ดิบที่ผูกไว้ใน prefab ของแต่ละหน้าจอ ⇒ หน้าจอที่ลงทะเบียน Gem/WarpMatter ไว้
+	// จะได้วิดเจ็ตของตัวเอง กลายเป็นช่องเงินหลายช่องเรียงกันบนหัวจอ ทั้งที่ทุกช่องโชว์ยอด
+	// T Stone ตัวเดียวกันหมด (อาการที่เห็นจริง: 3 ช่อง เลข 12,500 เท่ากันทั้งสามช่อง)
+	//
+	// Add กับ Remove แปลงเหมือนกัน ⇒ ReferenceCount ยังสมดุลตอนเปิด/ปิดหน้าจอ
 	private void Add(Currency currency)
 	{
-		GetWidget(currency).ReferenceCount++;
+		GetWidget(Currency.TStone).ReferenceCount++;
 		Refresh();
 	}
 
 	private void Remove(Currency currency)
 	{
-		CurrencyWidget_PC widget = GetWidget(currency);
+		CurrencyWidget_PC widget = GetWidget(Currency.TStone);
 		widget.ReferenceCount = ((widget.ReferenceCount != 0) ? (widget.ReferenceCount - 1) : 0);
 		Refresh();
 	}

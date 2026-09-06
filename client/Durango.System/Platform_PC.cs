@@ -1,3 +1,4 @@
+using System;
 using Durango.UI;
 using UnityEngine;
 
@@ -17,7 +18,32 @@ public class Platform_PC : Platform
 
 	public override bool IsAvailableOfferwall => false;
 
-	public override bool UsePCUI => true;
+	// **ค่าของเรา** — ค่าเริ่มต้น = UI มือถือ · สลับได้ด้วย PlayerPrefs option:ui_mode
+	// (ยกมาจาก OpenCode) env DURANGO_FORCE_PCUI=1 บังคับชุด PC ถ้าต้องการเทียบ
+	public override bool UsePCUI
+	{
+		get
+		{
+			string env = global::System.Environment.GetEnvironmentVariable("DURANGO_FORCE_PCUI");
+			if (env == "1" || string.Equals(env, "true", StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+			string mode = PlayerPrefs.GetString("option:ui_mode", string.Empty);
+			if (string.Equals(mode, "pc", StringComparison.OrdinalIgnoreCase)
+			    || string.Equals(mode, "PC", StringComparison.Ordinal))
+			{
+				return true;
+			}
+			if (string.Equals(mode, "mobile", StringComparison.OrdinalIgnoreCase)
+			    || mode == "มือถือ")
+			{
+				return false;
+			}
+			// ค่าเริ่มต้น: มือถือ
+			return false;
+		}
+	}
 
 	public override int DefaultUISize => 1280;
 

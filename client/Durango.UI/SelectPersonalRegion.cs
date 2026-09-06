@@ -57,7 +57,13 @@ public class SelectPersonalRegion : MonoBehaviour, IEditPlayerDisplayPage
 				SelectNode(index);
 			});
 			UITexture uITexture = next.FindComponent<UITexture>("Texture");
-			uITexture.mainTexture = _regionTextures[num];
+			// **ค่าของเรา**: prefab ฝั่ง PC มี _regionTextures น้อยกว่าจำนวน region_template_ids
+			// ใน constants ของเซิร์ฟ (IndexOutOfRangeException กลาง Awake — log เกม 6 ก.ย. 2026)
+			// ⇒ วนใช้รูปซ้ำแทนดึงเกินขอบ ถ้า prefab ไม่มีรูปเลยก็ปล่อยค่าเดิมไว้ อย่าให้แครช
+			if (_regionTextures != null && _regionTextures.Length > 0)
+			{
+				uITexture.mainTexture = _regionTextures[num % _regionTextures.Length];
+			}
 		}
 		nodes.EndLoad();
 		_scrollView.ResetPosition();

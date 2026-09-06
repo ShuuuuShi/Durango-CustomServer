@@ -348,18 +348,17 @@ public class GatheringSystem : GameSystem<GatheringSystem>
 		{
 			return;
 		}
-		if (CurrentGatheringData.IsAvailableForGathering())
-		{
+// เริ่มท่า/หลอดทันทีแม้ Ideal tool ยังไม่พร้อม — เดิมข้ามเมื่อ !IsAvailable
+			// แล้วส่ง Collect อย่างเดียว ⇒ ได้ของแต่ไม่มีอนิเมชั่น
 			MakePredictGahteringTimer();
-		}
-		Connections.Frontend.Send(new Collect
-		{
-			EntityId = lastInteractionTarget.EntityId,
-			Tile = new Point2((int)lastInteractionTarget.Tile.x, (int)lastInteractionTarget.Tile.y),
-			GeneratorId = CurrentGatheringData.GeneratorId,
-			Level = CurrentGatheringData.Level,
-			ToolItemId = ((_currentGatheringTool == null) ? string.Empty : _currentGatheringTool.Id)
-		}).On<Messages.Timer>(OnGatheringTimer).On<ToolNeeded>(OnToolNeeded)
+			Connections.Frontend.Send(new Collect
+			{
+				EntityId = lastInteractionTarget.EntityId,
+				Tile = new Point2((int)lastInteractionTarget.Tile.x, (int)lastInteractionTarget.Tile.y),
+				GeneratorId = CurrentGatheringData.GeneratorId,
+				Level = CurrentGatheringData.Level,
+				ToolItemId = ((_currentGatheringTool == null) ? string.Empty : _currentGatheringTool.Id)
+			}).On<Messages.Timer>(OnGatheringTimer).On<ToolNeeded>(OnToolNeeded)
 			.On(delegate(SkillNeeded msg, PacketHeader header)
 			{
 				GameSystem<SkillSystem>.Instance().SkillNeeded(msg);
@@ -488,10 +487,38 @@ public class GatheringSystem : GameSystem<GatheringSystem>
 			StopCollectTimer();
 			return;
 		}
-		PlayCollectTimer(CurrentGatheringData.Duration + Connections.Frontend.Ping + 2f);
-		string model = _currentGatheringTool.GetModel(PlayerBehavior.LocalPlayer.IsMale);
+		float predictDuration = CurrentGatheringData.Duration + Connections.Frontend.Ping + 2f;
+		if (predictDuration < 0.5f)
+		{
+			predictDuration = 2.5f;
+		}
+		PlayCollectTimer(predictDuration);
+		ApplyGatheringMotion();
+	}
+
+	/// <summary>
+	/// เลือกท่าเก็บ + โมเดลเครื่องมือ แล้วสั่งเล่น — มือเปล่าต้องข้าม GetModel (เดิม NRE ทำให้ไม่มีอนิเมชั่น)
+	/// </summary>
+	private void ApplyGatheringMotion()
+	{
+		InteractionObject lastInteractionTarget = GameSystem<InteractionSystem>.Instance().LastInteractionTarget;
+		if (lastInteractionTarget == null || CurrentGatheringData == null)
+		{
+			return;
+		}
+		string model = null;
+		ItemColor colors = default(ItemColor);
+		if (_currentGatheringTool != null)
+		{
+			model = _currentGatheringTool.GetModel(PlayerBehavior.LocalPlayer.IsMale);
+			colors = _currentGatheringTool.Colors;
+		}
 		string motion = null;
-		string toolTag = ((CurrentGatheringData.BestTool != null) ? CurrentGatheringData.CanGateringWithThisTool(CurrentGatheringData.BestTool) : "bare_hands");
+		string toolTag = ((CurrentGatheringData.BestTool != null) ? CurrentGatheringData.CanGateringWithThisTool(CurrentGatheringData.BestTool) : GatheringData.BarehandKey);
+		if (string.IsNullOrEmpty(toolTag))
+		{
+			toolTag = GatheringData.BarehandKey;
+		}
 		ImmovableBase targetComponent = lastInteractionTarget.GetTargetComponent<ImmovableBase>();
 		if (targetComponent != null)
 		{
@@ -507,7 +534,11 @@ public class GatheringSystem : GameSystem<GatheringSystem>
 				motion = MotionMap.Instance().GetGatheringMotion(toolTag, CurrentGatheringData.GeneratorId, entityTypeId, _lastGatherSize);
 			}
 		}
-		_collectTimer.SetMotion(motion, model, (_currentGatheringTool == null) ? default(ItemColor) : _currentGatheringTool.Colors, 0.5f);
+		if (string.IsNullOrEmpty(motion))
+		{
+			Debug.LogWarning("[Gathering] ไม่เจอท่าเก็บ tool=" + toolTag + " gen=" + CurrentGatheringData.GeneratorId + " size=" + _lastGatherSize);
+		}
+		_collectTimer.SetMotion(motion, model, colors, 0.5f);
 	}
 
 	private void OnGatheringTimer(Messages.Timer msg, PacketHeader header)
@@ -522,7 +553,9 @@ public class GatheringSystem : GameSystem<GatheringSystem>
 		{
 			CurrentGatheringData.DurationChanged(msg.Duration);
 		}
-		PlayCollectTimer(msg.Duration);
+		// ถ้า predict ถูกข้าม/พัง ตอน Timer จากเซิร์ฟมาถึงยังต้องมีท่า
+		ApplyGatheringMotion();
+		PlayCollectTimer(Mathf.Max(0.1f, msg.Duration));
 	}
 
 	private void InteractionSystem_InteractionTargetSelected(InteractionObject interactionObject)

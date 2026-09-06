@@ -25,13 +25,29 @@ public static class WalletExtension
 		return (wallet.UnpaidBalances != null) ? wallet.UnpaidBalances.Get(currency.Normalize(), 0L) : 0;
 	}
 
+	// [7 ก.ย. 2026] เซิร์ฟนี้ใช้สกุลเงินเดียวคือ T Stone — ยุบทุกสกุลมาที่ตัวเดียว
+	//
+	// ทำไมแก้ที่นี่จุดเดียว: Normalize() เป็นคอขวดที่ทุกเส้นทางเงินฝั่งเกมผ่านหมด
+	//   · ยอดเงิน  — GetPaidBalance / GetUnpaidBalance (สองเมธอดข้างบนไฟล์นี้)
+	//   · ข้อความ  — Durango.Logic.Item/Inventory.cs:195 CurrencyFormat
+	//                 · :213 CurrencyEmphasisFormat
+	//   · ไอคอน    — Durango.Logic.Item/Inventory.cs:248 GetIcon
+	// ⇒ แก้ตรงนี้แล้วจุดที่อ้าง Currency.Gem / WarpMatter / Coin ฯลฯ อีก 88 จุดใน 25 ไฟล์
+	//   เปลี่ยนตามเองทั้งหมด ไม่ต้องไล่แก้ทีละที่ (และไม่ต้องแตะ enum ใน GameCode ซึ่งห้ามแก้)
+	//
+	// ต้นฉบับออกแบบเมธอดนี้ไว้แปลงสกุลอยู่แล้ว — ของเดิมแปลง Coin → MobileCoin/PcCoin
+	// ตามแพลตฟอร์ม เราแค่ขยายให้แปลงทุกสกุลเป็น TStone
+	//
+	// ฝั่งเซิร์ฟเป็นตัวบังคับจริง: กระเป๋าที่ส่งมามีคีย์เดียวคือ Currency.TStone และการหักเงิน
+	// ทุกครั้งผ่าน Player.TrySpendTStone (server/Core/Player.Wallet.cs) ⇒ ต่อให้หน้าจอไหน
+	// ยังเขียนว่าจ่ายด้วยเพชร เซิร์ฟก็หัก T Stone อยู่ดี
 	public static Currency Normalize(this Currency type)
 	{
-		if (type == Currency.Coin)
+		if (type == Currency.Invalid)
 		{
-			return (!Platform.Instance.UsePCCoin) ? Currency.MobileCoin : Currency.PcCoin;
+			return Currency.Invalid;
 		}
-		return type;
+		return Currency.TStone;
 	}
 
 	public static int GetVoucherCount(this Wallet wallet, [CanBeNull] string id)

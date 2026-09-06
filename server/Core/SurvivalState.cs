@@ -205,6 +205,9 @@ public sealed class SurvivalState
         return true;
     }
 
+    /// <summary>ชื่อแหล่ง momentum ที่กำลังมีอยู่ — ใช้เคลียร์แหล่งของ StatusEffect</summary>
+    public IEnumerable<string> MomentumSources() => _momenta.Keys;
+
     // ── การเปลี่ยนค่าแบบไม่ต่อเนื่อง (กิน/โดนตี/ชุบชีวิต) ─────────────────────────────
 
     /// <summary>ตั้งค่าหลอดตรง ๆ — ใช้ตอนค่ากระโดด ไม่ใช่ค่อย ๆ ไหลตามเวลา</summary>

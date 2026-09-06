@@ -259,6 +259,24 @@ if (-not $SkipGame) {
             Rename-Item $_.FullName ('readme-th' + $_.Extension) -ErrorAction SilentlyContinue
         }
 
+        # ── ด่านตรวจหลังแพ็ก — เคยหลุด account.key ไปกับชุดแจกมาแล้วจริง ──────────────
+        # /XF ของ robocopy กันได้แค่ไฟล์ที่ชื่อตรงเป๊ะ ถ้าวันหลังมีคนแก้บรรทัดนั้นหรือ
+        # ไฟล์ถูกวางในโฟลเดอร์ย่อย มันจะหลุดไปเงียบ ๆ ⇒ ตรวจซ้ำแล้วหยุดทันทีถ้าเจอ
+        $leaked = @()
+        foreach ($pattern in @('account.key', 'launcher.session', '*.pid')) {
+            $leaked += Get-ChildItem $GameOut -Recurse -File -Filter $pattern -ErrorAction SilentlyContinue
+        }
+        if ($leaked.Count -gt 0) {
+            Say '   ⚠️ พบไฟล์ลับหลุดเข้าชุดแจก — ลบออกแล้ว:' Red
+            foreach ($f in $leaked) {
+                Say ("      " + $f.FullName.Substring($GameOut.Length)) Red
+                Remove-Item $f.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+        else {
+            Say '   ✓ ไม่มี account.key/launcher.session ติดไปกับชุดแจก' Green
+        }
+
         $gsize = (Get-ChildItem $GameOut -Recurse -File | Measure-Object Length -Sum).Sum
         Say ("   ชุดเกม {0:N0} MB ที่ {1}" -f ($gsize / 1MB), $GameOut) Green
     }

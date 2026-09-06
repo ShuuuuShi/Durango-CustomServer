@@ -348,17 +348,23 @@ public partial class Player
     /// ตอบ Recipes(120) — client เอา Ids ไปตั้งว่าสูตรไหน "ปลดล็อกแล้ว"
     /// (client/RecipeSystem.cs:135-143 → RecipeContainer.SetAvailableList)
     ///
-    /// **ค่าของเรา: ปลดทุกสูตร** — ของจริงสูตรถูกปลดผ่านระบบสกิล (Recipe.GetOwnerSkill อ่านจาก
-    /// Reward.RecipeIds ของโหนดสกิล — client/Crafting/Recipe.cs:88-107) ซึ่งเซิร์ฟยังตอบ GetSkills
-    /// เป็นชุดว่าง (Core/Player.cs:283-294) ⇒ ถ้าคัดตามสกิลจริงจะไม่มีสูตรเลยสักอัน
-    /// แนวเดียวกับที่ระบบล่องเรือเปิดทุกเกาะไว้ก่อน (Core/Player.cs:314-328)
-    /// (คัดเฉพาะสูตรที่ทำได้จริง — ดู <see cref="CraftRecipeStore.CraftableIds"/>)
+    /// [7 ก.ย. 2026] **ปลดตามสกิลจริงแล้ว** — เดิมส่งทุกสูตร (625) เพราะตอนนั้น GetSkills ตอบชุดว่าง
+    /// ตอนนี้ Player.Skills.cs ทับ GetSkills ด้วยของจริง ⇒ เงื่อนไขที่ต้องลัดหายไปแล้ว
+    /// เส้นทาง: skills.json → rewards[] → rewards.json → recipe_ids (เส้นเดียวกับ client)
+    ///
+    /// ชุดที่เปิดตลอด = สูตรที่ไม่มีรางวัลสกิลไหนปลดเลย (88 ตัว ดู SkillDataStore.RecipesWithoutSkill)
     /// </summary>
     private void SendRecipes(uint replyOf)
     {
+        HashSet<string> unlocked = UnlockedRecipeIds();
+        var ids = new List<string>();
+        foreach (string id in CraftRecipeStore.CraftableIds())
+        {
+            if (unlocked.Contains(id)) ids.Add(id);
+        }
         Send(new Recipes
         {
-            Ids = CraftRecipeStore.CraftableIds(),
+            Ids = ids.ToArray(),
             LikedRecipeIds = _likedRecipes.ToArray(),
             NewRecipeIds = Array.Empty<string>()
         }, replyOf);
@@ -423,6 +429,11 @@ public partial class Player
         Send(new InventoryUpdated { EntityId = EntityId, RemovedItemIds = consumedIds });
         AddItems(products);                                   // เข้ากระเป๋า + OnContextChanged (เซฟ)
         Send(new InventoryUpdated { EntityId = EntityId, Items = products });
+
+        // [7 ก.ย. 2026] ให้ exp ตอนหักของ+เติมของแล้ว — ไม่รอ Timer/FinishCraft
+        // (inventory เปลี่ยนตั้งแต่ตรงนี้แล้ว ถ้าให้ตอนส่ง Crafted จะซ้ำ/ช้าโดยใช่เหตุ)
+        AddExpForAction(SkillTuning.CraftWeight, MapRecipeSkillCategory(recipe.category),
+                        $"คราฟต์ {msg.RecipeId}");
 
         SpendCraftEnergy(recipe);
 
@@ -732,6 +743,43 @@ public partial class Player
         int min = recipe.min_level > 0 ? recipe.min_level : 1;
         int max = recipe.max_level > 0 ? recipe.max_level : min;
         return Math.Clamp(level, min, Math.Max(min, max));
+    }
+
+    /// <summary>
+    /// แปลงสตริง <c>recipes.json → category</c> เป็นหมวดสกิลสำหรับให้ exp
+    /// ไม่รู้จัก → null = ได้แค่เลเวลตัวละคร ไม่ได้ exp หมวด (ไม่เดา)
+    /// </summary>
+    private static Shared.Skill.Category? MapRecipeSkillCategory(string category)
+    {
+        if (string.IsNullOrEmpty(category))
+        {
+            return null;
+        }
+        if (category.StartsWith("cook", StringComparison.OrdinalIgnoreCase))
+        {
+            return Shared.Skill.Category.Cooking;
+        }
+        if (category.StartsWith("clothing", StringComparison.OrdinalIgnoreCase))
+        {
+            return Shared.Skill.Category.Armorcrafting;
+        }
+        if (category.StartsWith("material_process", StringComparison.OrdinalIgnoreCase) ||
+            category.StartsWith("process", StringComparison.OrdinalIgnoreCase))
+        {
+            return Shared.Skill.Category.Process;
+        }
+        if (category.StartsWith("weapon", StringComparison.OrdinalIgnoreCase) ||
+            category.StartsWith("tool", StringComparison.OrdinalIgnoreCase))
+        {
+            return Shared.Skill.Category.Weaponcrafting;
+        }
+        if (category.StartsWith("modular", StringComparison.OrdinalIgnoreCase) ||
+            category.StartsWith("build", StringComparison.OrdinalIgnoreCase) ||
+            category.StartsWith("construct", StringComparison.OrdinalIgnoreCase))
+        {
+            return Shared.Skill.Category.Constructing;
+        }
+        return null;
     }
 
     /// <summary>

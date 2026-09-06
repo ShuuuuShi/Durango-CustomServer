@@ -334,15 +334,28 @@ public class GameServer
         // "/terrains/1" ให้ตามโลกของผู้เล่นที่ขออยู่แล้ว ⇒ ไม่ต้องแตะฝั่ง client
         World playerWorld = WorldOf(playerContext);
         msg.Region.CreatedAt = 0.0;
-        msg.Region.Id = playerWorld.TerrainId ?? "1";
+        // Region.Id/Role ต้องบอก client ว่าตอนนี้อยู่เกาะส่วนตัวหรือไม่
+        // UI ที่ดินเทียบ GameManager.Region.Role/Id กับ PersonalRegion.Region.Id
+        // เควส MoveToRegionToDo(Personal) ก็เช็ค Role() == Personal
+        string regionId = playerContext.RegionId;
+        bool onPersonal = !string.IsNullOrEmpty(regionId) &&
+                          regionId.StartsWith("personal_", StringComparison.OrdinalIgnoreCase);
+        msg.Region.Id = onPersonal
+            ? regionId
+            : (string.IsNullOrEmpty(regionId) ? (playerWorld.TerrainId ?? "1") : regionId);
         msg.Region.Name = null;
-        msg.Region.TemplateId = playerWorld.TerrainInfo.region_template;
-        // TerrainId = ชื่อเกาะจริง ไม่ใช่ "1" — ตัวเกมเอาค่านี้ไปประกอบ URL แผนที่ตรง ๆ ไม่ validate
-        // (client/Durango.Terrain/TerrainMeta.cs:130 · TerrainBase.cs:337 · MapSystem.cs:752)
-        // และ **จำเป็นต้องต่างกันต่อเกาะ** เพราะ chunk ถูกขอแบบ disableCache:false
-        // (TerrainBase.cs:332) ⇒ BestHTTP แคชตาม URL ถ้าใช้ id ซ้ำ เกาะใหม่จะได้แผนที่เก่าจากแคช
+        msg.Region.TemplateId = onPersonal
+            ? (playerContext.PersonalRegionTemplateId ?? playerWorld.TerrainInfo.region_template)
+            : playerWorld.TerrainInfo.region_template;
+        // TerrainId = ชื่อไฟล์ terrain จริง สำหรับโหลดแผนที่/chunk
         msg.Region.TerrainId = playerWorld.TerrainId ?? "1";
-        msg.Region.Role = Role.Rural;
+        msg.Region.Role = onPersonal ? Role.Personal : Role.Rural;
+        // เกาะส่วนตัวของผู้เล่น (ว่างได้ถ้ายังไม่สร้าง)
+        msg.PersonalRegionId = string.IsNullOrEmpty(playerContext.PersonalRegionId)
+            ? null
+            : playerContext.PersonalRegionId;
+        Console.WriteLine(
+            $"[welcome] {entityId[..Math.Min(8, entityId.Length)]} Region.Id={msg.Region.Id} Role={msg.Region.Role} TerrainId={msg.Region.TerrainId} TemplateId={msg.Region.TemplateId} PersonalRegionId={msg.PersonalRegionId ?? "(ว่าง)"}");
         msg.Options.Bool = new[]
         {
             new BoolOption { Key = "market.ui_enabled", Value = true }

@@ -168,6 +168,9 @@ internal class SkillRewardJson
     [JsonProperty("modifier")] public string Modifier;
 
     [JsonProperty("value")] public float Value;
+
+    /// <summary>สูตรที่รางวัลนี้ปลดล็อก (type 2 — 604 จาก 1,321 รายการมีช่องนี้)</summary>
+    [JsonProperty("recipe_ids")] public string[] RecipeIds;
 }
 
 /// <summary>นิยามโมดิฟายเออร์ใน <c>skill/modifiers.json</c> (154 รายการ)</summary>
@@ -369,10 +372,43 @@ internal static class SkillDataStore
             }
         }
         BuildDerivedMap();
+        BuildFreeSkillNodes();
 
         Console.WriteLine($"[skill] โหลดตารางสกิล: {CategoryOfBundle.Count} bundle · {Categories.Count} หมวด · " +
                           $"{Rewards.Count} รางวัล · {Modifiers.Count} โมดิฟายเออร์ ({DerivedOfModifier.Count} ตัวผูกกับ Derived) · " +
-                          $"{Jobs.Count} อาชีพ · เลเวลสูงสุด {MaxPlayerLevel}");
+                          $"{Jobs.Count} อาชีพ · เลเวลสูงสุด {MaxPlayerLevel} · " +
+                          $"สกิลอัตโนมัติ {FreeSkillNodes.Count} โหนด");
+    }
+
+    /// <summary>
+    /// โหนดสกิลที่ <c>skill_point = 0</c> — ของจริงไม่คิดแต้ม ⇒ ปลดให้อัตโนมัติ
+    /// เก็บเป็น (skillId, subId, level, categoryLevel) เพื่อเช็คเงื่อนไขเลเวลหมวดก่อนแจก
+    /// (ข้อมูลจริง: 71 จาก 918 โหนด)
+    /// </summary>
+    public static List<(string SkillId, string SubId, int Level, int CategoryLevel, int Category)> FreeSkillNodes { get; }
+        = new();
+
+    private static void BuildFreeSkillNodes()
+    {
+        FreeSkillNodes.Clear();
+        foreach (var (category, bundles) in Skills)
+        {
+            if (bundles == null) continue;
+            foreach (var (skillId, subs) in bundles)
+            {
+                if (subs == null) continue;
+                foreach (var (subId, nodes) in subs)
+                {
+                    if (nodes == null) continue;
+                    for (int i = 0; i < nodes.Length; i++)
+                    {
+                        SkillNodeJson node = nodes[i];
+                        if (node == null || node.SkillPoint != 0) continue;
+                        FreeSkillNodes.Add((skillId, subId, i + 1, node.CategoryLevel, category));
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -438,6 +474,12 @@ public partial class Player
     /// <summary>ค่าที่คำนวณไว้รอบล่าสุด — ใช้จับ "เลเวลเปลี่ยน" โดยไม่ต้องคำนวณซ้ำ</summary>
     private int _skillLevel = 1;
 
+    /// <summary>
+    /// Derived รอบล่าสุดจาก SendFullStatistics — ให้ Combat/ความเร็วอ่านค่าจริงหลังสกิล
+    /// ไม่ใช่ค่าฐานดิบใน players.json
+    /// </summary>
+    private Dictionary<Shared.Ability.Derived, float> _lastDerivedAbilities;
+
     private void RegisterSkillHandlers()
     {
         SkillDataStore.EnsureLoaded();
@@ -447,6 +489,9 @@ public partial class Player
         //    เพราะบรรทัดนั้นอ่าน _context.AppearPlayer.Level ไปใส่ Statistics.Level ตรง ๆ
         //    (Player.cs:597) ⇒ ถ้าไม่ตั้งตรงนี้ push ชุดแรกจะพกเลเวลเก่าติดไปด้วย
         ApplyLevel(LevelFromExp(_skills.Exp), sendStats: false);
+
+        // [7 ก.ย. 2026] สกิลที่ไม่คิดแต้ม (skill_point = 0) ปลดให้เลย ไม่ต้องรอผู้เล่นกด
+        GrantFreeSkills(save: true);
 
         // ── ค่าสถานะทั้งชุด ──────────────────────────────────────────────────────
         // ⚠️ ทับ handler เดิมที่ Player.cs:234 ตั้งใจ: Connection.Recv ลง key ตาม TypeCode และ
@@ -597,6 +642,42 @@ public partial class Player
         }
         _context.Storage[SkillTuning.StorageKey] = blob;
         OnContextChanged();
+    }
+
+    /// <summary>
+    /// [7 ก.ย. 2026] ปลดสกิลที่ <c>skill_point = 0</c> ให้อัตโนมัติ
+    ///
+    /// ของจริงโหนดพวกนี้ไม่คิดแต้ม ⇒ ไม่มีเหตุผลให้ผู้เล่นต้องไล่กดทีละอัน
+    /// เงื่อนไขเดียวที่ยังต้องเคารพคือ <c>category_level</c> (เลเวลหมวดต้องถึงก่อน)
+    /// คืน true ถ้ามีสกิลใหม่ถูกปลดจริง
+    /// </summary>
+    private bool GrantFreeSkills(bool save)
+    {
+        if (_skills?.Learned == null) return false;
+        int granted = 0;
+        foreach (var (skillId, subId, level, categoryLevel, category) in SkillDataStore.FreeSkillNodes)
+        {
+            // เลเวลหมวดยังไม่ถึง = ยังปลดไม่ได้ (กติกาเดียวกับตอนผู้เล่นกดเรียนเอง)
+            if (CategoryState(category).Level < categoryLevel) continue;
+
+            if (!_skills.Learned.TryGetValue(skillId, out var subs))
+            {
+                subs = new Dictionary<string, int>();
+                _skills.Learned[skillId] = subs;
+            }
+            int current = subs.GetValueOrDefault(subId);
+            if (current >= level) continue;
+
+            // ต้องเรียนไล่ตามลำดับ — ข้ามขั้นไม่ได้ (โหนด level นี้ต้องต่อจาก level-1)
+            if (current < level - 1) continue;
+
+            subs[subId] = level;
+            granted++;
+        }
+        if (granted == 0) return false;
+        Console.WriteLine($"[skill] {ShortId()} ปลดสกิลอัตโนมัติ {granted} โหนด (ไม่ใช้แต้ม)");
+        if (save) SaveSkillState();
+        return true;
     }
 
     private SkillCategorySave CategoryState(int category)
@@ -773,6 +854,7 @@ public partial class Player
         else
         {
             state.Exp += amount;
+            int levelBefore = state.Level;
             while (state.Level < SkillDataStore.MaxPlayerLevel &&
                    table.ExpNeeded.TryGetValue(state.Level, out int need) && need > 0 && state.Exp >= need)
             {
@@ -784,6 +866,12 @@ public partial class Player
                 }
                 state.Exp -= need;
                 state.Level++;
+            }
+            // หมวดขึ้นเลเวล = อาจปลดสกิลอัตโนมัติชุดใหม่ได้ (โหนดที่ติดเงื่อนไข category_level)
+            if (state.Level > levelBefore && GrantFreeSkills(save: false))
+            {
+                SendSkills();
+                SendFullStatistics();
             }
         }
 
@@ -1016,6 +1104,43 @@ public partial class Player
     private const string BaseSubId = "__base__";
 
     /// <summary>
+    /// สูตรที่ผู้เล่นคนนี้ปลดล็อกแล้ว — **มาจากสกิลที่เรียนแล้วเท่านั้น**
+    ///
+    /// เส้นทางข้อมูลจริง: skills.json → rewards[] → rewards.json → recipe_ids
+    /// (ฝั่งเกมใช้เส้นเดียวกันที่ client/Crafting/Recipe.cs:88-107 GetOwnerSkill)
+    ///
+    /// [7 ก.ย. 2026] เลิกเปิด "สูตรที่ไม่มีสกิลไหนปลด" (88 ตัว) ให้ฟรีแล้ว —
+    /// ในนั้นมีของอีเวนต์ (ชุดซานตา/สเกเลตัน/โปสเตอร์เมษาหน้าโง่) ที่ไม่ควรคราฟต์ได้ในเซิร์ฟปกติ
+    /// ⇒ สูตรที่ไม่มีทางปลดด้วยสกิล = ไม่โผล่ในตารางคราฟต์เลย
+    /// ผู้เล่นใหม่ได้สูตรจากสกิลที่แจกตอนสร้างตัว + สกิลอัตโนมัติ (ราคา 0 แต้ม)
+    /// </summary>
+    public HashSet<string> UnlockedRecipeIds()
+    {
+        var unlocked = new HashSet<string>(StringComparer.Ordinal);
+        if (_skills?.Learned == null) return unlocked;
+
+        foreach (var (skillId, subs) in _skills.Learned)
+        {
+            foreach (var (subId, level) in subs)
+            {
+                for (int lv = 1; lv <= level; lv++)
+                {
+                    SkillNodeJson node = FindNode(skillId, subId, lv, out _);
+                    foreach (string rewardId in node?.Rewards ?? Array.Empty<string>())
+                    {
+                        if (!SkillDataStore.Rewards.TryGetValue(rewardId, out SkillRewardJson reward)) continue;
+                        foreach (string recipeId in reward?.RecipeIds ?? Array.Empty<string>())
+                        {
+                            unlocked.Add(recipeId);
+                        }
+                    }
+                }
+            }
+        }
+        return unlocked;
+    }
+
+    /// <summary>
     /// แต้มสกิลทั้งหมด = ของจริง (<c>constants.json</c> → <c>skill_points.initial</c> = 10)
     /// + <see cref="SkillTuning.SkillPointsPerLevel"/> ต่อเลเวล (ค่าของเรา)
     /// </summary>
@@ -1185,7 +1310,10 @@ public partial class Player
         BuildResistances(out var resistLevels, out var resistExps);
         msg.ResistanceLevels = resistLevels;
         msg.ResistanceExps = resistExps;
+        _lastDerivedAbilities = new Dictionary<Shared.Ability.Derived, float>(deriveds);
         Send(msg);
+        // ความเร็วเดินผูกกับความเหนื่อย — รีเฟรชทุกครั้งที่สถิติเปลี่ยน
+        SendBaseMoveSpeed();
     }
 
     /// <summary>
@@ -1324,8 +1452,8 @@ public partial class Player
     /// <summary>
     /// cheat ของระบบสกิล — คืน true ถ้าจัดการเองแล้ว (ไม่ต้องส่งต่อให้ <c>HandleCheatMsg</c>)
     ///
-    /// มีไว้เทสอย่างเดียว เพราะตอนนี้ยังไม่มีระบบไหนเรียก <see cref="AddExpForAction"/>
-    /// (เก็บของ/คราฟต์/ต่อสู้ อยู่คนละไฟล์ที่ทีมอื่นดูแล) ⇒ ถ้าไม่มีทางนี้จะเทสเลเวลอัพไม่ได้เลย
+    /// cheat <c>addexp</c>/<c>lv</c>/<c>catexp</c> — เส้นเล่นจริงเรียก <see cref="AddExpForAction"/>
+    /// จากเก็บของ/คราฟต์/ล่าสัตว์/สร้างสิ่งปลูกสร้างแล้ว แต่ทางนี้ยังใช้เทสกระโดดเลเวลได้
     ///   <c>exp 500</c>  = ได้ exp ดิบ 500
     ///   <c>lv 12</c>    = กระโดดไปเลเวล 12 (ตั้ง exp เท่าเกณฑ์ของเลเวลนั้น)
     ///   <c>catexp 7 5</c> = ให้ exp หมวด 7 (Gathering) 5 หน่วย

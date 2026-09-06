@@ -800,6 +800,13 @@ public static class BotBridge
             {
                 if (!string.IsNullOrEmpty(c.Clip)) { clip = c.Clip; break; }
             }
+            // [7 ก.ย. 2026] ท่าโจมตี (AnimationElemAttack) เก็บชื่อคลิปไว้ที่ meta.motion
+            // ส่วน meta.Clip เป็น AnimationClip object ที่ยังเป็น null ถ้า asset ไม่ได้โหลด
+            // ⇒ enumerator คืนค่าว่าง ทำให้ attack_normal/attack_strong หายจากดัมป์ทุกตัว
+            if (string.IsNullOrEmpty(clip) && elem is AnimationElemAttack attackElem)
+            {
+                clip = attackElem.meta != null ? attackElem.meta.motion : null;
+            }
             if (string.IsNullOrEmpty(clip)) continue;
             if (!first) sb.Append(',');
             first = false;
@@ -823,6 +830,44 @@ public static class BotBridge
                 break;
             }
         }
+        // [7 ก.ย. 2026] ท่าโจมตีอยู่ใน combat_attacks ซึ่ง key ของแต่ละโหนดไม่ได้ชื่อ
+        // "attack_normal" เสมอไป (AutoFill ตั้งชื่อตามไฟล์ fbx ที่มีคำว่า Attack)
+        // ⇒ กวาดทั้งลิสต์ แล้วเลือกท่าที่เหมาะเป็น "โจมตีปกติ" ที่สุด
+        //
+        // ลำดับความชอบ: ท่าธรรมดา > ท่าพุ่ง/กระโดด > ท่าสวนกลับ
+        // (Dash/Jump ทำให้ตัวเคลื่อนที่ · Counter เป็นท่าตอบโต้ ไม่ใช่ท่าเข้าตีเอง)
+        if (fw.combat_attacks != null)
+        {
+            string best = null;
+            int bestScore = -1;
+            foreach (AnimationElemAttack atk in fw.combat_attacks)
+            {
+                if (atk == null) continue;
+                string clip = atk.meta != null ? atk.meta.motion : null;
+                if (string.IsNullOrEmpty(clip) && atk.meta != null && atk.meta.Clip != null)
+                {
+                    clip = atk.meta.Clip.name;
+                }
+                if (string.IsNullOrEmpty(clip)) continue;
+
+                int score = 3;
+                if (clip.IndexOf("Counter", StringComparison.OrdinalIgnoreCase) >= 0) score = 0;
+                else if (clip.IndexOf("Dash", StringComparison.OrdinalIgnoreCase) >= 0) score = 1;
+                else if (clip.IndexOf("Jump", StringComparison.OrdinalIgnoreCase) >= 0) score = 1;
+                else if (clip.IndexOf("Strong", StringComparison.OrdinalIgnoreCase) >= 0) score = 2;
+
+                if (score > bestScore) { bestScore = score; best = clip; }
+            }
+            if (!string.IsNullOrEmpty(best))
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                JStr(sb, "attack_normal");
+                sb.Append(':');
+                JStr(sb, best);
+            }
+        }
+
         sb.Append('}');
         return sb.ToString();
     }

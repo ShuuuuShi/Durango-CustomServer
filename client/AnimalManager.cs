@@ -130,43 +130,55 @@ public class AnimalManager : Singleton<AnimalManager>
 		MakeAnimalObject(msg);
 	}
 
-	public void MakeAnimalObject(AppearAnimal msg)
-	{
-		PrepareLoad(msg.EntityId);
-		string prefabPath = AnimalYaml.GetPrefabPath(msg.EntityType);
-		Singleton<AssetBundleManager>.Instance().RequestAsset(prefabPath, typeof(GameObject), delegate(UnityEngine.Object asset)
+public void MakeAnimalObject(AppearAnimal msg)
 		{
-			if (CheckPrepared(msg.EntityId) && !(asset == null))
+			PrepareLoad(msg.EntityId);
+			string prefabPath = AnimalYaml.GetPrefabPath(msg.EntityType);
+			if (string.IsNullOrEmpty(prefabPath))
 			{
-				GameObject gameObject = UnityEngine.Object.Instantiate(asset, Vector3.zero, Quaternion.identity) as GameObject;
-				if (!(gameObject == null))
-				{
-					AnimalBehavior component = gameObject.GetComponent<AnimalBehavior>();
-					Location location = PathMovable.GetLocation(msg.Move, Connections.Frontend.GetBufferedServerTime());
-					component.CurrentPosition = location.Position.ToClientPosition();
-					component.TurnToYaw(location.Yaw, bSnap: true);
-					component.Floor.Value = location.Floor;
-					component.EntityId = msg.EntityId;
-					component.EntityTypeId = msg.EntityType;
-					component.Level = msg.Level;
-					component.Role = msg.Role;
-					component.transform.localScale = new Vector3(msg.Display.BaseScale, msg.Display.BaseScale, msg.Display.BaseScale);
-					component.SetAlive(msg.IsAlive, fromInit: true);
-					component.Destroyed += Animal_Destroyed;
-					_animals[msg.EntityId] = component;
-					HandleMoveMsg(msg.Move);
-					component.SetSurvivalGauge(msg.Survival.Life, msg.Survival.Gauges);
-					string role = msg.Role;
-					if (role != null && role == "warp_guard")
-					{
-						ParticleManager.EmitFollow("Particle/FX_Targeting_Common_02.prefab", Vector3.zero, Quaternion.identity, component.transform);
-					}
-					OnAppearAnimal(component);
-					OnPostAppearAnimal(msg);
-				}
+				// catalog ฝั่งเกมไม่มีชนิดนี้ — สัตว์จะหายเงียบถ้าไม่เตือน
+				Debug.LogWarning("[AnimalManager] ไม่มี prefab ของ entityType=" + msg.EntityType + " id=" + msg.EntityId);
 			}
-		});
-	}
+			Singleton<AssetBundleManager>.Instance().RequestAsset(prefabPath, typeof(GameObject), delegate(UnityEngine.Object asset)
+			{
+				if (!CheckPrepared(msg.EntityId))
+				{
+					return;
+				}
+				if (asset == null)
+				{
+					Debug.LogWarning("[AnimalManager] โหลด prefab ไม่ได้ path='" + prefabPath + "' entityType=" + msg.EntityType + " id=" + msg.EntityId);
+					return;
+				}
+				GameObject gameObject = UnityEngine.Object.Instantiate(asset, Vector3.zero, Quaternion.identity) as GameObject;
+				if (gameObject == null)
+				{
+					return;
+				}
+				AnimalBehavior component = gameObject.GetComponent<AnimalBehavior>();
+				Location location = PathMovable.GetLocation(msg.Move, Connections.Frontend.GetBufferedServerTime());
+				component.CurrentPosition = location.Position.ToClientPosition();
+				component.TurnToYaw(location.Yaw, bSnap: true);
+				component.Floor.Value = location.Floor;
+				component.EntityId = msg.EntityId;
+				component.EntityTypeId = msg.EntityType;
+				component.Level = msg.Level;
+				component.Role = msg.Role;
+				component.transform.localScale = new Vector3(msg.Display.BaseScale, msg.Display.BaseScale, msg.Display.BaseScale);
+				component.SetAlive(msg.IsAlive, fromInit: true);
+				component.Destroyed += Animal_Destroyed;
+				_animals[msg.EntityId] = component;
+				HandleMoveMsg(msg.Move);
+				component.SetSurvivalGauge(msg.Survival.Life, msg.Survival.Gauges);
+				string role = msg.Role;
+				if (role != null && role == "warp_guard")
+				{
+					ParticleManager.EmitFollow("Particle/FX_Targeting_Common_02.prefab", Vector3.zero, Quaternion.identity, component.transform);
+				}
+				OnAppearAnimal(component);
+				OnPostAppearAnimal(msg);
+			});
+		}
 
 	private void Animal_Destroyed(AnimalBehavior animal)
 	{

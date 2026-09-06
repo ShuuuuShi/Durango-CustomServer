@@ -231,12 +231,21 @@ public class Host
         BanList.Load(System.IO.Path.Combine(AppData.CombinePath(basePath), "bans.json"));
     }
 
-    public void Start(int gamePort, int gatewayPort, string publicHost, string androidBundlesDir, string assetsDir)
+    public void Start(int gamePort, int gatewayPort, string publicHost, string androidBundlesDir, string assetsDir, string dataDir = null)
     {
         GameServer = new GameServer(_worldCtx, _fallbackPlayer);
         // โลกของเกาะตั้งต้น (ไฟล์ 0.world ของต้นฉบับ) ใช้ต่อเป็นเกาะแรกของสารบัญ
         Worlds = new WorldRegistry(_clusterKey, GameServer.World, _worldCtx?.TerrainId);
         GameServer.Worlds = Worlds;
+        // ลงทะเบียนเกาะส่วนตัวของผู้เล่นที่โหลดมาแล้ว ก่อนมีคนเดินทางเข้า
+        foreach (Context context in _contexts)
+        {
+            PlayerContext pc = context.Player;
+            if (pc != null && !string.IsNullOrEmpty(pc.PersonalRegionId) && !string.IsNullOrEmpty(pc.PersonalRegionTemplateId))
+            {
+                Worlds.RegisterPersonalRegion(pc.PersonalRegionId, pc.PersonalRegionTemplateId);
+            }
+        }
         GameServer.Start(gamePort);
         foreach (Context context in _contexts)
         {
@@ -249,7 +258,8 @@ public class Host
             AssetsDir = assetsDir,
             AdminToken = this.AdminToken,
             MinClientVersion = this.MinClientVersion,
-            DownloadUrl = this.DownloadUrl
+            DownloadUrl = this.DownloadUrl,
+            DataDir = dataDir
         };
         Gateway.Start(gatewayPort);
     }
@@ -484,6 +494,104 @@ public class Host
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// สรุปเงินทั้งเซิร์ฟ (สำหรับหน้าแอดมิน) — ไว้เฝ้าเงินเฟ้อ
+    ///
+    /// เซิร์ฟนี้ใช้สกุลเดียวคือ T Stone (ดู Core/Player.Wallet.cs) ⇒ "ปริมาณเงินในระบบ"
+    /// คือผลรวม TStone ของทุกตัวละครที่มีไฟล์เซฟ ไม่ใช่เฉพาะคนที่ออนไลน์
+    ///
+    /// ⚠️ ตัวเลขนี้ต้องดู **การเปลี่ยนแปลงตามเวลา** ไม่ใช่ค่า ณ จุดเดียว
+    /// เงินเฟ้อ = ยอดรวมโตเร็วกว่าจำนวนผู้เล่น ⇒ ก๊อกน้ำแรงกว่าท่อระบาย
+    /// ให้เรียกเส้นนี้ซ้ำ ๆ แล้วเทียบ total_tstone กับ average
+    /// </summary>
+    public Dictionary<string, object> DescribeEconomy(int topCount = 20)
+    {
+        var online = new HashSet<string>(StringComparer.Ordinal);
+        foreach (World world in WorldsOf())
+        foreach (Player player in world.PlayersSnapshot())
+        {
+            if (!string.IsNullOrEmpty(player.EntityId)) online.Add(player.EntityId);
+        }
+
+        var rows = new List<Dictionary<string, object>>();
+        long total = 0;
+        int holders = 0;
+        long max = 0;
+        var amounts = new List<long>();
+
+        foreach (Context context in _contexts)
+        {
+            PlayerContext player = context?.Player;
+            if (player == null || string.IsNullOrEmpty(player.EntityId)) continue;
+            long amount = player.TStone;
+            total += amount;
+            amounts.Add(amount);
+            if (amount > 0) holders++;
+            if (amount > max) max = amount;
+            rows.Add(new Dictionary<string, object>
+            {
+                ["entity_id"] = player.EntityId,
+                ["name"] = player.AppearPlayer.Name ?? "",
+                ["t_stone"] = amount,
+                ["online"] = online.Contains(player.EntityId)
+            });
+        }
+
+        amounts.Sort();
+        long median = amounts.Count == 0 ? 0 : amounts[amounts.Count / 2];
+        rows.Sort((a, b) => ((long)b["t_stone"]).CompareTo((long)a["t_stone"]));
+
+        // ช่วงยอดเงิน — ดูการกระจุกตัว ถ้าคนไม่กี่คนถือเงินเกือบทั้งระบบแปลว่าก๊อกรั่วที่ใครบางคน
+        var buckets = new Dictionary<string, int>
+        {
+            ["0"] = 0, ["1-999"] = 0, ["1k-9,999"] = 0,
+            ["10k-99,999"] = 0, ["100k-999,999"] = 0, ["1M+"] = 0
+        };
+        foreach (long amount in amounts)
+        {
+            string key = amount switch
+            {
+                <= 0 => "0",
+                < 1_000 => "1-999",
+                < 10_000 => "1k-9,999",
+                < 100_000 => "10k-99,999",
+                < 1_000_000 => "100k-999,999",
+                _ => "1M+"
+            };
+            buckets[key]++;
+        }
+
+        return new Dictionary<string, object>
+        {
+            ["currency"] = "TStone",
+            ["total_tstone"] = total,
+            ["character_count"] = rows.Count,
+            ["holder_count"] = holders,
+            ["online_count"] = online.Count,
+            ["average"] = rows.Count == 0 ? 0 : total / rows.Count,
+            ["median"] = median,
+            ["max"] = max,
+            ["buckets"] = buckets,
+            ["top"] = rows.GetRange(0, Math.Min(topCount, rows.Count))
+        };
+    }
+
+    /// <summary>
+    /// ดันยอดเงินใหม่ไปให้ผู้เล่นที่ออนไลน์อยู่ — คืน false ถ้าไม่ได้ออนไลน์
+    /// (ไม่ออนไลน์ก็ไม่เป็นไร เพราะยอดอยู่ในไฟล์เซฟแล้ว เดี๋ยวเข้ามาก็เห็นเอง)
+    /// </summary>
+    public bool PushWalletTo(string entityId)
+    {
+        foreach (World world in WorldsOf())
+        foreach (Player player in world.PlayersSnapshot())
+        {
+            if (!string.Equals(player.EntityId, entityId, StringComparison.Ordinal)) continue;
+            player.SendWalletNow();
+            return true;
+        }
+        return false;
     }
 
     /// <summary>เตะผู้เล่นออกจากเกม — คืน false ถ้าไม่ได้ออนไลน์อยู่</summary>

@@ -67,6 +67,40 @@ public class PlayerContext
     public string RegionId;
 
     /// <summary>
+    /// เกาะส่วนตัวของผู้เล่นคนนี้ — id โลกใน WorldRegistry (เช่น personal_&lt;entityIdShort&gt;)
+    /// ว่าง = ยังไม่สร้างเกาะส่วนตัว
+    /// </summary>
+    [JsonProperty("personal_region_id", NullValueHandling = NullValueHandling.Ignore)]
+    public string PersonalRegionId;
+
+    /// <summary>template ที่ใช้สร้างเกาะส่วนตัว (pe10gr_1 …) — เก็บไว้สร้างโลกซ้ำหลังรีสตาร์ต</summary>
+    [JsonProperty("personal_region_template_id", NullValueHandling = NullValueHandling.Ignore)]
+    public string PersonalRegionTemplateId;
+
+    /// <summary>กลุ่มที่อนุญาตให้เข้าเกาะส่วนตัว · null/ว่าง = ปิดรับ</summary>
+    [JsonProperty("personal_region_admission", NullValueHandling = NullValueHandling.Ignore)]
+    public List<int> PersonalRegionAdmission;
+
+    /// <summary>
+    /// [7 ก.ย. 2026] กลุ่มที่เปิดใช้งานแล้ว — คีย์เป็นค่า <c>Shared.Faction.FactionType</c>
+    /// ค่าคือเลเวลกลุ่ม (อย่างน้อย 1 = เปิดแล้ว)
+    ///
+    /// ต้องเก็บเพราะเมนู "คู่มือเส้นทางอาชีพ" (LearningGuide) ฝั่งเกมเปิดก็ต่อเมื่อ
+    /// <c>FactionType.Lama.Level &gt; 0</c> (client/Durango.Logic/LearningGuideSystem.cs:CheckAvailable)
+    /// และบนเกาะส่วนตัวเกมไม่ยิง ActivateFaction(Lama) เอง เพราะ <c>IsAfterRural()</c>
+    /// ตัด Role.Personal ออก
+    /// </summary>
+    [JsonProperty("activated_factions", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<int, int> ActivatedFactions;
+
+    /// <summary>
+    /// [7 ก.ย. 2026] สวิตช์แจ้งเตือนแชทช่องเผ่า — คีย์เป็นค่า <c>Shared.Chat.ChannelType</c>
+    /// เดิมเก็บในหน่วยความจำต่อ connection (Player.Clan.cs) ⇒ ออกเกมแล้วค่าหาย ต้องตั้งใหม่ทุกครั้ง
+    /// </summary>
+    [JsonProperty("clan_channel_notifications", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<int, bool> ClanChannelNotifications;
+
+    /// <summary>
     /// [5 ก.ย. 2026] สัตว์เลี้ยงของผู้เล่นคนนี้
     ///
     /// ก่อนหน้านี้อยู่แต่ใน <c>Player.PetStore</c> (Core/Player.Animals.cs) ซึ่งเป็น static dict
@@ -98,6 +132,15 @@ public class PlayerContext
     /// </summary>
     [JsonProperty("explored_pois", NullValueHandling = NullValueHandling.Ignore)]
     public Dictionary<string, ExploredPoint> ExploredPOIs;
+
+    /// <summary>
+    /// [7 ก.ย. 2026] ยอด T Stone — เซิร์ฟนี้ใช้สกุลเงินเดียว (ดู Core/Player.Wallet.cs)
+    ///
+    /// ต้องเก็บลงไฟล์เซฟ ไม่งั้นล็อกเอาต์แล้วเงินหายหมด
+    /// ชื่อคีย์เป็นของเราเอง (ไฟล์ .player ต้นฉบับไม่มีช่องนี้ เพราะเซิร์ฟ offline ไม่มีเศรษฐกิจ)
+    /// </summary>
+    [JsonProperty("t_stone", NullValueHandling = NullValueHandling.Ignore)]
+    public long TStone;
 
     [JsonProperty("death_count")]
     public int DeathCount;
@@ -182,6 +225,9 @@ public class PlayerContext
         // ⚠️ ซ่อม Item.Ext ที่โหลดกลับมาเป็น JObject **ก่อน** ที่ใครจะเอาไอเทมไปแพ็กลงแพ็กเก็ต
         // (เหตุผลเต็ม ๆ ดูที่หัวคลาส ItemExtRepair ท้ายไฟล์ — ไม่ทำ = ไอเทมทั้งชิ้นเลื่อนช่อง)
         ItemExtRepair.Normalize(InventoryItems, "กระเป๋าผู้เล่น");
+        // [7 ก.ย. 2026] ของที่ถูกเซฟตอนที่ตารางสียังอ่านไม่ได้ จะขาวไปหมด — คำนวณสีให้ใหม่
+        // (เหตุผลเต็มที่ Support/ItemColorRepair.cs · แตะเฉพาะชิ้นที่ยังขาวล้วน)
+        ItemColorRepair.Normalize(InventoryItems, "กระเป๋าผู้เล่น");
         // [6 ก.ย. 2026] ไอเทมที่เซฟไว้ก่อนมีระบบคำแปล เก็บ "ชื่อ" เป็นข้อความเกาหลีลงไฟล์ไปแล้ว
         // ⇒ โหลดกลับมาก็ยังเกาหลี ทั้งที่ของใหม่เป็นไทยหมดแล้ว (ดู Support/MoCatalog.cs)
         // แปลตอนโหลดครั้งเดียว แล้วรอบเซฟถัดไปจะเขียนทับเป็นไทยเอง
@@ -191,6 +237,7 @@ public class PlayerContext
             if (pet != null)
             {
                 ItemExtRepair.Normalize(pet.Bag, "กระเป๋าสัตว์");
+                ItemColorRepair.Normalize(pet.Bag, "กระเป๋าสัตว์");
                 ItemNames.Localize(pet.Bag, "กระเป๋าสัตว์");
             }
         }

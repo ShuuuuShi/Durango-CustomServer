@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Durango LastHuman — Admin Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen active">
+        <div class="login-box">
+            <div class="login-logo">
+                <h1>🦕 Durango</h1>
+                <h2>LastHuman Admin</h2>
+            </div>
+            <form id="login-form">
+                <label for="server-url">Server URL</label>
+                <input type="text" id="server-url" placeholder="http://host:port">
+                <label for="admin-token">Admin Token</label>
+                <input type="password" id="admin-token" placeholder="ใส่ --admin-token ที่ตั้งไว้">
+                <button type="submit" class="btn btn-primary btn-full">เข้าสู่ระบบ</button>
+                <p id="login-error" class="error-text"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="app-screen" class="screen">
+        <!-- Sidebar -->
+        <nav id="sidebar">
+            <div class="sidebar-header">
+                <h3>🦕 Durango Admin</h3>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item active" data-page="dashboard">
+                    <span class="nav-icon">📊</span> Dashboard
+                </li>
+                <li class="nav-item" data-page="config">
+                    <span class="nav-icon">⚙️</span> Config Editor
+                </li>
+                <li class="nav-item" data-page="features">
+                    <span class="nav-icon">🎯</span> Feature Toggles
+                </li>
+                <li class="nav-item" data-page="islands">
+                    <span class="nav-icon">🏝️</span> Islands
+                </li>
+                <li class="nav-item" data-page="players">
+                    <span class="nav-icon">👥</span> Players
+                </li>
+                <li class="nav-item" data-page="economy">
+                    <span class="nav-icon">🪙</span> เศรษฐกิจ
+                </li>
+                <li class="nav-item" data-page="data">
+                    <span class="nav-icon">📦</span> Game Data
+                </li>
+                <li class="nav-item" data-page="actions">
+                    <span class="nav-icon">🔧</span> Server Actions
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <button id="btn-logout" class="btn btn-danger btn-sm">ออกจากระบบ</button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main id="main-content">
+            <!-- Dashboard Page -->
+            <div id="page-dashboard" class="page active">
+                <h2>📊 Dashboard</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Players Online</div>
+                        <div class="stat-value" id="stat-players">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Max Players</div>
+                        <div class="stat-value" id="stat-max-players">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Uptime</div>
+                        <div class="stat-value" id="stat-uptime">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Tick (p50)</div>
+                        <div class="stat-value" id="stat-tick">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Worlds Loaded</div>
+                        <div class="stat-value" id="stat-worlds">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Last Save</div>
+                        <div class="stat-value" id="stat-save">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Save Failures</div>
+                        <div class="stat-value" id="stat-save-fail">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Loop Errors</div>
+                        <div class="stat-value" id="stat-errors">—</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>Online Players</h3>
+                    <div id="online-players-list">กำลังโหลด...</div>
+                </div>
+                <div class="card">
+                    <h3>Unhandled Packets</h3>
+                    <div id="unhandled-packets">—</div>
+                </div>
+            </div>
+
+            <!-- Config Editor Page -->
+            <div id="page-config" class="page">
+                <h2>⚙️ Config Editor</h2>
+                <p class="help-text">แก้ไข config.json — กด Save เพื่อบันทึก</p>
+                <div class="toolbar">
+                    <button id="btn-reload-config" class="btn btn-secondary">🔄 Reload Config</button>
+                    <button id="btn-save-config" class="btn btn-primary">💾 Save Config</button>
+                    <span id="config-status" class="status-text"></span>
+                </div>
+                <div id="config-sections"></div>
+            </div>
+
+            <!-- Feature Toggles Page -->
+            <div id="page-features" class="page">
+                <h2>🎯 Feature Toggles</h2>
+                <p class="help-text">เปิด/ปิดระบบต่าง ๆ ของเกม</p>
+                <div class="toolbar">
+                    <button id="btn-save-features" class="btn btn-primary">💾 Save Features</button>
+                    <span id="features-status" class="status-text"></span>
+                </div>
+                <div id="features-grid" class="features-grid"></div>
+            </div>
+
+            <!-- Islands Page -->
+            <div id="page-islands" class="page">
+                <h2>🏝️ Island Management</h2>
+                <div class="toolbar">
+                    <button id="btn-reload-islands" class="btn btn-secondary">🔄 Reload</button>
+                    <button id="btn-save-islands" class="btn btn-primary">💾 Save Islands</button>
+                    <span id="islands-status" class="status-text"></span>
+                </div>
+                <div id="islands-list"></div>
+            </div>
+
+            <!-- Players Page -->
+            <div id="page-players" class="page">
+                <h2>👥 Player Management</h2>
+                <div class="tabs">
+                    <button class="tab-btn active" data-tab="online">Online Players</button>
+                    <button class="tab-btn" data-tab="whitelist">Whitelist</button>
+                    <button class="tab-btn" data-tab="bans">Ban List</button>
+                </div>
+                <div id="tab-online" class="tab-content active">
+                    <div class="toolbar">
+                        <button id="btn-refresh-online" class="btn btn-secondary">🔄 Refresh</button>
+                    </div>
+                    <div id="online-table"></div>
+                </div>
+                <div id="tab-whitelist" class="tab-content">
+                    <div class="toolbar">
+                        <button id="btn-save-whitelist" class="btn btn-primary">💾 Save Whitelist</button>
+                        <span id="whitelist-status" class="status-text"></span>
+                    </div>
+                    <textarea id="whitelist-editor" class="code-editor" rows="15" placeholder="บรรทัดละ 1 ชื่อ/entity id"></textarea>
+                </div>
+                <div id="tab-bans" class="tab-content">
+                    <div id="bans-list"></div>
+                </div>
+            </div>
+
+            <!-- Game Data Page -->
+            <!-- เฝ้าเงินเฟ้อ — เซิร์ฟใช้สกุลเดียวคือ T Stone -->
+            <div id="page-economy" class="page">
+                <div class="page-header">
+                    <h2>🪙 เศรษฐกิจ — T Stone</h2>
+                    <button id="btn-refresh-economy" class="btn btn-secondary">🔄 รีเฟรช</button>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">เงินทั้งระบบ</div>
+                        <div class="stat-value" id="eco-total">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">ตัวละครทั้งหมด</div>
+                        <div class="stat-value" id="eco-chars">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">คนที่มีเงิน</div>
+                        <div class="stat-value" id="eco-holders">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">เฉลี่ยต่อคน</div>
+                        <div class="stat-value" id="eco-avg">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">มัธยฐาน</div>
+                        <div class="stat-value" id="eco-median">—</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">คนรวยสุด</div>
+                        <div class="stat-value" id="eco-max">—</div>
+                    </div>
+                </div>
+                <div class="section">
+                    <h3>เทียบกับครั้งก่อน (เฝ้าเงินเฟ้อ)</h3>
+                    <div id="eco-delta">กดรีเฟรชสองครั้งเพื่อดูส่วนต่าง</div>
+                </div>
+                <div class="section">
+                    <h3>การกระจายตัวของเงิน</h3>
+                    <div id="eco-buckets">—</div>
+                </div>
+                <div class="section">
+                    <h3>ผู้ถือรายใหญ่</h3>
+                    <div id="eco-top">—</div>
+                </div>
+            </div>
+
+            <div id="page-data" class="page">
+                <h2>📦 Game Data Browser</h2>
+                <p class="help-text">เลือกข้อมูลเกมที่ต้องการดู</p>
+                <div class="toolbar">
+                    <select id="data-select" class="select-input">
+                        <option value="">— เลือกข้อมูล —</option>
+                        <optgroup label="Items">
+                            <option value="item/prototype_data">Item Prototypes</option>
+                            <option value="item/recipes">Crafting Recipes</option>
+                        </optgroup>
+                        <optgroup label="Entities">
+                            <option value="entity_types/animal">Animals</option>
+                            <option value="entity_types/natural">Natural Resources</option>
+                            <option value="entity_types/artifact">Buildings/Artifacts</option>
+                        </optgroup>
+                        <optgroup label="Skills">
+                            <option value="skill/skills">Skills</option>
+                            <option value="skill/categories">Skill Categories</option>
+                        </optgroup>
+                        <optgroup label="Player">
+                            <option value="player/jobs">Jobs</option>
+                        </optgroup>
+                        <optgroup label="World">
+                            <option value="constants">Constants</option>
+                            <option value="tags">Tags</option>
+                        </optgroup>
+                    </select>
+                    <button id="btn-load-data" class="btn btn-primary">📥 Load</button>
+                </div>
+                <div id="data-viewer" class="code-editor" style="display:none;"></div>
+            </div>
+
+            <!-- Server Actions Page -->
+            <div id="page-actions" class="page">
+                <h2>🔧 Server Actions</h2>
+                <div class="actions-grid">
+                    <div class="action-card">
+                        <h3>📢 Broadcast Announcement</h3>
+                        <textarea id="announce-text" class="code-editor" rows="3" placeholder="ข้อความที่ต้องการประกาศ"></textarea>
+                        <button id="btn-announce" class="btn btn-primary">ส่งประกาศ</button>
+                        <div id="announce-result" class="result-text"></div>
+                    </div>
+                    <div class="action-card">
+                        <h3>🔧 Maintenance Mode</h3>
+                        <p>เปิด = คนใหม่เข้าไม่ได้ (คนที่เล่นอยู่ยังเล่นต่อได้)</p>
+                        <button id="btn-maintenance-on" class="btn btn-warning">เปิด Maintenance</button>
+                        <button id="btn-maintenance-off" class="btn btn-secondary">ปิด Maintenance</button>
+                        <div id="maintenance-result" class="result-text"></div>
+                    </div>
+                    <div class="action-card">
+                        <h3>🔄 Reload Config</h3>
+                        <p>โหลด config.json ใหม่โดยไม่ต้องรีสตาร์ทเซิร์ฟ</p>
+                        <button id="btn-reload-server" class="btn btn-primary">Reload Now</button>
+                        <div id="reload-result" class="result-text"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

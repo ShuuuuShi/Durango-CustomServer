@@ -51,10 +51,51 @@ public abstract class CurrencyWidgetBase : MonoBehaviour
 
 	private void Start()
 	{
-		if (Application.isPlaying)
+		if (!Application.isPlaying)
 		{
-			MakeComponent();
+			return;
 		}
+		// [7 ก.ย. 2026] เซิร์ฟนี้ใช้สกุลเงินเดียวคือ T Stone ⇒ ยุบช่องเงินซ้ำให้เหลือช่องเดียว
+		//
+		// ⚠️ ช่องเงินพวกนี้ **วางไว้ใน prefab แล้วตั้งค่าตัวเองจาก _currencyType ที่ Unity เซฟไว้**
+		// (Refresh() ข้างล่างอ่าน _currencyType ตอน MakeComponent) ไม่มีโค้ด C# ตัวไหนเรียกเลย
+		// ⇒ grep หา SetCurrencyType ไม่เจอ และแก้ที่ CurrencyWidgetList/MenuListGroup ไม่ถึง
+		// (อาการจริง: หัวจอเมนู 3 ช่อง · หน้ากระเป๋า 2 ช่อง เลข 12,500 เท่ากันทุกช่อง
+		//  เพราะ WalletExtension.Normalize() แปลงทุกสกุลเป็น TStone แต่ตัววิดเจ็ตยังคนละตัว)
+		//
+		// กติกา: ในพ่อคนเดียวกัน เก็บ "ช่องเงินตัวแรก" ไว้ตัวเดียว ที่เหลือปิดทิ้ง
+		// แตะเฉพาะช่องที่เป็นเงินจริง (_currencyType != Invalid) ⇒ ช่องแต้มสกิล · คูปอง ·
+		// กองทุนเผ่า · หินวาร์ปรัช ไม่ได้รับผลกระทบ เพราะพวกนั้น _currencyType เป็น Invalid
+		if (_currencyType != Currency.Invalid)
+		{
+			if (HasEarlierMoneySibling())
+			{
+				base.gameObject.SetActive(value: false);
+				return;
+			}
+			_currencyType = Currency.TStone;
+		}
+		MakeComponent();
+	}
+
+	/// <summary>มีช่องเงินตัวอื่นอยู่ก่อนหน้าเราใต้พ่อคนเดียวกันไหม</summary>
+	private bool HasEarlierMoneySibling()
+	{
+		Transform parent = base.transform.parent;
+		if (parent == null)
+		{
+			return false;
+		}
+		int self = base.transform.GetSiblingIndex();
+		for (int i = 0; i < self; i++)
+		{
+			CurrencyWidgetBase other = parent.GetChild(i).GetComponent<CurrencyWidgetBase>();
+			if (other != null && other.gameObject.activeSelf && other._currencyType != Currency.Invalid)
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private void OnEnable()

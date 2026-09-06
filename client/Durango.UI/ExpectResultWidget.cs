@@ -74,6 +74,12 @@ public class ExpectResultWidget : UIWidget
 
 	private ArtifactPreview? _previewMsg;
 
+	// ── แพตช์ UI ฝั่ง PC ───────────────────────────────────────────────────
+	// prefab ของ PC ผูกวิดเจ็ตไม่ครบเท่าของมือถือ ฟิลด์ที่ไม่ถูกผูกจะเป็น null
+	// ของเดิมอ้างตรง ๆ พอเป็น null เลย NRE กลาง Open() แล้วหน้าต่างไม่เด้งขึ้นมาเลย
+	// วิดเจ็ตที่ขาดเป็นแค่ป้าย/แผงเสริม ข้ามได้ ไม่กระทบการใส่วัสดุและการกดสร้าง
+	private bool _reportedMissingWidgets;
+
 	private bool IsRemodeling => !_isCraft && _build != null && _build.Blueprint.IsRemodeling;
 
 	protected override void OnStart()
@@ -83,26 +89,38 @@ public class ExpectResultWidget : UIWidget
 		{
 			return;
 		}
-		UIEventListener uIEventListener = UIEventListener.Get(_helpTouchBox);
-		uIEventListener.onClick = (UIEventListener.VoidDelegate)Delegate.Combine(uIEventListener.onClick, new UIEventListener.VoidDelegate(ShowHelpTooltip));
-		UIEventListener uIEventListener2 = UIEventListener.Get(_previewWidget.gameObject);
-		uIEventListener2.onClick = (UIEventListener.VoidDelegate)Delegate.Combine(uIEventListener2.onClick, new UIEventListener.VoidDelegate(ShowPreviewPopup));
-		UIEventListener uIEventListener3 = UIEventListener.Get(_bonusItemWidget.gameObject);
-		uIEventListener3.onClick = (UIEventListener.VoidDelegate)Delegate.Combine(uIEventListener3.onClick, (UIEventListener.VoidDelegate)delegate
+		if (_helpTouchBox != null)
 		{
-			if (_craft != null)
+			UIEventListener uIEventListener = UIEventListener.Get(_helpTouchBox);
+			uIEventListener.onClick = (UIEventListener.VoidDelegate)Delegate.Combine(uIEventListener.onClick, new UIEventListener.VoidDelegate(ShowHelpTooltip));
+		}
+		if (_previewWidget != null)
+		{
+			UIEventListener uIEventListener2 = UIEventListener.Get(_previewWidget.gameObject);
+			uIEventListener2.onClick = (UIEventListener.VoidDelegate)Delegate.Combine(uIEventListener2.onClick, new UIEventListener.VoidDelegate(ShowPreviewPopup));
+		}
+		if (_bonusItemWidget != null)
+		{
+			UIEventListener uIEventListener3 = UIEventListener.Get(_bonusItemWidget.gameObject);
+			uIEventListener3.onClick = (UIEventListener.VoidDelegate)Delegate.Combine(uIEventListener3.onClick, (UIEventListener.VoidDelegate)delegate
 			{
-				int? level = null;
-				if (_craftEstimation.HasValue)
+				if (_craft != null)
 				{
-					level = _craftEstimation.Value.CraftLevel;
+					int? level = null;
+					if (_craftEstimation.HasValue)
+					{
+						level = _craftEstimation.Value.CraftLevel;
+					}
+					ReceiveRewardsPopup receiveRewardsPopup = UIManager.Popup.Tooltip<ReceiveRewardsPopup>();
+					receiveRewardsPopup.ShowRecipeBonusInfo(_craft.Recipe.Id, level);
 				}
-				ReceiveRewardsPopup receiveRewardsPopup = UIManager.Popup.Tooltip<ReceiveRewardsPopup>();
-				receiveRewardsPopup.ShowRecipeBonusInfo(_craft.Recipe.Id, level);
-			}
-		});
-		IntSelector quantitySelector = _quantitySelector;
-		quantitySelector.ValueChanged = (Action)Delegate.Combine(quantitySelector.ValueChanged, new Action(OnQuantityChanged));
+			});
+		}
+		if (_quantitySelector != null)
+		{
+			IntSelector quantitySelector = _quantitySelector;
+			quantitySelector.ValueChanged = (Action)Delegate.Combine(quantitySelector.ValueChanged, new Action(OnQuantityChanged));
+		}
 	}
 
 	protected override void OnDisable()
@@ -115,48 +133,49 @@ public class ExpectResultWidget : UIWidget
 	{
 		_isCraft = true;
 		_craft = slotContainer;
+		ReportMissingWidgetsOnce();
 		RefreshHelpLabel();
-		_remodelingWidget.gameObject.SetActive(value: false);
+		SetVisible(_remodelingWidget, value: false);
 		if (_craft.TechSupportBaseSlotInfo == null)
 		{
 			int max = Mathf.Max(1, _craft.CalcMaxQuantity());
-			_quantitySelector.gameObject.SetActive(value: true);
-			_quantitySelector.Set(_craft.Quantity, 1, max);
+			SetVisible(_quantitySelector, value: true);
+			if (_quantitySelector != null)
+			{
+				_quantitySelector.Set(_craft.Quantity, 1, max);
+			}
 		}
 		else
 		{
-			_quantitySelector.gameObject.SetActive(value: false);
+			SetVisible(_quantitySelector, value: false);
 		}
 		BonusPrototypes[] array = SingletonDict<string, BonusPrototypes[]>.Get(slotContainer.Recipe.Id);
-		if (array != null && array.Length > 0)
-		{
-			_bonusItemWidget.gameObject.SetActive(value: true);
-		}
-		else
-		{
-			_bonusItemWidget.gameObject.SetActive(value: false);
-		}
+		SetVisible(_bonusItemWidget, array != null && array.Length > 0);
 	}
 
 	public void Set(BuildSlotContainer slotContainer)
 	{
 		_isCraft = false;
 		_build = slotContainer;
+		ReportMissingWidgetsOnce();
 		RefreshHelpLabel();
-		_remodelingWidget.gameObject.SetActive(slotContainer.Blueprint.IsRemodeling);
-		_quantitySelector.gameObject.SetActive(value: false);
-		_bonusItemWidget.gameObject.SetActive(value: false);
+		SetVisible(_remodelingWidget, slotContainer.Blueprint.IsRemodeling);
+		SetVisible(_quantitySelector, value: false);
+		SetVisible(_bonusItemWidget, value: false);
 	}
 
 	public void Refresh()
 	{
-		if (_isCraft)
+		if (_expectResultDetailWidget != null)
 		{
-			_expectResultDetailWidget.Set(_craft);
-		}
-		else
-		{
-			_expectResultDetailWidget.Set(_build);
+			if (_isCraft)
+			{
+				_expectResultDetailWidget.Set(_craft);
+			}
+			else
+			{
+				_expectResultDetailWidget.Set(_build);
+			}
 		}
 		UpdateLayout();
 	}
@@ -171,35 +190,50 @@ public class ExpectResultWidget : UIWidget
 		{
 			SetBuildEstimation(null);
 		}
-		_expectResultDetailWidget.ClearEstimation();
+		if (_expectResultDetailWidget != null)
+		{
+			_expectResultDetailWidget.ClearEstimation();
+		}
 	}
 
 	public void SetPreviewTextureMode()
 	{
-		_iconResult.gameObject.SetActive(value: false);
-		_iconResultLabel.gameObject.SetActive(value: false);
-		_previewTexture.gameObject.SetActive(value: true);
-		_moreInfoButton.SetActive(value: true);
-		_previewWidget.height = 215;
+		SetVisible(_iconResult, value: false);
+		SetVisible(_iconResultLabel, value: false);
+		SetVisible(_previewTexture, value: true);
+		SetVisible(_moreInfoButton, value: true);
+		if (_previewWidget != null)
+		{
+			_previewWidget.height = 215;
+		}
 		UpdateLayout();
 	}
 
 	public void SetIconMode(bool expectPreviewTexture, bool isBig = false)
 	{
-		_iconResult.gameObject.SetActive(value: true);
-		_previewTexture.gameObject.SetActive(value: false);
-		_moreInfoButton.SetActive(value: false);
-		_iconResultLabel.gameObject.SetActive(expectPreviewTexture);
-		_iconResult.alpha = ((!expectPreviewTexture) ? 1f : 0.2f);
-		_iconResultLabel.text = T._("모든 재료를 선택하면 미리보기 가능");
-		_previewWidget.height = ((!isBig) ? 120 : 215);
+		SetVisible(_iconResult, value: true);
+		SetVisible(_previewTexture, value: false);
+		SetVisible(_moreInfoButton, value: false);
+		SetVisible(_iconResultLabel, expectPreviewTexture);
+		if (_iconResult != null)
+		{
+			_iconResult.alpha = ((!expectPreviewTexture) ? 1f : 0.2f);
+		}
+		SetText(_iconResultLabel, T._("모든 재료를 선택하면 미리보기 가능"));
+		if (_previewWidget != null)
+		{
+			_previewWidget.height = ((!isBig) ? 120 : 215);
+		}
 		UpdateLayout();
 	}
 
 	private void UpdateLayout()
 	{
 		RectLayoutComponent component = GetComponent<RectLayoutComponent>();
-		component.UpdateLayout();
+		if (component != null)
+		{
+			component.UpdateLayout();
+		}
 		UIUtility.UpdateAnchors(base.transform);
 	}
 
@@ -218,43 +252,42 @@ public class ExpectResultWidget : UIWidget
 			Prototype itemPrototype = PrototypeYaml.GetItemPrototype(value.PrototypeId, value.Level);
 			if (itemPrototype != null)
 			{
-				_iconResult.spriteName = itemPrototype.Icon;
+				if (_iconResult != null)
+				{
+					_iconResult.spriteName = itemPrototype.Icon;
+				}
 				isImmuneToTime = itemPrototype.ImmuneToTime;
 				isTimeLimited = itemPrototype.TimeLimited;
 			}
 			resultLevel = value.Level;
 			arg = value.Name;
 		}
-		else
+		else if (_iconResult != null)
 		{
 			_iconResult.spriteName = ((recipe != null) ? recipe.Icon : string.Empty);
 		}
 		string arg2 = ((_craft != null) ? CreateLevelText(resultLevel, _craft.GetAverageMaterialsLevel(0)) : string.Empty);
 		int num = (recipe?.Count ?? 0) * ((_craft == null) ? 1 : _craft.Quantity);
-		if (num > 1)
+		SetText(_textName, (num > 1)
+			? string.Format("{0} {1} [size=24][FFFFFF7F]/ {2}[-][/size]", arg, arg2, T._("{0}개", num))
+			: $"{arg} {arg2}");
+		SetText(_textSuccessRate, estimation.HasValue
+			? $"{estimation.Value.SuccessRate:P0}  <em>[icon=icon_question_big]</em>"
+			: "-  <em>[icon=icon_question_big]</em>");
+		if (_expectResultDetailWidget != null)
 		{
-			_textName.text = string.Format("{0} {1} [size=24][FFFFFF7F]/ {2}[-][/size]", arg, arg2, T._("{0}개", num));
+			_expectResultDetailWidget.SetEstimation(estimation, recipe as RecipeReform, isImmuneToTime, isTimeLimited);
 		}
-		else
-		{
-			_textName.text = $"{arg} {arg2}";
-		}
-		if (estimation.HasValue)
-		{
-			_textSuccessRate.text = $"{estimation.Value.SuccessRate:P0}  <em>[icon=icon_question_big]</em>";
-		}
-		else
-		{
-			_textSuccessRate.text = "-  <em>[icon=icon_question_big]</em>";
-		}
-		_expectResultDetailWidget.SetEstimation(estimation, recipe as RecipeReform, isImmuneToTime, isTimeLimited);
 		if (!estimation.HasValue || estimation.Value.UnrevealedRareTagCount == 0)
 		{
-			_rareResultEffect.gameObject.SetActive(value: false);
+			SetVisible(_rareResultEffect, value: false);
 			return;
 		}
-		_rareResultEffect.gameObject.SetActive(value: true);
-		_rareResultEffect.Play();
+		SetVisible(_rareResultEffect, value: true);
+		if (_rareResultEffect != null)
+		{
+			_rareResultEffect.Play();
+		}
 	}
 
 	public void SetBuildEstimation(BuildEstimation? estimation)
@@ -267,30 +300,45 @@ public class ExpectResultWidget : UIWidget
 			resultLevel = estimation.Value.Level;
 			SetPreview(estimation.Value.ArtifactPreview);
 		}
-		_iconResult.spriteName = ((blueprint != null) ? blueprint.Icon : string.Empty);
+		if (_iconResult != null)
+		{
+			_iconResult.spriteName = ((blueprint != null) ? blueprint.Icon : string.Empty);
+		}
 		string arg2 = ((_build != null) ? CreateLevelText(resultLevel, _build.GetAverageMaterialsLevel(0)) : string.Empty);
-		_textName.text = $"{arg} {arg2}";
-		_expectResultDetailWidget.SetEstimation(estimation);
+		SetText(_textName, $"{arg} {arg2}");
+		if (_expectResultDetailWidget != null)
+		{
+			_expectResultDetailWidget.SetEstimation(estimation);
+		}
 		if (!estimation.HasValue || estimation.Value.UnrevealedRareTagCount == 0)
 		{
-			_rareResultEffect.gameObject.SetActive(value: false);
+			SetVisible(_rareResultEffect, value: false);
 		}
 		else
 		{
-			_rareResultEffect.gameObject.SetActive(value: true);
-			_rareResultEffect.Play();
+			SetVisible(_rareResultEffect, value: true);
+			if (_rareResultEffect != null)
+			{
+				_rareResultEffect.Play();
+			}
 		}
-		_textSuccessRate.text = $"{1f:P0}  <em>[icon=icon_question_big]</em>";
+		SetText(_textSuccessRate, $"{1f:P0}  <em>[icon=icon_question_big]</em>");
 	}
 
 	public void SetRemodelingEstimation([NotNull] Artifact artifact, ArtifactPreview? artifactPreview)
 	{
 		SetPreview(artifactPreview);
-		_iconResult.spriteName = ((artifact.Blueprint != null) ? artifact.Blueprint.Icon : string.Empty);
-		_textName.text = string.Format("{0} {1}", (artifact.Blueprint != null) ? artifact.Blueprint.Name : string.Empty, NGUIText.EncodeColor(T._("{0:lv:}", artifact.ArtifactState.Level), PresetColor.UIYellow));
-		_textSuccessRate.text = $"{1f:P0}  <em>[icon=icon_question_big]</em>";
-		_expectResultDetailWidget.SetEstimation(artifact);
-		_rareResultEffect.gameObject.SetActive(value: false);
+		if (_iconResult != null)
+		{
+			_iconResult.spriteName = ((artifact.Blueprint != null) ? artifact.Blueprint.Icon : string.Empty);
+		}
+		SetText(_textName, string.Format("{0} {1}", (artifact.Blueprint != null) ? artifact.Blueprint.Name : string.Empty, NGUIText.EncodeColor(T._("{0:lv:}", artifact.ArtifactState.Level), PresetColor.UIYellow)));
+		SetText(_textSuccessRate, $"{1f:P0}  <em>[icon=icon_question_big]</em>");
+		if (_expectResultDetailWidget != null)
+		{
+			_expectResultDetailWidget.SetEstimation(artifact);
+		}
+		SetVisible(_rareResultEffect, value: false);
 	}
 
 	public void SetTechSupportEstimation(TechSupportBaseSlotInfo slotInfo)
@@ -298,18 +346,19 @@ public class ExpectResultWidget : UIWidget
 		TechSupportTarget target = slotInfo?.Target ?? default(TechSupportTarget);
 		RecipeReform reformRecipe = TechSupportSystem.GetReformRecipe(target.GetReformSlot());
 		Prototype prototype = ((target.Item == null) ? null : PrototypeYaml.GetItemPrototype(target.Item.PrototypeId, target.Item.Level));
-		_iconResult.spriteName = ((prototype == null) ? string.Empty : prototype.Icon);
-		if (target.Item != null)
+		if (_iconResult != null)
 		{
-			_textName.text = string.Format("{0} {1}", target.Item.Name, NGUIText.EncodeColor(T._("{0:lv:}", target.Item.Level), PresetColor.UIYellow));
+			_iconResult.spriteName = ((prototype == null) ? string.Empty : prototype.Icon);
 		}
-		else
+		SetText(_textName, (target.Item != null)
+			? string.Format("{0} {1}", target.Item.Name, NGUIText.EncodeColor(T._("{0:lv:}", target.Item.Level), PresetColor.UIYellow))
+			: string.Empty);
+		SetText(_textSuccessRate, $"{1f:P0}  <em>[icon=icon_question_big]</em>");
+		if (_expectResultDetailWidget != null)
 		{
-			_textName.text = string.Empty;
+			_expectResultDetailWidget.SetEstimation(GameSystem<TechSupportSystem>.Instance().GetEstimate(target), reformRecipe);
 		}
-		_textSuccessRate.text = $"{1f:P0}  <em>[icon=icon_question_big]</em>";
-		_expectResultDetailWidget.SetEstimation(GameSystem<TechSupportSystem>.Instance().GetEstimate(target), reformRecipe);
-		_rareResultEffect.gameObject.SetActive(value: false);
+		SetVisible(_rareResultEffect, value: false);
 	}
 
 	private void SetPreview(ArtifactPreview? artifactPreview)
@@ -319,6 +368,10 @@ public class ExpectResultWidget : UIWidget
 			SetPreviewTextureMode();
 			ArtifactPreview value = artifactPreview.Value;
 			_previewMsg = value;
+			if (_previewTexture == null)
+			{
+				return;
+			}
 			_previewTexture.SetArtifactModel(new UIModelViewer.ArtifactArguments
 			{
 				Display = value.Display,
@@ -340,13 +393,105 @@ public class ExpectResultWidget : UIWidget
 
 	private void RefreshHelpLabel()
 	{
-		_helpLabel.text = ((!IsRemodeling) ? T._("예상 결과") : T._("개조 결과"));
+		SetText(_helpLabel, (!IsRemodeling) ? T._("예상 결과") : T._("개조 결과"));
+	}
+
+	// ซ่อน/แสดงวิดเจ็ตที่ prefab อาจไม่มี — ไม่มีก็ข้ามไปเงียบ ๆ
+	private static void SetVisible(Component widget, bool value)
+	{
+		if (widget != null)
+		{
+			widget.gameObject.SetActive(value);
+		}
+	}
+
+	private static void SetVisible(GameObject go, bool value)
+	{
+		if (go != null)
+		{
+			go.SetActive(value);
+		}
+	}
+
+	private static void SetText(UILabel label, string text)
+	{
+		if (label != null)
+		{
+			label.text = text;
+		}
+	}
+
+	// บอกครั้งเดียวต่อวิดเจ็ตว่า prefab ตัวนี้ขาดอะไร — ไว้ไล่ปัญหา UI ฝั่ง PC ต่อ
+	private void ReportMissingWidgetsOnce()
+	{
+		if (_reportedMissingWidgets)
+		{
+			return;
+		}
+		_reportedMissingWidgets = true;
+		StringBuilder stringBuilder = new StringBuilder();
+		if (_helpLabel == null)
+		{
+			stringBuilder.Append(" _helpLabel");
+		}
+		if (_moreInfoButton == null)
+		{
+			stringBuilder.Append(" _moreInfoButton");
+		}
+		if (_previewWidget == null)
+		{
+			stringBuilder.Append(" _previewWidget");
+		}
+		if (_iconResult == null)
+		{
+			stringBuilder.Append(" _iconResult");
+		}
+		if (_iconResultLabel == null)
+		{
+			stringBuilder.Append(" _iconResultLabel");
+		}
+		if (_previewTexture == null)
+		{
+			stringBuilder.Append(" _previewTexture");
+		}
+		if (_rareResultEffect == null)
+		{
+			stringBuilder.Append(" _rareResultEffect");
+		}
+		if (_textName == null)
+		{
+			stringBuilder.Append(" _textName");
+		}
+		if (_expectResultDetailWidget == null)
+		{
+			stringBuilder.Append(" _expectResultDetailWidget");
+		}
+		if (_bonusItemWidget == null)
+		{
+			stringBuilder.Append(" _bonusItemWidget");
+		}
+		if (_quantitySelector == null)
+		{
+			stringBuilder.Append(" _quantitySelector");
+		}
+		if (_textSuccessRate == null)
+		{
+			stringBuilder.Append(" _textSuccessRate");
+		}
+		if (_remodelingWidget == null)
+		{
+			stringBuilder.Append(" _remodelingWidget");
+		}
+		if (stringBuilder.Length != 0)
+		{
+			Debug.LogWarning("[ExpectResultWidget] prefab '" + base.name + "' ไม่ได้ผูกวิดเจ็ต:" + stringBuilder);
+		}
 	}
 
 	private void ShowHelpTooltip(GameObject obj)
 	{
 		string text = (_isCraft ? ((_craft == null || _craft.TechSupportBaseSlotInfo == null) ? MakeCraftSuccessRateHelpText() : T._("장비의 개조 슬롯 결과만 표시됩니다.")) : ((!IsRemodeling) ? T._("결과물은 예상 결과물과 다를 수 있습니다.") : T._("투입된 재료에 따라 건물 외형이 변경됩니다.")));
-		if (!string.IsNullOrEmpty(text))
+		if (!string.IsNullOrEmpty(text) && _textSuccessRate != null)
 		{
 			UIWidget childSprite = UIUtility.GetChildSprite(_textSuccessRate, 0);
 			WidgetTooltipControl widgetTooltipControl = UIManager.Popup.Tooltip<WidgetTooltipControl>();

@@ -5,15 +5,26 @@
 
 ---
 
-## จุดยืนตอนนี้ (5 ก.ย. 2026)
+## จุดยืนตอนนี้ (7 ก.ย. 2026)
 
 | | สถานะ |
 |---|---|
-| `server/` | โค้ดเซิร์ฟ NEXON พอร์ต .NET 9 · build ผ่าน · **รับ message ได้ 147 ชนิด** (เริ่มที่ 42) |
-| `client/` | ซอร์ส NEXON แท้ · build ผ่าน · DLL วางลงเกมแล้ว · เข้าเล่นได้จริง |
+| `server/` | โค้ดเซิร์ฟ NEXON พอร์ต .NET 9 · build ผ่าน 0 error · **รับ message ได้ 399 ชนิด** (เริ่มที่ 42 → 147 → 183 → **399**) |
+| `client/` | ซอร์ส NEXON แท้ · build ผ่าน 0 error · DLL วางลงเกมแล้ว · เข้าเล่นได้จริง |
 | โปรโตคอล | 989 message มี TypeCode + `Pack`/`Unpack` ครบ — ไม่ต้องเขียน serializer เอง |
+| **ความครอบคลุม** | ตัวเกมยิงจริง 397 ชนิด — **รับแล้ว 376 · ยังไม่รับ 21** (ดูหัวข้อถัดไป) |
 | เกาะ | 18 เกาะ · เดินทางข้ามเกาะได้จริง · สัตว์ป่าเกิดครบทุกเกาะ |
-| โมดูล | `Player.<ระบบ>.cs` 12 ไฟล์ ต่อสายที่ `Player.Systems.cs` จุดเดียว |
+| โมดูล | `Player.<ระบบ>.cs` **38 ไฟล์** (27,129 บรรทัด) ต่อสายที่ `Player.Systems.cs` จุดเดียว |
+| หน้าแอดมิน | `server/admin/` เสิร์ฟที่ `/admin` — เทสแล้ว 200 ทั้ง html/css/js |
+| กฎเหล็ก | `server/GameCode/**` **สะอาด 100%** — `git status` ไม่มีไฟล์ต้นฉบับไหนถูกแก้เลย |
+
+### 21 message ที่ยังไม่รับ — เหลือของจริงตัวเดียว
+
+| กลุ่ม | จำนวน | ต้องทำไหม |
+|---|---:|---|
+| **เซิร์ฟ→เกม** (`OK` `Abort` `Error` `Info` `Timer` `Recipes` `Quests` `Products` `Musics` `Weather` `GardenDiff` `DisappearEntity` `InventoryUpdated` `ArtifactBlueprints` `EstateLicenses` `QuestCategories` `GrazedPets`) | 17 | **ไม่ต้อง** — จุดเรียกอยู่ใน `client/Durango.Online/*` ซึ่งคือเซิร์ฟจำลองที่ฝังมาในเกม ไม่ใช่ฝั่งผู้เล่น |
+| สแกนเนอร์มองไม่เห็น — `Bleach`(3669) · `RequestTechSupport`(59144) ลงผ่าน `RecvFallback` · `GetAvailableEmotions`(9592634) ลงผ่าน `Recv<T>(delegate` ที่ `Player.cs:431` | 3 | **มีแล้ว** |
+| `Keepalive`(254) | 1 | ฝั่งเกมส่งทุก 30 วิแบบไม่รอคำตอบ (`client/Durango.Network/Connection.cs:216`) เซิร์ฟแค่ขึ้น log เตือน ไม่กระทบอะไร — ลงทะเบียน handler เปล่าไว้ได้ถ้าอยากให้ log สะอาด |
 
 ---
 
@@ -35,6 +46,13 @@
 | หลอดเอาชีวิตรอด + ตาย/เกิดใหม่ | `Core/SurvivalState.cs` | กินอาหารดันเพดานเลือด 30/30 → 300/300 |
 | บทเรียนเริ่มเกม | `Player.Tutorial.cs` | บทสนทนาไม่ค้างบังจอแล้ว |
 | กลางวัน/กลางคืน | (เดิมถูกต้องอยู่แล้ว) | รอบละ 48 นาที · `daytime 2880` |
+| **สร้างสิ่งปลูกสร้างครบวงจร** | `Player.Building.cs` | จองพื้นที่ → ใส่วัสดุ → สร้าง → ทำให้สมบูรณ์ → เก็บใส่กระเป๋า/วางใหม่ |
+| **ภาษาไทยทั้งเกม** | `Support/MoCatalog.cs` `Gettext.cs` | อ่าน `.mo` แบบ GNU gettext 33,440 รายการ โหลดก่อน `DataStore.Load` — ชื่อไอเทมมาจากเซิร์ฟ ไม่ใช่ catalog ของเกม |
+| **จุดกลับบ้าน / วาร์ป** | `Player.Warp.cs` | ตั้งบ้าน · กลับบ้าน · วาร์ปไปท่าเรือ · ลบจุดตาย |
+| **เก็บของธรรมชาติทีละ generator** | `Player.Gathering.cs` `World.cs` `WorldContext.cs` | ต้นไม้/หิน/กอหญ้าเก็บได้หลายรอบจนหมดค่อยหาย · จำลงไฟล์เกาะ (`natural_harvests`) |
+| **เมนูแตะสิ่งปลูกสร้างถูกต้อง** | `Player.cs` | เมนู "ใช้งาน" รอ `Completed` ก่อน · เพิ่ม `Interaction.Craft` ให้ component `Workbench` (61 ชนิด) |
+| **หน้าแอดมินบนเว็บ** | `server/admin/` `Core/Gateway.cs` | `/admin` 200 · `RawBytesResponse` อยู่ที่ `Support/` ไม่แตะ GameCode |
+| **เสียงตามระยะ (Proximity Voice)** | `tools/ProximityVoiceMod/` `tools/VoiceRelay/` | `MicCapture` `ULawCodec` `VoiceProtocol` `RemoteVoicePlayer` — ดู `docs/ProximityVoice.md` |
 
 **เครื่องมือทดสอบ:** `client/BotBridge.cs` (mod — ⚠️ ต้องลบก่อนเปิดจริง) +
 `tools/bot.ps1` `tools/reload.ps1` `tools/regression.ps1`
@@ -222,59 +240,98 @@
 
 ---
 
-## 🚨 ช่องโหว่ใหญ่ที่เพิ่งเจอ — สร้างสิ่งปลูกสร้างผ่าน UI ไม่ได้เลย
+## ✅ ปิดแล้ว — สร้างสิ่งปลูกสร้างผ่าน UI ไม่ได้เลย
 
-**เซิร์ฟรับ `DestructArtifact` (รื้อ) แต่ไม่รับอะไรเลยในสายการสร้าง** ⇒ ผู้เล่นรื้อได้ แต่**สร้างไม่ได้**
-ที่ผ่านมาไม่เจอเพราะเทสด้วย `cheat prop` ซึ่งข้ามสายนี้ทั้งเส้น
+เดิมเซิร์ฟรับ `DestructArtifact` (รื้อ) แต่ไม่รับอะไรเลยในสายการสร้าง ⇒ ผู้เล่นรื้อได้ แต่**สร้างไม่ได้**
+ที่ผ่านมาไม่เจอเพราะเทสด้วย `cheat prop` ซึ่งข้ามสายนี้ทั้งเส้น — ทำครบแล้วที่ `Core/Player.Building.cs`
 
-ลำดับที่ฝั่งเกมใช้จริง (client/BuildSystem.cs):
+| ลำดับ | message | ฝั่งเกมรออะไร | สถานะ |
+|---|---|---|---|
+| 1 | `EstimateBuild` → `BuildEstimation` | ราคา/วัสดุในหน้าเลือกแบบ | ✅ |
+| 2 | `OccupyArtifactSite` → `Timer` (2057) | จองพื้นที่ + เริ่มนับเวลาสร้าง | ✅ |
+| 3 | `BuildArtifact` → `Timer` | ใส่วัสดุ/เดินงานสร้าง | ✅ |
+| — | `GetArtifact` → `ArtifactMaterials` | รายการวัสดุที่ใส่ไปแล้ว | ✅ |
+| — | `CompleteArtifact` · `Capsulate` · วางจากแคปซูล | ทำให้สมบูรณ์ / เก็บใส่กระเป๋า | ✅ |
 
-| ลำดับ | message | TypeCode | ฝั่งเกมรออะไร | มี handler? |
-|---|---|---:|---|---|
-| 1 | `EstimateBuild` → `BuildEstimation` | — | ราคา/วัสดุในหน้าเลือกแบบ (BuildSlotContainer.cs:93) | ❌ |
-| 2 | `OccupyArtifactSite` → `Timer` | 2057 | จองพื้นที่ + เริ่มนับเวลาสร้าง (BuildSystem.cs:515-543) | ❌ |
-| 3 | `BuildArtifact` → `Timer` | — | ใส่วัสดุ/เดินงานสร้าง (BuildSystem.cs:224-232) | ❌ |
-| — | `ArtifactMaterials` | — | รายการวัสดุที่ใส่ไปแล้ว (BuildSystem.cs:374) | ❌ |
-| — | `OccupyGardenGrid` | — | ลงแปลงสวน | ❌ |
-
-⇒ **งานชิ้นถัดไปที่ควรทำก่อนเพื่อน** ถ้าจะให้คนเทสเล่นได้จริง
+⚠️ ตอนเทสเจอว่าถึงเซิร์ฟจะถูกทุกอย่าง **หน้าต่างใส่วัสดุก็ยังไม่เด้ง** — ต้นเหตุอยู่ฝั่งเกม
+(`Durango.UI/ExpectResultWidget.cs` NRE เพราะ prefab ฝั่ง PC ผูกวิดเจ็ตไม่ครบ)
+ดูรายละเอียดที่ [แก้ฝั่งตัวเกม.md](แก้ฝั่งตัวเกม.md)
 
 ---
 
-## ระบบถัดไป (ยังไม่ได้เริ่ม)
+## ✅ ระบบที่เคยอยู่ในช่อง "ยังไม่ได้เริ่ม" — ทำครบแล้ว (7 ก.ย. 2026)
 
-| ระบบ | ขนาด | สถานะตอนนี้ |
+ทำเป็นชุดเดียว 20 ไฟล์ 5,419 บรรทัด ต่อสายครบใน `Player.Systems.cs`
+ทุกไฟล์อ้างอิงต้นฉบับ 3 ทาง: `GameCode/Messages/<ชื่อ>.cs` (TypeCode+ฟิลด์จริง) ·
+จุดยิงใน `client/` (ดูว่ารอ `.On<อะไร>`) · `server/data/assets/**` (ข้อมูลเกมจริง)
+
+| ระบบ | ไฟล์ | หมายเหตุ |
 |---|---|---|
-| ที่ดิน / Estate | 6+ msg | `GetEstateLicenses` ตอบ struct ว่าง (`Core/Player.cs`) |
-| เควส | หลายสิบ | `GetQuests` ตอบ `Finished = true` หมด · ไม่มี handler `GetQuestState`(398132) |
-| แคลน / ปาร์ตี้ / เพื่อน / จดหมาย | หลายสิบ | ไม่มี handler `GetParty`(20001) `GetSocial`(2402) `GetMemos`(2439) `GetFactions`(3600) |
-| ตลาดจริง | หลายสิบ | `MarketManager` ราคา 0 · ของไม่หมด |
-| หมู่เกาะ (Archipelago) + วาร์ป | 30+ msg | เดินทางข้ามเกาะทำแล้ว แต่ยังไม่มีระบบหมู่เกาะ/เส้นทาง |
-| ระบบเปิดหลุมอุกกาบาต (ลงหินนำทาง) | ~5 msg | วางหลุมได้แล้ว ยังลงทุนเปิดไม่ได้ — ค่าอยู่ใน `Support/CrackTuning.cs` แล้ว |
-| ภารกิจ / สารานุกรม | — | ไม่มี handler `GetMissions`(3620) |
+| ที่ดิน / Estate | `Player.Estate.cs` `Player.PersonalRegion.cs` `EstateRecord.cs` | `OwnerType` มี 6 ค่า (ไม่ใช่ 4) |
+| แคลน + พันธมิตร | `Player.Clan.cs` `Player.Ally.cs` | |
+| ปาร์ตี้ · เพื่อน · จดหมาย | `Player.Party.cs` `Player.Friend.cs` `Player.Mail.cs` | |
+| กลุ่ม/ภารกิจกลุ่ม | `Player.Faction.cs` | |
+| เควส: รางวัล/คะแนน/NPC/วาร์ปเนื้อเรื่อง | `Player.QuestFlow.cs` | |
+| ตลาดผู้เล่น · ร้านค้าเงินจริง | `Player.Market.cs` `Player.Shop.cs` | ร้านเงินจริง **ปฏิเสธทุกการซื้อ** — ไม่มีระบบชำระเงิน ห้ามแจกของฟรี |
+| แผนที่/วาร์ป/ข้ามเกาะ | `Player.Travel.cs` (711 บรรทัด) | |
+| งานวิจัย · ดนตรี/คอนเสิร์ต · ซ่อม/เสริมเทค | `Player.Research.cs` `Player.Music.cs` `Player.Repair.cs` | |
+| ไร่นา/ไฟ · พาหนะ/บอลลูน · อีเวนต์/มินิเกม | `Player.Farm.cs` `Player.Vehicle.cs` `Player.Event.cs` | |
+| ชีวิตประจำวัน (กินน้ำ/อาบน้ำ/ฟื้นคืนชีพ/ฉายา/คลังของ/เครื่องประดับ) | `Player.Life.cs` | |
+| เกาะบทเรียน/เกาะ PvP | `Player.S02.cs` | เซิร์ฟนี้ไม่มีสนาม PvP ⇒ ตอบปฏิเสธที่มีข้อความ |
 
-### ของที่เกมยิงมาจริงบนเซิร์ฟ VPS แต่ยังไม่มี handler (5 ก.ย. 2026)
+**หลักการที่ใช้ตลอดชุดนี้:** ระบบที่เซิร์ฟยังไม่มีของจริงรองรับ ให้ตอบ **"โครงว่างที่ถูกชนิด"**
+ไม่ใช่เงียบ — เพราะฝั่งเกมหลายระบบตั้งธง `initialized` ได้ที่เดียวคือตอนได้คำตอบ
+ไม่ตอบ = ระบบนั้นค้าง Disabled เงียบ ๆ ตลอดกาล และ **ห้ามแต่งข้อมูลปลอม** ที่ทำให้ผู้เล่นเข้าใจผิด
 
-เก็บจาก `grep 'ไม่มี handler' /var/log/durango-lasthuman.log` หลังเล่นจริงหนึ่งรอบ
+### กลไกใหม่ที่เกิดจากงานชุดนี้
 
-| กระทบการเล่นตรง ๆ | | ระบบที่ยังไม่เริ่ม | |
-|---|---|---|---|
-| `OccupyArtifactSite` | 2057 | `GetParty` | 20001 |
-| `ReturnToHome` | 2100 | `GetSocial` | 2402 |
-| `Dashed` | 2491 | `GetMemos` | 2439 |
-| `WarpToPort` | 9081241 | `GetFactions` | 3600 |
-| `SearchPOIs` | 904 | `GetMissions` | 3620 |
-| `GetLastSearchedTime` | 906 | `GetClanCreationCosts` | 3667 |
-| `GetQuestState` | 398132 | `GetSupportRequests` | 2347809 |
-| `GetAttachableAccessories` | 9823457 | `GetNomadInfo` | 100000 |
-| `Depart` | 2448 | `GetReturnerInfo` | 3450983 |
-| | | `GetExpiredProducts` · `EngagementAgreementChanged` | 5015 · 1444250 |
+**`RecvFallback<T>`** (`Player.Crafting.cs:336`) — ลงทะเบียน handler แบบ "ตัวสำรอง"
+เช็ค `_connection.HasHandler(TypeCode)` ก่อน ถ้ามีของจริงอยู่แล้วให้หลบ
+แก้กับดัก "`Connection.Recv` ตัวหลังทับตัวหน้า" ที่ message คาบเกี่ยวหลายระบบ (เช่น `Dye`) เคยทับกันเงียบ ๆ
+
+**`--probe` + `SelfTestPackages.cs`** — เครื่องมือทดสอบแพ็กเกจอัตโนมัติ แยกจาก `--selftest` เดิม
+
+### บั๊กจริงที่เจอระหว่างทำชุดนี้
+
+- `SetMemberRoleInfo`(3681) ไม่มี handler ⇒ ฝั่งเกมตั้ง `_isModifying = true` ก่อนยิง
+  แล้วปลดล็อกได้ที่เดียวคือใน callback ของคำตอบ ⇒ เซิร์ฟเงียบ = **แก้ตำแหน่งในเผ่าไม่ได้อีกเลยจนกว่าจะปิดเกม**
+  (เพิ่มพร้อม `SetMemberRoleGrades`(792252) · `RemoveMemberRole`(792253))
+- หน้าแอดมินใช้งานไม่ได้มาตลอด — `DurangoServer.csproj` ไม่เคย include `admin/**`
+  ไฟล์อยู่แต่ใน source ไม่เคยไปถึง `bin/` ⇒ `/admin` ตอบ "Admin UI ไม่พบ" ทุกครั้ง
+- `Gateway.cs` เสิร์ฟไฟล์แอดมินด้วย `Encoding.UTF8.GetBytes(File.ReadAllText(...))`
+  แต่รายการ content type มี `image/png`/`image/x-icon` ⇒ ไฟล์ไบนารีถูกแปลงเป็น `U+FFFD` จนพัง
+
+### ยังค้าง
+
+| ระบบ | สถานะ |
+|---|---|
+| สาย **radiotower** ไม่เคยต่อติด | `ToggleClanNotification` · `GetClanNotificationEnabled` · `ResubscribeClanChannel` ฝั่งเกมยิงผ่าน `Connections.Radiotower` แต่ `Core/Gateway.cs` แจกแต่ `frontend_addresses` ไม่มี `radiotower_addresses` ⇒ handler ลงไว้ก็ยังไม่ถูกเรียก |
+| ตลาดจริง | `MarketManager` ราคา 0 · ของไม่หมด (handler ครบแล้ว แต่ยังไม่มีเศรษฐกิจจริง) |
+| ระบบเปิดหลุมอุกกาบาต | วางหลุมได้ · ค่าอยู่ใน `Support/CrackTuning.cs` แล้ว · ยังลงทุนเปิดไม่ได้ |
+| ค่าที่เก็บแค่ในหน่วยความจำ | สวิตช์แจ้งเตือนช่องแชทเผ่า · `SetPersonalRegionAdmission` — ล็อกเอาต์แล้วหาย |
 
 **วิธีรู้ว่าขาดอะไรต่อ:** อ่าน log เซิร์ฟตอนเล่นจริง มันพิมพ์เองทุกครั้งที่เกมยิงของที่ยังไม่ได้ทำ
 ```
 [conn] ไม่มี handler สำหรับ type=204 (bytes=3) — จะไม่เตือนซ้ำอีก
 ```
 หาชื่อจากเลข: `grep -l "TypeCode = 204u" server/GameCode/Messages/*.cs` → `GetDefoggedChunks.cs`
+หรือรัน `python tools/scan-protocol.py` ซึ่งเทียบทั้งโปรเจกต์ให้ในคำสั่งเดียว
+(⚠️ สแกนเนอร์รู้จักแต่ `Recv(delegate(` — ตัวที่ลงผ่าน `RecvFallback` หรือ `Recv<T>(delegate` จะขึ้นว่ายังไม่รับ ทั้งที่มีแล้ว)
+
+---
+
+## 🎯 งานที่ต้องทำถัดไป (7 ก.ย. 2026)
+
+1. **อัปเซิร์ฟขึ้น VPS** — VPS ยังรัน build ของ opencode อยู่ ⇒ ไม่มีภาษาไทย ไม่มีช่องโหว่ที่อุดไป
+   ไม่มี handler ทั้ง 399 ตัว ต้องคืน `run.sh` ที่มี `--download-url` ด้วย
+2. **commit** — ตอนนี้มี 75 ไฟล์เปลี่ยน (ไม่รวมการลบ `Opencode/` 5,281 ไฟล์) ยังไม่ commit สักครั้ง
+3. **บั๊กสัตว์: ยืนนิ่งแต่ผู้เล่นโดนดาเมจ** — ฝั่งเกมแพตช์แล้ว งานที่เหลืออยู่ฝั่งเซิร์ฟ
+   ห่วงโซ่หลักฐานครบใน [แก้ฝั่งเซิร์ฟ-อนิเมชั่นสัตว์.md](แก้ฝั่งเซิร์ฟ-อนิเมชั่นสัตว์.md)
+   สรุป: `Player.Hunting.cs` → `AnimalTurn` ไม่ส่ง `Move` ท่าโจมตีและไม่ส่ง `CombatInteraction`
+   และ `Support/AnimalMotions.cs` ไม่มีฟิลด์ท่าโจมตีเลย (มีแค่ 9 คีย์)
+4. **เทสในเกมให้ครบ** — handler 216 ตัวที่เพิ่งเพิ่มยังไม่เคยถูกยิงจริงสักตัว
+5. ความเสี่ยงที่ลดระดับไว้ยังไม่ปิด: `SetReturningPoint` เชื่อ tile ดิบจาก client ·
+   `Dashed`/`Depart` ไม่มี cooldown · วาร์ปไม่เช็ค `IsAlive` · `_warpTimers` ไม่มีเพดาน
 
 ---
 

@@ -85,10 +85,16 @@ public class PlayerManager : Durango.Utils.Singleton<PlayerManager>
 	}
 
 	[NotNull]
-	public PlayerBehavior MakePlayerObject(bool male, Vector3? worldPosition, string id, string motionName = "Barehand_Stand", bool loadClips = true)
-	{
-		GameObject original = ((!male) ? Durango.Utils.Singleton<PlatformResources>.Instance().FemaleReference : Durango.Utils.Singleton<PlatformResources>.Instance().MaleReference);
-		GameObject gameObject = UnityEngine.Object.Instantiate(original);
+public PlayerBehavior MakePlayerObject(bool male, Vector3? worldPosition, string id, string motionName = "Barehand_Stand", bool loadClips = true)
+		{
+			PlatformResources platformResources = Durango.Utils.Singleton<PlatformResources>.Instance();
+			GameObject original = ((!male) ? platformResources.FemaleReference : platformResources.MaleReference);
+			if (original == null)
+			{
+				Debug.LogError("[PlayerManager] PlatformResources ยังไม่มีโมเดลผู้เล่น (" + ((!male) ? "Female" : "Male") + "Reference=null) — ฉาก Main อาจยังไม่พร้อมหรือ prefab หลุด");
+				return null;
+			}
+			GameObject gameObject = UnityEngine.Object.Instantiate(original);
 		PlayerBehavior component = gameObject.GetComponent<PlayerBehavior>();
 		component.CurrentPosition = ((!worldPosition.HasValue) ? Vector3.zero : Util.WorldPositionToClientPosition(worldPosition.Value));
 		component.EntityId = id;

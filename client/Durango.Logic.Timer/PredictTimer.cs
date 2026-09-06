@@ -76,18 +76,19 @@ public class PredictTimer
 		return num / duration;
 	}
 
-	private void PlayMotion()
-	{
-		if (_hasMotion && !Timer.IsStop)
+private void PlayMotion()
 		{
-			LocalMotionUpdater motionUpdater = PlayerController.MotionUpdater;
-			string motion = _motion;
-			float time = Timer.Remain + _motionPeriodOffset;
-			string equip = _equip;
-			ItemColor equipColor = _equipColor;
-			motionUpdater.Motion(motion, time, 1f, forceTransition: false, overrideIdleMotion: false, equip, equipColor);
+			if (_hasMotion && !Timer.IsStop && !string.IsNullOrEmpty(_motion))
+			{
+				LocalMotionUpdater motionUpdater = PlayerController.MotionUpdater;
+				string motion = _motion;
+				float time = Timer.Remain + _motionPeriodOffset;
+				string equip = _equip;
+				ItemColor equipColor = _equipColor;
+				// forceTransition: บังคับเข้าท่าเก็บ — ไม่งั้นยืนนิ่งต่อได้ถ้า state ก่อนหน้ายังไม่จบ
+				motionUpdater.Motion(motion, time, 1f, forceTransition: true, overrideIdleMotion: false, equip, equipColor);
+			}
 		}
-	}
 
 	private void OnFinished(Timer timer)
 	{

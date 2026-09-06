@@ -1,4 +1,6 @@
 using System;
+using Durango.Prologue;
+using Durango.Development;
 using System.Collections.Generic;
 using Durango.Logic.Clusters;
 using Durango.System;
@@ -178,18 +180,31 @@ public class TitleMenuUserControlBase : MonoBehaviour
 		_playerSelectionButton.Disabled = true;
 		if (_onConfirm != null)
 		{
-			Account selectedAccount = GetSelectedAccount();
-			if (selectedAccount != null)
-			{
-				Pair<string, int> recommendedPlayer = selectedAccount.GetRecommendedPlayer();
-				GameManager.PlayerId = recommendedPlayer.Item1;
-				GameManager.PlayerSlotIndex = recommendedPlayer.Item2;
-			}
-			else
-			{
-				GameManager.PlayerId = null;
-			}
-			_onConfirm();
+Account selectedAccount = GetSelectedAccount();
+				if (selectedAccount != null)
+				{
+					Pair<string, int> recommendedPlayer = selectedAccount.GetRecommendedPlayer();
+					// สล็อตว่าง (สร้างตัวใหม่) = PlayerId ว่าง → เข้าฉาก Prologue
+					if (string.IsNullOrEmpty(recommendedPlayer.Item1))
+					{
+						GameManager.PlayerId = null;
+						GameManager.PlayerSlotIndex = recommendedPlayer.Item2;
+						PrologueManager.ToBeSkipped = false;
+						DeveloperSettings.SkipPrologue = false;
+					}
+					else
+					{
+						GameManager.PlayerId = recommendedPlayer.Item1;
+						GameManager.PlayerSlotIndex = recommendedPlayer.Item2;
+					}
+				}
+				else
+				{
+					GameManager.PlayerId = null;
+					PrologueManager.ToBeSkipped = false;
+					DeveloperSettings.SkipPrologue = false;
+				}
+				_onConfirm();
 		}
 	}
 
@@ -231,7 +246,17 @@ public class TitleMenuUserControlBase : MonoBehaviour
 
 	public void UpdateVersionInfo(string serverVersion = "")
 	{
-		string text = "* Client: " + CurrentBundleVersion.GetClientVersion();
+		if (_versionInfoLabel == null)
+		{
+			return;
+		}
+		string clientVersion = CurrentBundleVersion.GetClientVersion();
+		if (string.IsNullOrEmpty(clientVersion))
+		{
+			// resource client_version หายในบางแพ็กเกจ — ยังโชว์ตัวตน build ของเรา
+			clientVersion = "LastHuman";
+		}
+		string text = "* Client: " + clientVersion;
 		if (!string.IsNullOrEmpty(serverVersion))
 		{
 			text = text + " / Server: " + serverVersion;
@@ -242,6 +267,7 @@ public class TitleMenuUserControlBase : MonoBehaviour
 			text = text + " / NPA: " + nPA;
 		}
 		_versionInfoLabel.text = text;
+		_versionInfoLabel.gameObject.SetActive(value: true);
 	}
 
 	public bool IsInMaintenance()

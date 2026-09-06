@@ -1,9 +1,11 @@
 using System;
+using Durango.Utils;
 using System.Collections.Generic;
 using System.Linq;
 using Durango.Terrain;
 using Shared.Building;
 using Messages;
+using Shared.Estate;
 using UnityEngine;
 using Yaml.Util;
 using Durango.Utils.Extensions;
@@ -73,6 +75,10 @@ public class World
 
     /// <summary>ชื่อ terrain ของโลกนี้ (= RegionId ในสารบัญเกาะ ดู RegionCatalog)</summary>
     public string TerrainId => _context.TerrainId;
+
+    /// <summary>registry ที่ถือโลกนี้ — ตั้งโดย WorldRegistry.GetOrCreate</summary>
+    public WorldRegistry Registry { get; set; }
+
 
     public byte[] Biomes => _terrainData.Biomes;
 
@@ -312,6 +318,7 @@ public class World
             AnimalManager?.Process(Gauge.CurrentTime, BroadCast);
             ProcessWeather(Gauge.CurrentTime);
             ArtifactManager?.ProcessFarming(Gauge.CurrentTime);
+            ProcessRegrow(Gauge.CurrentTime);
         }
     }
 
@@ -363,6 +370,8 @@ public class World
         if (!string.IsNullOrEmpty(Weather))
         {
             player.Send(new Weather { _Weather = Weather });
+            // ผู้เล่นเพิ่งเข้าเกาะ — ใส่ SE จากอากาศปัจจุบันด้วย (ไม่งั้นต้องรอรอบหมุนถัดไป)
+            player.SyncWeatherStatusEffects(Weather);
         }
         _players.Add(player);
         PlayerAppeared?.Invoke(player);
@@ -517,6 +526,56 @@ public class World
         }
     }
 
+    // ══ ระบบนิเวศ: ของธรรมชาติงอกกลับ ══════════════════════════════════════════
+    //
+    // ต้นฉบับฝั่ง offline ไม่มีระบบนี้ (AddNatural ถูกเรียกจาก cheat จุดเดียว — เหมือนกันทั้ง
+    // nexonSRC/Durango.Offline/Player.cs:624 และของเรา Core/Player.cs:1013)
+    // แต่เซิร์ฟจริงของ NEXON มี — ดูคอมเมนต์ที่ GameCode/Durango.Online/Connection.cs:159
+    // "เจอจริง: natural regrowth ส่ง AppearEntityOnTile"
+    //
+    // ท่อส่งข่าวมีครบอยู่แล้ว: AddNatural → NaturalAdded → Core/Player.cs:89 ส่ง GardenDiff(202)
+    // ให้ทุกคนที่อยู่ในโลก ⇒ ที่ขาดคือ "ตัวสั่งให้งอก" เท่านั้น
+
+    /// <summary>จองคิวให้ของธรรมชาติงอกกลับที่ช่องเดิม</summary>
+    private void ScheduleRegrow(Point2 tile, ushort entityType)
+    {
+        if (entityType == 0) return;                       // ไม่รู้ว่าเดิมเป็นอะไร — งอกกลับไม่ได้
+        double seconds = WorldTuning.NaturalRegrowSeconds; // ปรับได้ที่ config.json → World
+        if (seconds <= 0) return;                          // ตั้ง 0 = ปิดระบบงอกกลับ
+
+        List<NaturalRegrowEntry> queue = _context.NaturalRegrow;
+        if (queue == null) return;
+        // ช่องเดิมที่ค้างคิวอยู่แล้ว ให้ทับของเดิม (กันคิวบวมตอนเก็บ-งอก-เก็บซ้ำที่เดิม)
+        NaturalRegrowEntry entry = queue.Find(e => e.X == tile.x && e.Y == tile.y);
+        if (entry == null)
+        {
+            entry = new NaturalRegrowEntry { X = tile.x, Y = tile.y };
+            queue.Add(entry);
+        }
+        entry.EntityType = entityType;
+        entry.DueAt = Gauge.CurrentTime + seconds;
+    }
+
+    /// <summary>
+    /// ถึงเวลาแล้วก็ปลูกกลับ — เรียกจาก <see cref="Process"/> ทุกเฟรม (งานจริงน้อยมาก
+    /// เพราะคิวว่างเกือบตลอด และ AddNatural เรียกเฉพาะตอนถึงกำหนดจริง)
+    /// </summary>
+    private void ProcessRegrow(double now)
+    {
+        List<NaturalRegrowEntry> queue = _context.NaturalRegrow;
+        if (queue == null || queue.Count == 0) return;
+        for (int i = queue.Count - 1; i >= 0; i--)
+        {
+            NaturalRegrowEntry entry = queue[i];
+            if (entry == null) { queue.RemoveAt(i); continue; }
+            if (now < entry.DueAt) continue;
+            queue.RemoveAt(i);
+            var tile = new Point2(entry.X, entry.Y);
+            AddNatural(tile, entry.EntityType);   // broadcast GardenDiff ให้เอง + Save()
+            Console.WriteLine($"[นิเวศ] ของธรรมชาติชนิด {entry.EntityType} งอกกลับที่ ({entry.X},{entry.Y})");
+        }
+    }
+
     public void AddNatural(Point2 tile, ushort entityType)
     {
         if (AddNaturalToGarden(tile, entityType))
@@ -563,10 +622,37 @@ public class World
         return true;
     }
 
+    private static readonly List<string> NoHarvest = new();
+
+    /// <summary>
+    /// generator ที่ถูกเก็บไปแล้วของเป้าหนึ่งชิ้น
+    /// คีย์: "x,y" สำหรับของธรรมชาติ · entity id สำหรับซากสัตว์ (ดู Player.Gathering.cs HarvestKeyOf)
+    /// </summary>
+    public IReadOnlyList<string> HarvestedGenerators(string targetKey)
+        => _context.NaturalHarvests.TryGetValue(targetKey, out List<string> list) ? list : NoHarvest;
+
+    public void MarkGeneratorHarvested(string targetKey, string generatorId)
+    {
+        if (!_context.NaturalHarvests.TryGetValue(targetKey, out List<string> list))
+        {
+            list = new List<string>();
+            _context.NaturalHarvests[targetKey] = list;
+        }
+        if (!list.Contains(generatorId)) list.Add(generatorId);
+    }
+
+    public void ForgetHarvests(string targetKey) => _context.NaturalHarvests.Remove(targetKey);
+
     public void DestroyNatural(Point2 tile)
     {
-        if (RemoveNaturalFromGarden(tile))
+        if (RemoveNaturalFromGarden(tile, out ushort removedType))
         {
+            // [7 ก.ย. 2026] ระบบนิเวศ — จองคิวให้ของงอกกลับที่เดิม
+            // ไม่ทำ = เก็บของแล้วช่องนั้นว่างถาวร ของหมดเกาะไปเรื่อย ๆ
+            ScheduleRegrow(tile, removedType);
+            // ของหายจากโลกแล้ว ประวัติการเก็บไม่มีความหมายอีกต่อไป
+            // ⚠️ ไม่ล้าง = ช่องนี้งอกของใหม่ขึ้นมาแล้วเก็บไม่ได้เลยสักตัว
+            _context.NaturalHarvests.Remove($"{tile.x},{tile.y}");
             if (!_removedNatural.Contains(tile)) _removedNatural.Add(tile);
             int num = _addedNatural.FindIndex(t => t.X == tile.x && t.Y == tile.y);
             if (num != -1) _addedNatural.RemoveAt(num);
@@ -575,8 +661,9 @@ public class World
         }
     }
 
-    private bool RemoveNaturalFromGarden(Point2 tile)
+    private bool RemoveNaturalFromGarden(Point2 tile, out ushort removedType)
     {
+        removedType = 0;
         Point2 point = Util.TilePositionToChunkCoords(tile);
         if (point.x < 0 || point.x >= NumChunksX || point.y < 0 || point.y >= NumChunksY) return false;
         if (_chunkData[point.x, point.y].Garden == null) return false;
@@ -585,6 +672,8 @@ public class World
         {
             if (list[i].X == tile.x && list[i].Y == tile.y)
             {
+                // จำชนิดไว้ให้ระบบนิเวศงอกกลับเป็นตัวเดิม (ดู ScheduleRegrow)
+                removedType = list[i].EntityType;
                 list.RemoveAt(i);
                 break;
             }
@@ -673,6 +762,11 @@ public class World
         }
         Weather = weather;
         BroadCast(new Weather { _Weather = weather });
+        // [7 ก.ย. 2026] ซิงก์บัพ/ดีบัพจากอากาศให้ทุกคนบนเกาะ (ฝน→wet · ภูเขาไฟ→volcanic_*)
+        foreach (Player player in _players)
+        {
+            player.SyncWeatherStatusEffects(weather);
+        }
         Console.WriteLine($"[อากาศ] {TerrainId} → {weather}");
     }
 
@@ -700,5 +794,192 @@ public class World
                 dst[num10 + k] = src[num6 + k];
             }
         }
+    }
+
+    public const int EstateGridSize = 4;
+
+    public static string EstateCellKey(int cx, int cy) => cx + "," + cy;
+
+    public static Point2 TileFromCell(Point2 cell) => new Point2(cell.x * EstateGridSize, cell.y * EstateGridSize);
+
+    public EstateRecord GetEstate(string estateId)
+    {
+        if (string.IsNullOrEmpty(estateId) || _context.Estates == null) return null;
+        return _context.Estates.TryGetValue(estateId, out EstateRecord rec) ? rec : null;
+    }
+
+    public IEnumerable<KeyValuePair<string, EstateRecord>> EnumerateEstates()
+    {
+        if (_context.Estates == null) yield break;
+        foreach (var kv in _context.Estates) yield return kv;
+    }
+
+    public IEnumerable<EstateRecord> EstatesOfOwner(string ownerId)
+    {
+        if (_context.Estates == null || string.IsNullOrEmpty(ownerId)) yield break;
+        foreach (KeyValuePair<string, EstateRecord> kv in _context.Estates)
+        {
+            if (string.Equals(kv.Value.OwnerId, ownerId, StringComparison.Ordinal))
+            {
+                yield return kv.Value;
+            }
+        }
+    }
+
+    public bool TryGetEstateIdAtCell(Point2 cell, out string estateId)
+    {
+        estateId = null;
+        if (_context.EstateCells == null) return false;
+        return _context.EstateCells.TryGetValue(EstateCellKey(cell.x, cell.y), out estateId);
+    }
+
+    public EstateLicense ToLicense(string estateId, EstateRecord rec)
+    {
+        return new EstateLicense
+        {
+            EstateId = estateId,
+            Type = (Shared.Estate.OwnerType)rec.Type,
+            OwnerId = rec.OwnerId,
+            ActivatedAt = rec.ActivatedAt,
+            ExpiresAt = rec.ExpiresAt,
+            Size = rec.Size,
+            RegionId = rec.RegionId,
+            Tile = new Point2(rec.TileX, rec.TileY),
+            AccessRights = rec.AccessForOthers.HasValue
+                ? new Messages.AccessRights { ForOthers = (Shared.Estate.AccessRights)rec.AccessForOthers.Value }
+                : null
+        };
+    }
+
+    /// <summary>ประกาศที่ดิน 1 ช่อง — คืน license หรือ null ถ้าช่องถูกจองแล้ว/ผิดเงื่อนไข</summary>
+    public EstateLicense? DeclareEstate(string ownerId, Shared.Estate.OwnerType type, Point2 cell, string regionId)
+    {
+        _context.Estates ??= new Dictionary<string, EstateRecord>();
+        _context.EstateCells ??= new Dictionary<string, string>();
+        string key = EstateCellKey(cell.x, cell.y);
+        if (_context.EstateCells.ContainsKey(key))
+        {
+            return null;
+        }
+        // ผู้เล่นหนึ่งคนต่อประเภท หนึ่งแปลงก่อน (ง่าย/ชัด) — เมืองกับส่วนตัวแยกกันได้
+        foreach (KeyValuePair<string, EstateRecord> kv in _context.Estates)
+        {
+            if (kv.Value.OwnerId == ownerId && kv.Value.Type == (int)type)
+            {
+                return null;
+            }
+        }
+        string estateId = Guid.NewGuid().ToString("N");
+        Point2 tile = TileFromCell(cell);
+        var rec = new EstateRecord
+        {
+            Type = (int)type,
+            OwnerId = ownerId,
+            ActivatedAt = Times.UnixTimeNow(),
+            ExpiresAt = null,
+            Size = 1,
+            RegionId = regionId,
+            TileX = tile.x,
+            TileY = tile.y,
+            Cells = new List<string> { key },
+            AccessForOthers = 0
+        };
+        _context.Estates[estateId] = rec;
+        _context.EstateCells[key] = estateId;
+        Save();
+        return ToLicense(estateId, rec);
+    }
+
+    public EstateLicense? ExpandEstate(string estateId, string ownerId, Point2 cell, int maxSize)
+    {
+        if (!_context.Estates.TryGetValue(estateId, out EstateRecord rec)) return null;
+        if (rec.OwnerId != ownerId) return null;
+        if (rec.Size >= maxSize) return null;
+        string key = EstateCellKey(cell.x, cell.y);
+        if (_context.EstateCells.ContainsKey(key)) return null;
+        // ต้องติดกับเซลล์เดิม
+        bool adjacent = false;
+        foreach (string existing in rec.Cells)
+        {
+            string[] parts = existing.Split(',');
+            int ex = int.Parse(parts[0]);
+            int ey = int.Parse(parts[1]);
+            if (Math.Abs(ex - cell.x) + Math.Abs(ey - cell.y) == 1)
+            {
+                adjacent = true;
+                break;
+            }
+        }
+        if (!adjacent) return null;
+        rec.Cells.Add(key);
+        rec.Size = rec.Cells.Count;
+        _context.EstateCells[key] = estateId;
+        Save();
+        return ToLicense(estateId, rec);
+    }
+
+    public EstateLicense? ShrinkEstate(string estateId, string ownerId, Point2 cell)
+    {
+        if (!_context.Estates.TryGetValue(estateId, out EstateRecord rec)) return null;
+        if (rec.OwnerId != ownerId) return null;
+        string key = EstateCellKey(cell.x, cell.y);
+        if (!rec.Cells.Contains(key)) return null;
+        if (rec.Cells.Count <= 1) return null; // เหลือช่องเดียวให้ใช้ Remove
+        rec.Cells.Remove(key);
+        rec.Size = rec.Cells.Count;
+        _context.EstateCells.Remove(key);
+        Save();
+        return ToLicense(estateId, rec);
+    }
+
+    public bool RemoveEstate(string estateId, string ownerId)
+    {
+        if (!_context.Estates.TryGetValue(estateId, out EstateRecord rec)) return false;
+        if (rec.OwnerId != ownerId) return false;
+        foreach (string key in rec.Cells)
+        {
+            _context.EstateCells.Remove(key);
+        }
+        _context.Estates.Remove(estateId);
+        Save();
+        return true;
+    }
+
+    public EstateGrids BuildEstateGridsForChunks(IEnumerable<Point2> chunks)
+    {
+        var chunkList = new List<Point2>(chunks);
+        var cells = new Dictionary<Point2, string>();
+        var licenses = new Dictionary<string, EstateLicense>();
+        if (_context.EstateCells != null && _context.Estates != null)
+        {
+            var chunkSet = new HashSet<string>();
+            foreach (Point2 ch in chunkList)
+            {
+                chunkSet.Add(ch.x + "," + ch.y);
+            }
+            foreach (KeyValuePair<string, string> kv in _context.EstateCells)
+            {
+                string[] parts = kv.Key.Split(',');
+                int cx = int.Parse(parts[0]);
+                int cy = int.Parse(parts[1]);
+                // cell -> tile -> chunk (16 tiles)
+                int tileX = cx * EstateGridSize;
+                int tileY = cy * EstateGridSize;
+                int chunkX = tileX / 16;
+                int chunkY = tileY / 16;
+                if (!chunkSet.Contains(chunkX + "," + chunkY)) continue;
+                cells[new Point2(cx, cy)] = kv.Value;
+                if (!licenses.ContainsKey(kv.Value) && _context.Estates.TryGetValue(kv.Value, out EstateRecord rec))
+                {
+                    licenses[kv.Value] = ToLicense(kv.Value, rec);
+                }
+            }
+        }
+        return new EstateGrids
+        {
+            Chunks = chunkList.ToArray(),
+            Cells = cells,
+            EstateLicenses = licenses.Values.ToArray()
+        };
     }
 }

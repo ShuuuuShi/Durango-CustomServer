@@ -38,6 +38,12 @@
       <Link>data\terrains\%(FileName)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- หน้าแอดมิน — Gateway หาไฟล์จาก <ข้าง exe>/admin (Core/Gateway.cs:846)
+         ไม่ก๊อปไปด้วย = เปิด /admin แล้วได้ "Admin UI ไม่พบ" ทุกครั้ง -->
+    <None Include="admin\**\*.*">
+      <Link>admin\%(RecursiveDir)%(FileName)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="data\assets\**\*.json">
       <Link>data\assets\%(RecursiveDir)%(FileName)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

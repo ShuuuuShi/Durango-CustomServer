@@ -69,6 +69,9 @@ public partial class Player
     /// </summary>
     private readonly List<System.Threading.Timer> _warpTimers = new();
 
+    /// <summary>**ค่าของเรา** — วาร์ปค้างพร้อมกันได้กี่คิว (กันยิงรัวจองหน่วยความจำ)</summary>
+    private const int MaxConcurrentWarps = 3;
+
     private void RegisterWarpHandlers()
     {
         _connection.Recv(delegate(SetAsHome msg, PacketHeader header)
@@ -146,11 +149,28 @@ public partial class Player
 
     private void HandleSetReturningPointMsg(SetReturningPoint msg, uint seq)
     {
+        // [7 ก.ย. 2026] เดิมเชื่อ tile ดิบจาก client ⇒ ยิงพิกัดนอกแผนที่/ติดลบได้
+        // ตั้งจุดกลับนอกเกาะแล้ววาร์ปกลับไปจะหลุดออกนอกโลก
+        if (!IsTileInsideWorld(msg.Tile))
+        {
+            Send(new Abort { Text = "จุดกลับอยู่นอกเกาะ" }, seq);
+            return;
+        }
         _context.ReturningX = msg.Tile.x;
         _context.ReturningY = msg.Tile.y;
         OnContextChanged();
         Send(default(OK), seq);
         SendPoints();
+    }
+
+    /// <summary>ช่องนี้อยู่ในขอบเขตของเกาะจริงไหม — กันพิกัดปลอมจาก client</summary>
+    private bool IsTileInsideWorld(Point2 tile)
+    {
+        if (tile.x < 0 || tile.y < 0) return false;
+        int width = _world.NumTilesX;
+        int height = _world.NumTilesY;
+        if (width <= 0 || height <= 0) return true;   // ไม่รู้ขนาด = กันแค่ค่าติดลบ
+        return tile.x < width && tile.y < height;
     }
 
     // ── กลับบ้าน / ไปท่าเรือ ─────────────────────────────────────────────────────────
@@ -251,6 +271,22 @@ public partial class Player
     /// </summary>
     private void BeginWarp(Point2 tile, uint seq, string what)
     {
+        // [7 ก.ย. 2026] ตายแล้ววาร์ปไม่ได้ — เดิมกดจากหน้าจอตายแล้วย้ายตัวได้จริง
+        if (!_context.AppearPlayer.IsAlive)
+        {
+            Send(new Abort { Text = "ตอนนี้วาร์ปไม่ได้" }, seq);
+            return;
+        }
+        // เพดานจำนวนคิววาร์ปที่ค้างพร้อมกัน — **ค่าของเรา** กันยิงรัวจนจอง timer ไม่จำกัด
+        lock (_warpTimers)
+        {
+            if (_warpTimers.Count >= MaxConcurrentWarps)
+            {
+                Send(new Abort { Text = "กำลังวาร์ปอยู่แล้ว" }, seq);
+                return;
+            }
+        }
+
         float duration = Math.Max(0f, WarpTuning.WarpTime);
         Send(new Messages.Timer { Duration = duration }, seq);
 

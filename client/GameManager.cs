@@ -195,6 +195,7 @@ public class GameManager : Singleton<GameManager>
 		if (IsMainScene)
 		{
 			SafeInvoke(MainSceneLoaded);
+			TryLoadClientMods();
 			Connections.Frontend.ForceSyncClock();
 			Emigrated = EmigratedType.None;
 		}
@@ -234,8 +235,46 @@ public class GameManager : Singleton<GameManager>
 		}
 	}
 
+
+	private static bool _clientModsLoaded;
+
+	private static void TryLoadClientMods()
+	{
+		if (_clientModsLoaded)
+		{
+			return;
+		}
+		// รอจนมีผู้เล่นในโลกแล้วค่อยโหลด — มอดพูด/เมมโมรีที่บูตเร็วไปจะ NRE เพราะ LocalPlayer ยังไม่มี
+		if (PlayerBehavior.LocalPlayer == null)
+		{
+			UnityEngine.Debug.Log("[clientmods] รอ LocalPlayer ก่อนโหลดมอด");
+			return;
+		}
+		try
+		{
+			System.Reflection.Assembly asm = System.Reflection.Assembly.Load("DurangoClientMods");
+			System.Type loader = asm != null ? asm.GetType("ClientModLoader") : null;
+			System.Reflection.MethodInfo loadAll = loader != null
+				? loader.GetMethod("LoadAll", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+				: null;
+			if (loadAll == null)
+			{
+				UnityEngine.Debug.LogWarning("[clientmods] ไม่พบ ClientModLoader.LoadAll ใน DurangoClientMods");
+				return;
+			}
+			loadAll.Invoke(null, null);
+			_clientModsLoaded = true;
+			UnityEngine.Debug.Log("[clientmods] โหลดมอดหลังเข้าเกมแล้ว");
+		}
+		catch (System.Exception e)
+		{
+			UnityEngine.Debug.LogWarning("[clientmods] โหลดมอดไม่สำเร็จ: " + e.Message);
+		}
+	}
+
 	private void Start()
 	{
+		// มอดเลื่อนไปโหลดหลังเข้าเกม (MainSceneLoaded / SendReady) เมื่อ LocalPlayer พร้อม
 		_started = true;
 		SessionToken = string.Empty;
 		Connections.Frontend.On(delegate(Evicted msg, PacketHeader header)
@@ -417,6 +456,8 @@ public class GameManager : Singleton<GameManager>
 		{
 			IsReady = true;
 			SafeInvoke(Ready);
+			// จุดนี้ LocalPlayer พร้อมแล้วแน่นอน — โหลดมอดที่เลื่อนไว้ตอนบูต
+			TryLoadClientMods();
 		});
 	}
 

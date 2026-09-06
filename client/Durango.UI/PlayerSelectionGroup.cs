@@ -78,18 +78,13 @@ public class PlayerSelectionGroup : UIBase
 			}
 			break;
 		}
-		case PlayerSlotNode.SlotType.Empty:
-		{
-			MessageBox messageBox2 = UIManager.MessageBox;
-			messageBox2.Show(T._("<em>프롤로그</em>를 건너뛰시겠습니까?"), delegate(int index)
+case PlayerSlotNode.SlotType.Empty:
 			{
-				if (index != 2)
-				{
-					system.CreateNewPlayer(index == 0);
-				}
-			}, new MessageBox.Button(T._("건너뛰기")), T._("진행"), T._("생성 취소"));
-			break;
-		}
+				// **ค่าของเรา** — ตัวใหม่ต้องเข้าโปรล็อกสอนเล่นเสมอ (ลงรถไฟ/หมานำทาง)
+				// เดิมถามข้ามได้ ทำให้ ToBeSkipped=true แล้วตัดฉากสอนเล่นทั้งก้อน
+				system.CreateNewPlayer(skipPrologue: false);
+				break;
+			}
 		case PlayerSlotNode.SlotType.Locked:
 			GameSystem<ShopSystem>.Instance().GetPurchasableCommodities(delegate(List<Commodity> list)
 			{

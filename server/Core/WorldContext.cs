@@ -90,6 +90,41 @@ public class WorldContext
     [JsonProperty("warehouses", NullValueHandling = NullValueHandling.Ignore)]
     public Dictionary<string, Player.WarehouseStore.Box> Warehouses;
 
+    /// <summary>
+    /// [6 ก.ย. 2026] เป้าเก็บของไหนถูกเก็บ generator อะไรไปแล้ว
+    /// คีย์ = "x,y" ของช่อง (ของธรรมชาติ) หรือ entity id (ซากสัตว์) → รายการ generator id
+    ///
+    /// ต้องจำแยกเพราะ <c>Messages.Collectible</c> เป็นข้อความที่ประกอบใหม่ทุกครั้งจากตาราง
+    /// ไม่ใช่สถานะที่เก็บไว้ในโลก (เหตุผลเดียวกับ <see cref="Plantings"/> — แก้ GameCode ไม่ได้)
+    /// เก็บลงไฟล์เกาะเพราะเป็นของโลก ไม่ใช่ของคนเก็บ — คนอื่นเดินมาต้องเห็นว่ากิ่งถูกหักไปแล้ว
+    /// </summary>
+    [JsonProperty("natural_harvests", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, List<string>> NaturalHarvests;
+
+    /// <summary>
+    /// [7 ก.ย. 2026] ที่ดินบนเกาะนี้ — estateId → ข้อมูลใบอนุญาต+cells
+    /// เก็บแยกเพราะ Messages.EstateLicense ไม่ใช่ state ของโลกโดยตรง (แก้ GameCode ไม่ได้)
+    /// </summary>
+    [JsonProperty("estates", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, EstateRecord> Estates;
+
+    /// <summary>index เร็ว: "cellX,cellY" → estateId</summary>
+    [JsonProperty("estate_cells", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, string> EstateCells;
+
+    /// <summary>
+    /// [7 ก.ย. 2026] คิว "ของธรรมชาติที่รองอกกลับ" — ระบบนิเวศ
+    ///
+    /// ⚠️ ไม่มีตารางนี้ = เก็บของแล้วช่องนั้นว่างถาวร **ของหมดเกาะไปเรื่อย ๆ ไม่มีวันกลับ**
+    /// (ต้นฉบับฝั่ง offline ก็ไม่มี — AddNatural ถูกเรียกจาก cheat จุดเดียวเท่านั้น
+    ///  ส่วนเซิร์ฟจริงของ NEXON มี ดูคอมเมนต์ GameCode/Durango.Online/Connection.cs:159
+    ///  ที่พูดถึง "natural regrowth ส่ง AppearEntityOnTile")
+    ///
+    /// เก็บลงไฟล์เกาะเพราะเป็นของโลก และต้องรอดจากการรีสตาร์ตเซิร์ฟ
+    /// </summary>
+    [JsonProperty("natural_regrow", NullValueHandling = NullValueHandling.Ignore)]
+    public List<NaturalRegrowEntry> NaturalRegrow;
+
     [JsonIgnore]
     public string Path { get; private set; }
 
@@ -101,6 +136,10 @@ public class WorldContext
         Plantings ??= new Dictionary<string, string>();
         ArtifactOwners ??= new Dictionary<string, string>();
         BuildMaterials ??= new Dictionary<string, Dictionary<string, List<Item>>>();
+        NaturalHarvests ??= new Dictionary<string, List<string>>();
+        NaturalRegrow ??= new List<NaturalRegrowEntry>();
+        Estates ??= new Dictionary<string, EstateRecord>();
+        EstateCells ??= new Dictionary<string, string>();
         AddedNatural ??= new List<NaturalInfo>();
         RemovedNatural ??= new List<Point2>();
         GrazedPetList ??= new List<Pet>();

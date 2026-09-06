@@ -6,6 +6,7 @@ using Durango.UI;
 using Durango.UI.Control;
 using Durango.Utils;
 using JetBrains.Annotations;
+using Shared.Economy;   // Currency.TStone — เซิร์ฟนี้ใช้สกุลเดียว (ดู CurrencyList ข้างล่าง)
 using UnityEngine;
 
 public class UIBase : MonoBehaviour, IUriInvokable
@@ -236,7 +237,43 @@ public class UIBase : MonoBehaviour, IUriInvokable
 
 	public bool GameBlur => _gameBlur;
 
-	public ReadOnlyCollection<CurrencyData> CurrencyList => _currencyList.AsReadOnly();
+	// [7 ก.ย. 2026] เซิร์ฟนี้ใช้สกุลเงินเดียวคือ T Stone ⇒ ยุบช่องเงินบน HUD ให้เหลือช่องเดียว
+	//
+	// รายการนี้ถูกผูกไว้ใน prefab ของแต่ละหน้าจอ (_currencyList เป็น field ที่ Unity เซฟค่าไว้)
+	// และไม่มีโค้ดที่ไหนเรียก SetCurrencyList เลยสักจุด ⇒ แก้ที่ prefab ไม่ได้ ต้องกรองตอนอ่าน
+	// CurrencyGroup อ่าน property นี้ไปสร้างวิดเจ็ตทีละช่อง (Durango.UI/CurrencyGroup.cs:50,57)
+	//
+	// เก็บช่อง "แต้มสกิล" (IsSkillPoint) ไว้ตามเดิม เพราะไม่ใช่เงิน — เป็นแต้มจากระบบสกิล
+	// ที่เซิร์ฟมีของจริงอยู่แล้ว (server/Core/Player.Skills.cs)
+	public ReadOnlyCollection<CurrencyData> CurrencyList
+	{
+		get
+		{
+			if (_currencyList == null)
+			{
+				return new List<CurrencyData>().AsReadOnly();
+			}
+			List<CurrencyData> list = new List<CurrencyData>(_currencyList.Count);
+			bool moneyAdded = false;
+			for (int i = 0; i < _currencyList.Count; i++)
+			{
+				CurrencyData data = _currencyList[i];
+				if (data.IsSkillPoint)
+				{
+					list.Add(data);
+					continue;
+				}
+				if (moneyAdded)
+				{
+					continue;
+				}
+				moneyAdded = true;
+				data.CurrencyType = Currency.TStone;
+				list.Add(data);
+			}
+			return list.AsReadOnly();
+		}
+	}
 
 	public static event Action UIOpened;
 

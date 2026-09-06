@@ -27,26 +27,37 @@ public class FogOfWarCover : MonoBehaviour
 
 	private readonly Queue<Vector2>[] _defoggingChunks = new Queue<Vector2>[4];
 
-	public RenderTexture Initialize(int size, Action<RenderTexture> completed)
-	{
-		RenderTexture.ReleaseTemporary(_renderTexture);
-		RenderTextureFormat format = RenderTextureFormat.ARGB32;
-		if (SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.R8))
+public RenderTexture Initialize(int size, Action<RenderTexture> completed)
 		{
-			format = RenderTextureFormat.R8;
+			RenderTexture.ReleaseTemporary(_renderTexture);
+			_renderTexture = null;
+			// กัน RenderTextureDesc width must be greater than zero — ถ้า TerrainMeta ยังไม่พร้อม TileCount=0
+			if (size < 1)
+			{
+				Debug.LogWarning("[FogOfWarCover] Initialize ข้ามเพราะ size=" + size + " (TerrainMeta ยังไม่พร้อม)");
+				_mapSize = 0;
+				_onCompleted = null;
+				_setDefoggingChunk = false;
+				_isFirstRender = true;
+				return null;
+			}
+			RenderTextureFormat format = RenderTextureFormat.ARGB32;
+			if (SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.R8))
+			{
+				format = RenderTextureFormat.R8;
+			}
+			_mapSize = size;
+			_renderTexture = RenderTexture.GetTemporary(size, size, 0, format);
+			RenderTexture active = RenderTexture.active;
+			RenderTexture.active = _renderTexture;
+			_renderTexture.MarkRestoreExpected();
+			GL.Clear(clearDepth: false, clearColor: true, Color.white);
+			RenderTexture.active = active;
+			_isFirstRender = true;
+			_setDefoggingChunk = false;
+			_onCompleted = completed;
+			return _renderTexture;
 		}
-		_mapSize = size;
-		_renderTexture = RenderTexture.GetTemporary(size, size, 0, format);
-		RenderTexture active = RenderTexture.active;
-		RenderTexture.active = _renderTexture;
-		_renderTexture.MarkRestoreExpected();
-		GL.Clear(clearDepth: false, clearColor: true, Color.white);
-		RenderTexture.active = active;
-		_isFirstRender = true;
-		_setDefoggingChunk = false;
-		_onCompleted = completed;
-		return _renderTexture;
-	}
 
 	private void OnDestroy()
 	{

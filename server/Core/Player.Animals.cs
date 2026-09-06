@@ -498,7 +498,8 @@ public partial class Player
                     ItemOrder = null,
                     ProtectedItems = new ProtectedItems { ItemIds = Array.Empty<string>() }
                 },
-                Wallet = null
+                // ดู Core/Player.Wallet.cs — เซิร์ฟนี้ใช้สกุลเดียวคือ T Stone
+                Wallet = BuildWallet()
             }
         };
     }

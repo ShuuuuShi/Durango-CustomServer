@@ -1,0 +1,485 @@
+/* ══ Durango LastHuman Admin Tool — Dark Theme ═══════════════════════════════════ */
+
+:root {
+    --bg-dark: #0d1117;
+    --bg-card: #161b22;
+    --bg-sidebar: #0d1117;
+    --bg-input: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --text-bright: #ffffff;
+    --accent: #58a6ff;
+    --accent-hover: #79c0ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d29922;
+    --purple: #bc8cff;
+    --cyan: #39d353;
+    --sidebar-width: 240px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-dark);
+    color: var(--text);
+    line-height: 1.5;
+}
+
+/* ══ Login Screen ═══════════════════════════════════════════════════════════════ */
+
+.screen { display: none; }
+.screen.active { display: flex; }
+
+#login-screen {
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+}
+
+.login-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px;
+    width: 400px;
+    max-width: 90vw;
+}
+
+.login-logo { text-align: center; margin-bottom: 30px; }
+.login-logo h1 { font-size: 2.5em; margin-bottom: 4px; }
+.login-logo h2 { color: var(--text-dim); font-weight: 400; font-size: 1.1em; }
+
+.login-box label {
+    display: block;
+    color: var(--text-dim);
+    font-size: 0.85em;
+    margin-bottom: 4px;
+    margin-top: 12px;
+}
+
+.login-box input {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+}
+
+.login-box input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+}
+
+.error-text { color: var(--red); font-size: 0.85em; margin-top: 10px; min-height: 1.2em; }
+
+/* ══ Main App Layout ════════════════════════════════════════════════════════════ */
+
+#app-screen { min-height: 100vh; }
+
+#sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: var(--sidebar-width);
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+}
+
+.sidebar-header {
+    padding: 20px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.sidebar-header h3 { font-size: 1.1em; }
+
+.nav-menu {
+    list-style: none;
+    padding: 8px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 0.9em;
+    transition: all 0.15s;
+    margin-bottom: 2px;
+}
+
+.nav-item:hover { background: var(--bg-input); color: var(--text); }
+.nav-item.active { background: rgba(88, 166, 255, 0.12); color: var(--accent); }
+.nav-icon { font-size: 1.1em; width: 24px; text-align: center; }
+
+.sidebar-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+}
+
+#main-content {
+    margin-left: var(--sidebar-width);
+    padding: 24px 32px;
+    min-height: 100vh;
+}
+
+/* ══ Pages ══════════════════════════════════════════════════════════════════════ */
+
+.page { display: none; }
+.page.active { display: block; }
+.page h2 { margin-bottom: 16px; font-size: 1.5em; }
+.help-text { color: var(--text-dim); margin-bottom: 16px; font-size: 0.9em; }
+
+/* ══ Cards & Stats ══════════════════════════════════════════════════════════════ */
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.stat-label { color: var(--text-dim); font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-value { font-size: 1.6em; font-weight: 700; color: var(--accent); margin-top: 4px; }
+
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.card h3 { margin-bottom: 12px; font-size: 1.1em; }
+
+/* ══ Buttons ════════════════════════════════════════════════════════════════════ */
+
+.btn {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 500;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-secondary { background: var(--bg-input); color: var(--text); }
+.btn-secondary:hover { background: var(--border); }
+.btn-danger { background: var(--red); color: #fff; border-color: var(--red); }
+.btn-danger:hover { opacity: 0.85; }
+.btn-warning { background: var(--orange); color: #000; border-color: var(--orange); }
+.btn-warning:hover { opacity: 0.85; }
+.btn-sm { padding: 5px 10px; font-size: 0.8em; }
+.btn-full { width: 100%; justify-content: center; margin-top: 16px; }
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.status-text { color: var(--text-dim); font-size: 0.85em; }
+.status-text.success { color: var(--green); }
+.status-text.error { color: var(--red); }
+
+/* ══ Tables ══════════════════════════════════════════════════════════════════════ */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+
+th, td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+}
+
+th {
+    background: var(--bg-input);
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75em;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+}
+
+tr:hover td { background: rgba(88, 166, 255, 0.05); }
+
+/* ══ Forms ══════════════════════════════════════════════════════════════════════ */
+
+.code-editor {
+    width: 100%;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    padding: 12px;
+    resize: vertical;
+    outline: none;
+    line-height: 1.6;
+    tab-size: 2;
+}
+
+.code-editor:focus {
+    border-color: var(--accent);
+}
+
+.select-input {
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+}
+
+.select-input:focus { border-color: var(--accent); }
+
+/* ══ Config Sections ════════════════════════════════════════════════════════════ */
+
+.config-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.config-section-header {
+    padding: 12px 16px;
+    background: var(--bg-input);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-weight: 600;
+    user-select: none;
+}
+
+.config-section-header:hover { background: var(--border); }
+
+.config-section-body {
+    padding: 16px;
+    display: none;
+}
+
+.config-section.open .config-section-body { display: block; }
+
+.config-section-header .arrow { transition: transform 0.2s; }
+.config-section.open .config-section-header .arrow { transform: rotate(90deg); }
+
+.config-field {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 8px;
+    align-items: start;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.config-field:last-child { border-bottom: none; }
+
+.config-field-label {
+    color: var(--text-dim);
+    font-size: 0.85em;
+    font-weight: 500;
+}
+
+.config-field-desc {
+    color: var(--text-dim);
+    font-size: 0.75em;
+    margin-top: 2px;
+}
+
+.config-field input, .config-field select {
+    padding: 6px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.9em;
+    width: 100%;
+    max-width: 400px;
+    outline: none;
+}
+
+.config-field input:focus, .config-field select:focus {
+    border-color: var(--accent);
+}
+
+/* ══ Feature Toggles ════════════════════════════════════════════════════════════ */
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
+}
+
+.feature-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+}
+
+.feature-toggle label { font-size: 0.9em; }
+
+.toggle-switch {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    cursor: pointer;
+}
+
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--border);
+    border-radius: 12px;
+    transition: 0.2s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    left: 3px;
+    top: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider { background: var(--green); }
+.toggle-switch input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+/* ══ Tabs ═══════════════════════════════════════════════════════════════════════ */
+
+.tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+}
+
+.tab-btn {
+    padding: 8px 16px;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.9em;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+}
+
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ══ Actions Grid ═══════════════════════════════════════════════════════════════ */
+
+.actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+}
+
+.action-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+}
+
+.action-card h3 { margin-bottom: 8px; }
+.action-card p { color: var(--text-dim); font-size: 0.85em; margin-bottom: 12px; }
+.action-card .btn { margin-top: 8px; }
+
+.result-text {
+    margin-top: 8px;
+    font-size: 0.85em;
+    min-height: 1.2em;
+}
+
+.result-text.success { color: var(--green); }
+.result-text.error { color: var(--red); }
+
+/* ══ Data Viewer ════════════════════════════════════════════════════════════════ */
+
+#data-viewer {
+    max-height: 600px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ══ Empty State ════════════════════════════════════════════════════════════════ */
+
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-dim);
+}
+
+.empty-state .icon { font-size: 2em; margin-bottom: 8px; }
+
+/* ══ Loading ═════════════════════════════════════════════════════════════════════ */
+
+.loading { color: var(--text-dim); padding: 20px; text-align: center; }
+
+/* ══ Responsive ═════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+    :root { --sidebar-width: 60px; }
+    .sidebar-header h3, .nav-item span:not(.nav-icon) { display: none; }
+    .nav-item { justify-content: center; padding: 10px; }
+    .sidebar-footer .btn { font-size: 0.7em; padding: 4px 6px; }
+    #main-content { padding: 16px; }
+    .config-field { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}

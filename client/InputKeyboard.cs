@@ -290,6 +290,14 @@ public class InputKeyboard : InputDispatcher<InputKeyboard.Message>
 			MenuType menuType = (MenuType)menuCommand.Key;
 			GameSystem<InputSystem>.Instance().On(value, delegate
 			{
+				// ปุ่มลัดเมนูใช้ได้เฉพาะตอนเข้าเกมแล้วเท่านั้น
+				// ถ้ากดตั้งแต่หน้าไตเติล/หน้าโหลด MenuHelper.GetScript จะไปสร้าง UIManager ก่อนเวลา
+				// แล้ว InitUIGroups() จะสร้าง prefab ของ UI ในเกมทั้งชุดตอนที่ terrain ยังไม่มี
+				// พังต่อกันจนม่านโหลดไม่เปิด (log: Can't add script behaviour TerrainBase ...)
+				if (!Durango.Utils.Singleton<UIManager>.HasInstance())
+				{
+					return;
+				}
 				UIBase script = MenuHelper.GetScript(menuType);
 				if (UIBase.CurrentUI != null && script != UIBase.CurrentUI && UIBase.CurrentUI.IsOpened)
 				{

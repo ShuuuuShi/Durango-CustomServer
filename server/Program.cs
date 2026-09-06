@@ -96,6 +96,20 @@ internal static class Program
                     }
                     return SelfTest.Run(stGateway, stGame);
                 }
+                case "--probe":
+                {
+                    int stGateway = 18290, stGame = 18291;
+                    while (i + 1 < args.Length)
+                    {
+                        if (args[i + 1] == "--gateway-port") stGateway = int.Parse(args[i + 2]);
+                        if (args[i + 1] == "--game-port") stGame = int.Parse(args[i + 2]);
+                        i++;
+                    }
+                    int rc = SelfTestPackages.Run(stGateway, stGame);
+                    // thread รับ packet ไม่ใช่ background — ไม่ Exit โปรเซสจะค้างล็อก dll ตัวเองไว้
+                    Environment.Exit(rc);
+                    return rc;
+                }
                 case "--name": name = args[++i]; break;
                 case "--gateway-port": gatewayPort = int.Parse(args[++i]); break;
                 case "--game-port": gamePort = int.Parse(args[++i]); break;
@@ -189,7 +203,7 @@ internal static class Program
         {
             // assets = ตารางข้อมูลเกมที่ client โหลดผ่าน HTTP เมื่อ cluster_mode = Online
             // (client/Yaml.Util/Loader.cs:164 — โหมดอื่นมันอ่านจาก Resources ในตัวเกมแทน)
-            host.Start(gamePort, gatewayPort, publicHost, androidBundles, Path.Combine(dataDir, "assets"));
+            host.Start(gamePort, gatewayPort, publicHost, androidBundles, Path.Combine(dataDir, "assets"), dataDir);
         }
         catch (Exception e)
         {

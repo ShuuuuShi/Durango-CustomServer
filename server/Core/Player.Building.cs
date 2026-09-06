@@ -349,13 +349,24 @@ public partial class Player
     {
         if (_world.ArtifactManager.Get(msg.EntityId) is not { } artifact)
         {
+            // ⚠️ ต้อง log — ตอบ Abort ตรงนี้แล้วฝั่งเกม "ไม่มี UI ใส่วัสดุ" แบบเงียบ ๆ
+            // (client/BuildSystem.cs:376 .On<ArtifactMaterials> ไม่โดน ⇒ ม่านโหลดหายเฉย ไม่มี error)
+            Console.WriteLine($"[สร้าง] {Short(EntityId)} ขอสถานะหลุม {Short(msg.EntityId)} " +
+                              $"ที่ [{msg.Tile.x},{msg.Tile.y}] — ไม่พบในโลกนี้ (id ไม่ตรง/ข้ามเกาะ)");
             Send(new Abort { Text = "ไม่พบสิ่งปลูกสร้างนี้" }, seq);
             return;
         }
+
+        Dictionary<string, Item[]> wire = WireMaterials(artifact.EntityId);
+        MergedBlueprint bp = BlueprintStore.GetBlueprint(artifact.EntityType);
+        Console.WriteLine($"[สร้าง] {Short(EntityId)} เปิดหลุม {bp?.Id ?? artifact.EntityType.ToString()} " +
+                          $"ที่ [{artifact.Tile.x},{artifact.Tile.y}] state={artifact.States.BuildingState} " +
+                          $"ช่องแบบแปลน={bp?.Slots?.Length ?? -1} วัสดุที่ใส่แล้ว={wire.Count} กลุ่ม");
+
         Send(new ArtifactMaterials
         {
             EntityId = artifact.EntityId,
-            Materials = WireMaterials(artifact.EntityId)
+            Materials = wire
         }, seq);
     }
 
@@ -597,6 +608,10 @@ public partial class Player
         // วัสดุถูกใช้ไปกับตัวอาคารแล้ว — เก็บต่อไม่มีประโยชน์และทำให้ไฟล์เซฟบวม
         _world.ArtifactManager.ClearBuildMaterials(artifact.EntityId);
         _world.Save();
+
+        // [7 ก.ย. 2026] ให้ exp ตอนกด "สำเร็จ" จริง — ไม่ให้ตอนจองหลุม/ใส่วัสดุ
+        AddExpForAction(SkillTuning.BuildWeight, Shared.Skill.Category.Constructing,
+                        $"สร้าง {blueprint.Id}");
 
         Console.WriteLine($"[สร้าง] {Short(EntityId)} ทำให้ {blueprint.Id} สมบูรณ์แล้ว");
 

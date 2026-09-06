@@ -33,6 +33,7 @@ public class WorldRegistry
         // โลกตั้งต้นมาจาก Host (ไฟล์ 0.world ของต้นฉบับ) — ใช้ต่อเลย ไม่สร้างซ้ำ
         if (defaultWorld != null)
         {
+            defaultWorld.Registry = this;
             _worlds[DefaultRegionId] = defaultWorld;
         }
     }
@@ -43,12 +44,45 @@ public class WorldRegistry
     /// โลกของเกาะที่ระบุ — สร้างขึ้นถ้ายังไม่เคยเปิด
     /// คืนโลกตั้งต้นเมื่อ regionId ว่างหรือไม่มีเกาะนั้นในสารบัญ
     /// </summary>
+    /// <summary>
+    /// แผนที่ region id ของเกาะส่วนตัว → template terrain จริง (pe10gr_1 ฯลฯ)
+    /// ต้องมีเพราะ GetOrCreate เดิมรับเฉพาะ id ที่อยู่ใน RegionCatalog
+    /// </summary>
+    private readonly Dictionary<string, string> _personalTemplates = new(StringComparer.OrdinalIgnoreCase);
+
+    public void RegisterPersonalRegion(string regionId, string templateId)
+    {
+        if (string.IsNullOrEmpty(regionId) || string.IsNullOrEmpty(templateId)) return;
+        _personalTemplates[regionId] = templateId;
+    }
+
+    public bool TryGetPersonalTemplate(string regionId, out string templateId) =>
+        _personalTemplates.TryGetValue(regionId ?? "", out templateId);
+
+    public bool IsPersonalRegion(string regionId) =>
+        !string.IsNullOrEmpty(regionId) && _personalTemplates.ContainsKey(regionId);
+
     public World GetOrCreate(string regionId)
     {
-        if (string.IsNullOrEmpty(regionId) || !RegionCatalog.TryGet(regionId, out _))
+        string terrainFile = null;
+        if (string.IsNullOrEmpty(regionId))
         {
             regionId = DefaultRegionId;
         }
+        else if (RegionCatalog.TryGet(regionId, out _))
+        {
+            terrainFile = regionId; // catalog ใช้ชื่อไฟล์ terrain เป็น region id
+        }
+        else if (_personalTemplates.TryGetValue(regionId, out string personalTemplate))
+        {
+            terrainFile = personalTemplate;
+        }
+        else
+        {
+            // ไม่รู้จักและไม่ใช่เกาะส่วนตัวที่ลงทะเบียนไว้ — ถอยไปเกาะตั้งต้น
+            regionId = DefaultRegionId;
+        }
+
         if (_worlds.TryGetValue(regionId, out World existing))
         {
             return existing;
@@ -67,12 +101,14 @@ public class WorldRegistry
         {
             context = new WorldContext();
             context.Initialize(path);
-            Console.WriteLine($"[world] สร้างโลกใหม่ของเกาะ {regionId}");
+            Console.WriteLine($"[world] สร้างโลกใหม่ของเกาะ {regionId}" +
+                              (terrainFile != null && terrainFile != regionId ? $" (template {terrainFile})" : ""));
         }
-        // เขียนทับเสมอ: ไฟล์เซฟเก่าอาจยังไม่มี terrain id หรือถูกก๊อปมาจากเกาะอื่น
-        context.TerrainId = regionId;
+        // โลกใช้ไฟล์ terrain จริง (pe10gr_*) แต่จำ region id ของตัวเองแยกได้ผ่าน registry key
+        context.TerrainId = terrainFile ?? regionId;
 
         var world = new World(context);
+        world.Registry = this;
         _worlds[regionId] = world;
         return world;
     }

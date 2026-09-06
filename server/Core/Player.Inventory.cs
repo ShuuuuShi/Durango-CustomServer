@@ -425,6 +425,14 @@ public partial class Player
             return;
         }
 
+        // [7 ก.ย. 2026] ถ้าอาหารมี effect_on และยังมีบัฟอาหารค้าง + ผู้เล่นยังไม่ยืนยัน
+        // → ถามก่อนทับ (client โชว์ MessageBox แล้วยิง UseItem ซ้ำด้วย Accept=true)
+        if (!string.IsNullOrEmpty(food.EffectOn) && !msg.Accept && HasConflictingFoodStatus(food.EffectOn))
+        {
+            Send(new AskEatFoodOverrideStatusEffect { ItemId = item.Id }, seq);
+            return;
+        }
+
         // ── ผลต่อหลอดสถานะ (ดู Core/SurvivalState.cs) ──────────────────────────────────
         // ค่าบวก = ฟื้น · fatigue ในไฟล์เป็นค่าลบอยู่แล้ว (เช่น fatigue_drug = "-150") จึงบวกตรง ๆ
         // SurvivalState.Add จะ clamp ให้อยู่ในช่วง min..max ของหลอดเอง (MakeLine)
@@ -439,6 +447,12 @@ public partial class Player
         touched |= _survival.Add(SurvivalState.KeyEnergy, food.EnergyPotential);
         if (touched) FlushSurvival();
 
+        if (!string.IsNullOrEmpty(food.EffectOn))
+        {
+            ApplyTimedStatusEffect(food.EffectOn, food.EffectOnLevel, food.ModifierEffectTime);
+            SendStatusEffects();
+        }
+
         _context.InventoryItems.RemoveAt(idx);
         _lockedItemIds.Remove(item.Id);
         Send(new InventoryUpdated
@@ -447,8 +461,35 @@ public partial class Player
             RemovedItemIds = new[] { item.Id }
         });
         Send(default(OK), seq);
-        Send(new ItemUsed { Motion = food.EatMotion, Time = 0f, Msg = null });
+        // ⚠️ Time ต้อง > 0 — client/LocalMotionUpdater.cs:243,275-278
+        // Time <= 0 ⇒ PlayUntil = 0 ⇒ ตั้งท่าแล้วเด้งออกจากคิวทันที แต่ state กินอาจค้างวน
+        // ใช้ digestivetime จาก performance.json เป็นความยาวท่าจริง
+        Send(new ItemUsed { Motion = food.EatMotion, Time = food.DigestiveTime, Msg = null });
         OnContextChanged();
+    }
+
+    /// <summary>
+    /// มีบัฟอาหารค้างที่ต่างจาก effect ใหม่หรือไม่ — ใช้ตัดสินใจถามทับก่อนกิน
+    /// **การตีความของเรา**: นับเฉพาะ effect ที่อยู่ในกลุ่มอาหารทั่วไป (ไม่นับ wet/rest/อากาศ)
+    /// </summary>
+    private bool HasConflictingFoodStatus(string newEffectId)
+    {
+        foreach (string id in _timedStatusEffects.Keys)
+        {
+            if (string.Equals(id, newEffectId, StringComparison.OrdinalIgnoreCase)) continue;
+            if (IsFoodishStatus(id)) return true;
+        }
+        return false;
+    }
+
+    private static bool IsFoodishStatus(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return false;
+        // รายการจาก performance.json → effect_on ที่พบจริง + กลุ่มรส/เครื่องดื่ม
+        return id is "drink_water" or "fruit_water" or "thirsty" or "hot_food" or "cold_food"
+            or "energetic" or "stamina_up" or "life_up" or "eat_bizarre_food" or "drunk"
+            or "taste_good" or "taste_very_good" or "taste_bad" or "taste_very_bad"
+            or "poisoning" or "cactus_water";
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════
@@ -663,7 +704,9 @@ public partial class Player
                 ItemOrder = null,
                 ProtectedItems = new ProtectedItems { ItemIds = Array.Empty<string>() }
             },
-            Wallet = null
+            // [7 ก.ย. 2026] เดิมส่ง null ⇒ ทุกยอดเป็น 0 หน้าจอที่โชว์เงินว่างเปล่าถาวร
+            // และของทุกอย่างที่ต้องจ่ายเงินกดไม่ได้เลยสักชิ้น (ดู Core/Player.Wallet.cs)
+            Wallet = BuildWallet()
         }, seq);
     }
 
@@ -1236,6 +1279,11 @@ public partial class Player
             public float Fatigue;
             public float EnergyPotential;
             public string EatMotion;
+            /// <summary>วินาทีของท่ากินจาก performance.json → digestivetime</summary>
+            public float DigestiveTime;
+            public string EffectOn;
+            public int EffectOnLevel = 1;
+            public double? ModifierEffectTime;
         }
 
         private class Root
@@ -1250,6 +1298,10 @@ public partial class Player
             [JsonProperty("fatigue")] public string Fatigue { get; set; }
             [JsonProperty("energy_potential")] public string EnergyPotential { get; set; }
             [JsonProperty("eat_motion")] public string EatMotion { get; set; }
+            [JsonProperty("digestivetime")] public string DigestiveTime { get; set; }
+            [JsonProperty("effect_on")] public string EffectOn { get; set; }
+            [JsonProperty("effect_on_level")] public string EffectOnLevel { get; set; }
+            [JsonProperty("modifier_effect_time")] public string ModifierEffectTime { get; set; }
         }
 
         private static Root _root;
@@ -1263,6 +1315,28 @@ public partial class Player
             if (!Data.Food.TryGetValue(prototypeId, out Dictionary<string, Def> byRange)) return null;
             Def def = LevelRange.Pick(byRange, level);
             if (def == null) return null;
+            int effectLevel = 1;
+            if (!string.IsNullOrEmpty(def.EffectOnLevel))
+            {
+                if (int.TryParse(def.EffectOnLevel, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+                {
+                    effectLevel = Math.Max(1, parsed);
+                }
+                else if (Formula.TryEval(def.EffectOnLevel, level, out float lvlF))
+                {
+                    effectLevel = Math.Max(1, (int)Math.Round(lvlF));
+                }
+            }
+double? effectTime = null;
+            if (!string.IsNullOrEmpty(def.ModifierEffectTime) &&
+                double.TryParse(def.ModifierEffectTime, NumberStyles.Float, CultureInfo.InvariantCulture, out double t) &&
+                t > 0)
+            {
+                effectTime = t;
+            }
+            float digTime = Eval(def.DigestiveTime, level);
+            // **ค่าของเรา**: ถ้าไฟล์ไม่มี/เป็น 0 ใช้ 3 วิ (ค่าที่พบบ่อยสุดใน performance.json)
+            if (digTime <= 0f) digTime = 3f;
             return new Effect
             {
                 Life = Eval(def.Life, level),
@@ -1270,7 +1344,11 @@ public partial class Player
                 Fatigue = Eval(def.Fatigue, level),
                 EnergyPotential = Eval(def.EnergyPotential, level),
                 // ท่าทางในไฟล์คือ "Eat"/"Drink" ตรงกับชื่อ motion ที่ client ใช้
-                EatMotion = string.IsNullOrEmpty(def.EatMotion) ? "Eat" : def.EatMotion
+                EatMotion = string.IsNullOrEmpty(def.EatMotion) ? "Eat" : def.EatMotion,
+                DigestiveTime = digTime,
+                EffectOn = def.EffectOn,
+                EffectOnLevel = effectLevel,
+                ModifierEffectTime = effectTime
             };
         }
 

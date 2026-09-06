@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using BestHTTP;
+using Durango.Development;
 using Durango.Logic;
 using Durango.Logic.Combat;
 using Durango.Logic.Item;
@@ -301,14 +302,20 @@ public class PrologueManager : Durango.Utils.Singleton<PrologueManager>
 		_activateList.Add(KUtility.FindObjectByName(_trainModel, "train_06", includeInactive: true));
 		UIManager.FindScript<PlayerFloatingGroup>().HideLocalPlayer();
 		GameSystem<CombatSystem>.Instance().DamagedProcesser.Damaged += OnDamaged;
-		Durango.Utils.Singleton<CameraController>.Instance().SetZoom(0.7f);
-		Durango.Utils.Singleton<CameraController>.Instance().LockZoomControl(isLock: true);
-		if (ToBeSkipped)
-		{
-			SkipPrologue();
-		}
-		Durango.Utils.Singleton<GameManager>.Instance().ForceMainSceneLoadedPrologue();
-		SoundManager.PlayEvent(_sceneStartSound);
+Durango.Utils.Singleton<CameraController>.Instance().SetZoom(0.7f);
+			Durango.Utils.Singleton<CameraController>.Instance().LockZoomControl(isLock: true);
+			// ตัวใหม่ต้องเล่นโปรล็อก — เคลียร์ธงข้ามที่ค้างจากรอบก่อน/เมนูเก่า
+			if (string.IsNullOrEmpty(GameManager.PlayerId))
+			{
+				ToBeSkipped = false;
+				DeveloperSettings.SkipPrologue = false;
+			}
+			if (ToBeSkipped)
+			{
+				SkipPrologue();
+			}
+			Durango.Utils.Singleton<GameManager>.Instance().ForceMainSceneLoadedPrologue();
+			SoundManager.PlayEvent(_sceneStartSound);
 	}
 
 	private void SetNextState(State next)

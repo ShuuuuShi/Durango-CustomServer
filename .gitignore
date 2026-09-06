@@ -27,6 +27,8 @@ saves/
 .vs/
 .idea/
 .vscode/
+.claude/
+.zcode/
 *.user
 *.suo
 Thumbs.db

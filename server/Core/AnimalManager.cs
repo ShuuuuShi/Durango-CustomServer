@@ -96,6 +96,15 @@ public class AnimalManager
         /// <summary>ตีได้อีกครั้งเมื่อไร (Gauge.CurrentTime) — คุมจังหวะด้วย attack_cooltime ของชนิดนั้น</summary>
         public double NextAttackAt;
 
+        /// <summary>
+        /// [7 ก.ย. 2026] เวลาที่ "เห็นเป้าอยู่ในระยะ" ครั้งล่าสุด — ใช้ตัดสินว่าควรเลิกโกรธหรือยัง
+        ///
+        /// ⚠️ ไม่มีตัวนี้ = <c>AggroTargetId</c> ถูกตั้งแล้วไม่มีจุดไหนเคลียร์เลยสักที่
+        /// (grep ทั้งเซิร์ฟ) แล้ว AnimalManager.Process ข้ามการเดินเล่นตลอดถ้ายังมี aggro
+        /// ⇒ สัตว์ค้างท่าเตรียมสู้ตลอดชีพ และพอผู้เล่นเดินหนีไปไกลมันก็ยังไม่กลับไปเดินเล่น
+        /// </summary>
+        public double AggroSeenAt;
+
         /// <summary>จุดที่มันเกิด — เดินเล่นวนอยู่รอบ ๆ จุดนี้ ไม่หลุดไปไกล</summary>
         public Point2 HomeTile;
 
@@ -148,6 +157,37 @@ public class AnimalManager
                 }
             }
         };
+
+        /// <summary>
+        /// [7 ก.ย. 2026] ท่าโจมตีตอนสัตว์กัดจริง — เล่นครั้งเดียวแล้วกลับท่ายืนเอง
+        ///
+        /// ⚠️ ไม่มีตัวนี้ = สัตว์ยืนนิ่งทั้งที่เลือดผู้เล่นลด (อาการที่ผู้เล่นแจ้ง)
+        /// เพราะฝั่งเกมขับอนิเมชั่นสัตว์จาก <c>Move.MotionName</c> อย่างเดียว
+        /// (client/AnimalBehavior.cs:1007-1011) — <c>Update()</c> ไม่เลือกท่าเอง
+        ///
+        /// คืนค่าเปล่าถ้าชนิดนี้ไม่มีท่าโจมตีในตาราง ⇒ ผู้เรียกเช็ค MotionName ก่อนส่ง
+        /// </summary>
+        public Move ToAttackMotionMessage()
+        {
+            AnimalMotions.Motions m = AnimalMotions.Of(EntityType);
+            string clip = m?.AttackNormal;
+            if (string.IsNullOrEmpty(clip)) return default;
+            return new Move
+            {
+                EntityId = EntityId,
+                Movements = new[]
+                {
+                    new Movement
+                    {
+                        MotionName = clip,
+                        MotionOption = (byte)MotionOption.NORMAL,   // เล่นจบแล้วกลับท่ายืน
+                        PlaybackRate = 1f,
+                        RotSpeed = DefaultRotateSpeed,
+                        Path = new[] { new Location { Position = Position, Time = Gauge.CurrentTime } }
+                    }
+                }
+            };
+        }
 
         /// <summary>
         /// แปลงเป็นข้อความที่เกมรอรับ
@@ -247,7 +287,15 @@ public class AnimalManager
             {
                 animal.StopWalkingAt = 0.0;
                 animal.NextWanderAt = now + WanderPauseMin + _rng.NextDouble() * (WanderPauseMax - WanderPauseMin);
-                broadcast(animal.ToMotionMessage());
+                // [7 ก.ย. 2026] กำลังไล่ล่าอยู่ = อย่าส่งท่ายืนทับ
+                // ⚠️ ตัวนี้เคยทำให้การวิ่งเข้าหาเหยื่อพังทั้งระบบ: Player.Hunting สั่งวิ่ง
+                // แล้วรอบถัดมาที่นี่ส่ง "ท่ายืนที่ตำแหน่งใหม่" ทับทันที ⇒ บนจอเห็นสัตว์
+                // วาร์ปกลับไปยืนนิ่ง แล้วตีข้ามระยะเหมือนเดิม
+                // ปล่อยให้ AnimalTurn เป็นคนตัดสินใจรอบถัดไป (เดินต่อ หรือกัด)
+                if (string.IsNullOrEmpty(animal.AggroTargetId))
+                {
+                    broadcast(animal.ToMotionMessage());
+                }
                 continue;
             }
 
@@ -286,6 +334,57 @@ public class AnimalManager
         float yaw = (float)(Math.Atan2(dx, dy) * 180.0 / Math.PI);    // ฝั่งเกมนับ yaw จากแกน +Z
 
         // ขยับตำแหน่งฝั่งเซิร์ฟตามไปด้วย ไม่งั้นระยะไล่กัด/ระยะจับจะอ้างจุดเก่า
+        animal.Tile = new Point2((int)Math.Round(dest.x / TileSize), (int)Math.Round(dest.y / TileSize));
+        animal.StopWalkingAt = now + travel;
+
+        return new Move
+        {
+            EntityId = animal.EntityId,
+            Movements = new[]
+            {
+                new Movement
+                {
+                    MotionName = walk,
+                    MotionOption = (byte)(MotionOption.LOOPING | MotionOption.ALIGN_TO_PATH),
+                    PlaybackRate = 1f,
+                    RotSpeed = DefaultRotateSpeed,
+                    Path = new[]
+                    {
+                        new Location { Position = from, Yaw = yaw, Time = now },
+                        new Location { Position = dest, Yaw = yaw, Time = now + travel }
+                    }
+                }
+            }
+        };
+    }
+
+    /// <summary>
+    /// [7 ก.ย. 2026] เดินเข้าหาเหยื่อ — เดิมสัตว์ยืนอยู่กับที่แล้วตีข้ามระยะ 4 ช่อง
+    ///
+    /// ใช้เส้นทางรูปแบบเดียวกับ <see cref="BuildWander"/> ต่างแค่ปลายทางเป็นตำแหน่งเหยื่อ
+    /// หยุดห่างจากเหยื่อ <paramref name="stopAtDistance"/> หน่วย เพื่อไม่ให้เดินทับตัวผู้เล่น
+    ///
+    /// คืนค่าเปล่าถ้าไม่มีท่าเดิน หรืออยู่ใกล้พอแล้ว ⇒ ผู้เรียกเช็ค Movements ก่อนส่ง
+    /// </summary>
+    public Move BuildChase(Animal animal, WorldPosition target, float stopAtDistance, double now)
+    {
+        AnimalMotions.Motions motions = AnimalMotions.Of(animal.EntityType);
+        string walk = motions?.Move;
+        if (string.IsNullOrEmpty(walk)) return default;
+
+        WorldPosition from = animal.Position;
+        float dx = target.x - from.x, dy = target.y - from.y;
+        float distance = (float)Math.Sqrt(dx * dx + dy * dy);
+        if (distance <= stopAtDistance) return default;      // ประชิดแล้ว ไม่ต้องเดิน
+
+        // เดินไปหยุดที่ขอบระยะประชิด ไม่ใช่ทับตัวผู้เล่น
+        float ratio = (distance - stopAtDistance) / distance;
+        var dest = new WorldPosition(from.x + dx * ratio, from.y + dy * ratio);
+
+        double travel = (distance - stopAtDistance) / MovingSpeed;
+        if (travel <= 0.01) return default;
+        float yaw = (float)(Math.Atan2(dx, dy) * 180.0 / Math.PI);
+
         animal.Tile = new Point2((int)Math.Round(dest.x / TileSize), (int)Math.Round(dest.y / TileSize));
         animal.StopWalkingAt = now + travel;
 

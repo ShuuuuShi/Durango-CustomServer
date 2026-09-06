@@ -97,14 +97,54 @@ public partial class Player
 
     // ── จุดที่สำรวจแล้ว ─────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// id เกาะตามที่ฝั่งเกมใช้ใน <c>GameManager.Region.Id</c>
+    /// บนเกาะส่วนตัวคือ <c>personal_*</c> ไม่ใช่ชื่อไฟล์ terrain
+    /// </summary>
+    private string LogicalRegionId()
+    {
+        if (!string.IsNullOrEmpty(_context.RegionId))
+        {
+            return _context.RegionId;
+        }
+        return _world.TerrainId ?? "1";
+    }
+
     /// <summary>เกาะที่คำขออ้างถึง — ว่างแปลว่า "เกาะที่ยืนอยู่ตอนนี้"</summary>
     private string RegionKey(string regionId) =>
-        string.IsNullOrEmpty(regionId) ? _world.TerrainId : regionId;
+        string.IsNullOrEmpty(regionId) ? LogicalRegionId() : regionId;
+
+    /// <summary>
+    /// แปลง region id → ชื่อไฟล์ terrain สำหรับอ่าน pois.yml
+    /// เกาะส่วนตัวใช้ template (pe10gr_*) ไม่ใช่ personal_*
+    /// </summary>
+    private string TerrainFileForRegion(string regionId)
+    {
+        if (string.IsNullOrEmpty(regionId))
+        {
+            return _world.TerrainId ?? "1";
+        }
+        if (_world.Registry != null &&
+            _world.Registry.TryGetPersonalTemplate(regionId, out string registered))
+        {
+            return registered;
+        }
+        if (!string.IsNullOrEmpty(_context.PersonalRegionId) &&
+            string.Equals(regionId, _context.PersonalRegionId, StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrEmpty(_context.PersonalRegionTemplateId))
+        {
+            return _context.PersonalRegionTemplateId;
+        }
+        return regionId;
+    }
 
     private void HandleExplorePOIMsg(ExplorePOI msg, uint seq)
     {
         Dictionary<string, ExploredPoint> found = _context.ExploredPOIs ??= new Dictionary<string, ExploredPoint>();
-        string key = $"{_world.TerrainId}|{msg.Tile.x},{msg.Tile.y}";
+        // ต้องใช้ LogicalRegionId ให้ตรงกับที่ client ส่งมาใน GetExploredPOIs (Region.Id)
+        // เดิมเซฟด้วย TerrainId ⇒ บนเกาะส่วนตัวขอ personal_* แล้วได้ลิสต์ว่าง
+        string regionId = LogicalRegionId();
+        string key = $"{regionId}|{msg.Tile.x},{msg.Tile.y}";
 
         // ⚠️ ต้องตอบ OK เสมอ แม้จุดนี้เคยเจอแล้ว — ฝั่งเกมยิงซ้ำทุกครั้งที่หลุมอุกกาบาต
         // เปลี่ยนสถานะเปิด/ปิด (POIUpdater.NearbyCrackFound บรรทัด 176-186) แล้วรอ OK
@@ -112,7 +152,7 @@ public partial class Player
         bool isNew = !found.ContainsKey(key);
         found[key] = new ExploredPoint
         {
-            RegionId = _world.TerrainId,
+            RegionId = regionId,
             X = msg.Tile.x,
             Y = msg.Tile.y,
             Type = (int)msg.Type,
@@ -123,7 +163,7 @@ public partial class Player
         if (isNew)
         {
             Console.WriteLine($"[แผนที่] {EntityId[..Math.Min(8, EntityId.Length)]} พบ {msg.Type} " +
-                              $"ที่ [{msg.Tile.x},{msg.Tile.y}] บน {_world.TerrainId}");
+                              $"ที่ [{msg.Tile.x},{msg.Tile.y}] บน {regionId}");
             OnContextChanged();
         }
     }
@@ -131,12 +171,25 @@ public partial class Player
     private void SendExploredPOIs(string regionId, uint seq)
     {
         var list = new List<PointOfInterest>();
+        bool personal = !string.IsNullOrEmpty(regionId) &&
+                        regionId.StartsWith("personal_", StringComparison.OrdinalIgnoreCase);
+        string terrainAlias = personal ? TerrainFileForRegion(regionId) : null;
         if (_context.ExploredPOIs != null)
         {
             foreach (ExploredPoint point in _context.ExploredPOIs.Values)
             {
-                if (point.RegionId != regionId) continue;
-                list.Add(ToMessage(point));
+                if (string.Equals(point.RegionId, regionId, StringComparison.OrdinalIgnoreCase))
+                {
+                    list.Add(ToMessage(point));
+                    continue;
+                }
+                // เซฟเก่าบนเกาะส่วนตัวเคยเขียน RegionId = pe10gr_* — ดึงมาด้วยจนกว่าจะสำรวจใหม่
+                if (personal &&
+                    !string.IsNullOrEmpty(terrainAlias) &&
+                    string.Equals(point.RegionId, terrainAlias, StringComparison.OrdinalIgnoreCase))
+                {
+                    list.Add(ToMessage(point));
+                }
             }
         }
 
@@ -253,13 +306,15 @@ public partial class Player
 
     private TerrainPois LoadPois(string regionId)
     {
+        string key = RegionKey(regionId);
+        string terrainFile = TerrainFileForRegion(key);
         try
         {
-            return TerrainLoader.Load(RegionKey(regionId))?.Pois;
+            return TerrainLoader.Load(terrainFile)?.Pois;
         }
         catch (Exception e)
         {
-            Console.WriteLine($"[แผนที่] อ่าน POI ของ {regionId} ไม่ได้: {e.Message}");
+            Console.WriteLine($"[แผนที่] อ่าน POI ของ {key} (terrain {terrainFile}) ไม่ได้: {e.Message}");
             return null;
         }
     }

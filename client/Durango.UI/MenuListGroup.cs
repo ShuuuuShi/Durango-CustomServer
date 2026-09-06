@@ -87,8 +87,16 @@ public class MenuListGroup : MenuListGroupBase
 		}
 		else
 		{
-			_currencyWidgets[0].SetCurrencyType(Currency.Coin);
-			_currencyWidgets[1].SetCurrencyType(Currency.Gem);
+			// [7 ก.ย. 2026] เซิร์ฟนี้ใช้สกุลเงินเดียวคือ T Stone ⇒ เหลือช่องเดียว
+			//
+			// นี่คือ 3 ช่องเงินบนหัวจอเมนู — เป็นวิดเจ็ตที่วางไว้ใน prefab ตายตัว 3 ตัว
+			// ไม่ได้ผ่าน CurrencyWidgetList/CurrencyGroup เลย (คนละเส้นกัน) ⇒ ที่แก้ไว้ตรงนั้นไม่ถึง
+			// ของเดิมผูก [0]=Coin [1]=Gem [2]=TStone และเพราะ WalletExtension.Normalize()
+			// แปลงทุกสกุลเป็น TStone ทั้งสามช่องจึงโชว์ยอดเดียวกันหมด (อาการที่เห็น: 12,500 × 3)
+			//
+			// ปิดสองช่องแรก เหลือช่อง TStone ช่องเดียว — ไม่แตะ prefab (แก้ไม่ได้อยู่แล้ว)
+			_currencyWidgets[0].gameObject.SetActive(value: false);
+			_currencyWidgets[1].gameObject.SetActive(value: false);
 			_currencyWidgets[2].SetCurrencyType(Currency.TStone);
 		}
 	}

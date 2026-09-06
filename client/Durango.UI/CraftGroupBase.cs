@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Building;
 using Crafting;
 using Durango.Logic.Item;
@@ -64,6 +65,9 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 
 	private Action _onBuild;
 
+	// แพตช์ UI ฝั่ง PC — prefab อาจไม่ได้ผูกวิดเจ็ตครบ กัน NRE แบบเดียวกับ ExpectResultWidget
+	private bool _reportedMissingWidgets;
+
 	protected virtual RecipeStepSelectWidget RecipeStepSelectWidget => _recipeStepSelectVerticalWidget;
 
 	private void Awake()
@@ -74,13 +78,23 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 
 	private void Start()
 	{
+		ReportMissingWidgetsOnce();
 		base.OnOpenSucceed += delegate
 		{
-			_materialSelectWidget.ResetpositionItemList();
+			if (_materialSelectWidget != null)
+			{
+				_materialSelectWidget.ResetpositionItemList();
+			}
 		};
-		_materialSelectWidget.ItemSelectionUpdated += MaterialSelectWidget_ItemSelectionUpdated;
-		SelectableButton confirmButton = _confirmButton;
-		confirmButton.Clicked = (Action)Delegate.Combine(confirmButton.Clicked, new Action(OnConfirmButtonClick));
+		if (_materialSelectWidget != null)
+		{
+			_materialSelectWidget.ItemSelectionUpdated += MaterialSelectWidget_ItemSelectionUpdated;
+		}
+		if (_confirmButton != null)
+		{
+			SelectableButton confirmButton = _confirmButton;
+			confirmButton.Clicked = (Action)Delegate.Combine(confirmButton.Clicked, new Action(OnConfirmButtonClick));
+		}
 		GameSystem<BuildSystem>.Instance().ArtifactOccupied += System_ArtifactOccupied;
 		GameSystem<CraftSystem>.Instance().EntrustedCraftStarted += OnStartEntrustedCraft;
 		GameSystem<CraftSystem>.Instance().CraftSucceed += OnSuccessCraft;
@@ -124,19 +138,28 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 
 	public Transform GetSelectableItemTranform()
 	{
+		if (_materialSelectWidget == null)
+		{
+			return null;
+		}
 		ItemIconWidget firstSelectableEnabledItemOrNull = _materialSelectWidget.GetFirstSelectableEnabledItemOrNull();
 		return (!(firstSelectableEnabledItemOrNull != null)) ? null : firstSelectableEnabledItemOrNull.transform;
 	}
 
 	public Transform GetNextRecipeSlotTransfrom()
 	{
-		RecipeSlotWidget nextRecipeSlotWidget = RecipeStepSelectWidget.GetNextRecipeSlotWidget();
+		RecipeStepSelectWidget recipeStepSelectWidget = RecipeStepSelectWidget;
+		if (recipeStepSelectWidget == null)
+		{
+			return null;
+		}
+		RecipeSlotWidget nextRecipeSlotWidget = recipeStepSelectWidget.GetNextRecipeSlotWidget();
 		return (!(nextRecipeSlotWidget != null)) ? null : nextRecipeSlotWidget.transform;
 	}
 
 	public Transform GetButtonTransform()
 	{
-		return _confirmButton.transform;
+		return (_confirmButton != null) ? _confirmButton.transform : null;
 	}
 
 	public SlotContainer GetSlotContainer()
@@ -155,42 +178,55 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 		_slotContainer = slotContainer;
 		if (_slotContainer == null)
 		{
-			_titleWidget.Object.SetTitle(string.Empty);
+			SetTitle(string.Empty);
 			_currentMode = Mode.Invalid;
 			return;
 		}
 		_slotContainer.SlotChanged += SlotContainer_SlotChanged;
 		_slotContainer.SlotMaterialUpdated += OnSlotMaterialUpdated;
 		_slotContainer.QuantityChanged += OnRecipeQuantityChanged;
-		RecipeStepSelectWidget.Set(_slotContainer);
-		_materialSelectWidget.Set(_slotContainer);
+		RecipeStepSelectWidget recipeStepSelectWidget = RecipeStepSelectWidget;
+		if (recipeStepSelectWidget != null)
+		{
+			recipeStepSelectWidget.Set(_slotContainer);
+		}
+		if (_materialSelectWidget != null)
+		{
+			_materialSelectWidget.Set(_slotContainer);
+		}
 		if (_slotContainer is BuildSlotContainer)
 		{
 			BuildSlotContainer buildSlotContainer = _slotContainer as BuildSlotContainer;
-			_estimateResultWidget.Set(buildSlotContainer);
+			if (_estimateResultWidget != null)
+			{
+				_estimateResultWidget.Set(buildSlotContainer);
+			}
 			Blueprint blueprint = buildSlotContainer.Blueprint;
 			if (blueprint.IsRemodeling)
 			{
-				_titleWidget.Object.SetTitle(blueprint.Name);
+				SetTitle(blueprint.Name);
 				_currentMode = Mode.Remodeling;
 			}
 			else
 			{
-				_titleWidget.Object.SetTitle(T._("건설"));
+				SetTitle(T._("건설"));
 				_currentMode = Mode.Build;
 			}
 		}
 		else if (_slotContainer is CraftSlotContainer)
 		{
-			_estimateResultWidget.Set(_slotContainer as CraftSlotContainer);
+			if (_estimateResultWidget != null)
+			{
+				_estimateResultWidget.Set(_slotContainer as CraftSlotContainer);
+			}
 			if (byTechSupport)
 			{
-				_titleWidget.Object.SetTitle(T._("기술 지원 요청"));
+				SetTitle(T._("기술 지원 요청"));
 				_currentMode = Mode.TechSupport;
 			}
 			else
 			{
-				_titleWidget.Object.SetTitle(T._("제작"));
+				SetTitle(T._("제작"));
 				_currentMode = Mode.Craft;
 			}
 		}
@@ -202,9 +238,19 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 
 	private void Refresh()
 	{
-		RecipeStepSelectWidget.Refresh();
-		_materialSelectWidget.Refresh();
-		_estimateResultWidget.Refresh();
+		RecipeStepSelectWidget recipeStepSelectWidget = RecipeStepSelectWidget;
+		if (recipeStepSelectWidget != null)
+		{
+			recipeStepSelectWidget.Refresh();
+		}
+		if (_materialSelectWidget != null)
+		{
+			_materialSelectWidget.Refresh();
+		}
+		if (_estimateResultWidget != null)
+		{
+			_estimateResultWidget.Refresh();
+		}
 		RefreshButton();
 		RequestEstimateResult();
 	}
@@ -230,7 +276,7 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 
 	private void RefreshBuildButton()
 	{
-		if (!(_slotContainer is BuildSlotContainer buildSlotContainer))
+		if (_confirmButton == null || !(_slotContainer is BuildSlotContainer buildSlotContainer))
 		{
 			return;
 		}
@@ -271,7 +317,7 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 
 	private void RefreshRemodelingButton()
 	{
-		if (!(_slotContainer is BuildSlotContainer buildSlotContainer))
+		if (_confirmButton == null || !(_slotContainer is BuildSlotContainer buildSlotContainer))
 		{
 			return;
 		}
@@ -301,7 +347,7 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 
 	private void RefreshCraftOrTechSupportButton(bool byTechSupport)
 	{
-		if (!(_slotContainer is CraftSlotContainer craftSlotContainer))
+		if (_confirmButton == null || !(_slotContainer is CraftSlotContainer craftSlotContainer))
 		{
 			return;
 		}
@@ -331,6 +377,10 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 
 	private void RequestEstimateResult(bool firstTime = false)
 	{
+		if (_estimateResultWidget == null)
+		{
+			return;
+		}
 		_estimateResultWidget.ClearEstimation();
 		if (_onRequestEstimateResult != null)
 		{
@@ -444,13 +494,16 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 	protected override bool TryOpen()
 	{
 		Singleton<PlayerController>.Instance().WaterFlowRegisterSet.Add("Build");
-		if (_currentMode == Mode.Craft)
+		if (_craftWarning != null)
 		{
-			_craftWarning.text = T._("<weak>제작 실패시 재료가 없어집니다.</weak>");
-		}
-		else
-		{
-			_craftWarning.text = T._("<em><help>{0}</help> 원하는 외형</em>이 나오려면?", T._("comment='재료의 절반을 초과하는만큼 넣어야 원하는 외형이 나옵니다.\n<weak>ex) 2x2 사이즈의 제브라케라톱스 지붕 벽집을 만들고싶다면,\n총 지붕재 4개 중 3개가 제브라케라톱스 지붕재여야합니다.</weak>',width=0, resize_collider=1"));
+			if (_currentMode == Mode.Craft)
+			{
+				_craftWarning.text = T._("<weak>제작 실패시 재료가 없어집니다.</weak>");
+			}
+			else
+			{
+				_craftWarning.text = T._("<em><help>{0}</help> 원하는 외형</em>이 나오려면?", T._("comment='재료의 절반을 초과하는만큼 넣어야 원하는 외형이 나옵니다.\n<weak>ex) 2x2 사이즈의 제브라케라톱스 지붕 벽집을 만들고싶다면,\n총 지붕재 4개 중 3개가 제브라케라톱스 지붕재여야합니다.</weak>',width=0, resize_collider=1"));
+			}
 		}
 		return base.TryOpen();
 	}
@@ -470,11 +523,15 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 		{
 			SlotContainer slotContainer = _slotContainer;
 			RequestEstimateResult();
-			if (slotContainer.CurrentSlot != null)
+			RecipeStepSelectWidget recipeStepSelectWidget = RecipeStepSelectWidget;
+			if (recipeStepSelectWidget != null)
 			{
-				RecipeStepSelectWidget.RefreshSlot(slotContainer.CurrentSlot.Index);
+				if (slotContainer.CurrentSlot != null)
+				{
+					recipeStepSelectWidget.RefreshSlot(slotContainer.CurrentSlot.Index);
+				}
+				recipeStepSelectWidget.RefreshProgressPercentage();
 			}
-			RecipeStepSelectWidget.RefreshProgressPercentage();
 			RefreshButton();
 		}
 	}
@@ -625,13 +682,20 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 	private void SlotContainer_SlotChanged(int previousIndex)
 	{
 		SlotContainer slotContainer = _slotContainer;
-		RecipeStepSelectWidget.RefreshSlot(previousIndex);
-		if (slotContainer.CurrentSlot != null && slotContainer.CurrentSlot.Index != previousIndex)
+		RecipeStepSelectWidget recipeStepSelectWidget = RecipeStepSelectWidget;
+		if (recipeStepSelectWidget != null)
 		{
-			RecipeStepSelectWidget.RefreshSlot(slotContainer.CurrentSlot.Index);
+			recipeStepSelectWidget.RefreshSlot(previousIndex);
+			if (slotContainer.CurrentSlot != null && slotContainer.CurrentSlot.Index != previousIndex)
+			{
+				recipeStepSelectWidget.RefreshSlot(slotContainer.CurrentSlot.Index);
+			}
 		}
-		_materialSelectWidget.Refresh();
-		_materialSelectWidget.ResetpositionItemList();
+		if (_materialSelectWidget != null)
+		{
+			_materialSelectWidget.Refresh();
+			_materialSelectWidget.ResetpositionItemList();
+		}
 	}
 
 	private void OnSlotMaterialUpdated()
@@ -779,5 +843,52 @@ public class CraftGroupBase : UIBase, IScreenResizeReceiver
 
 	public virtual void OnChangeScreenSize()
 	{
+	}
+
+	private void SetTitle(string title)
+	{
+		if (_titleWidget != null && _titleWidget.Object != null)
+		{
+			_titleWidget.Object.SetTitle(title);
+		}
+	}
+
+	// บอกครั้งเดียวว่า prefab ตัวนี้ขาดวิดเจ็ตอะไร — ไว้ไล่ปัญหา UI ฝั่ง PC ต่อ
+	private void ReportMissingWidgetsOnce()
+	{
+		if (_reportedMissingWidgets)
+		{
+			return;
+		}
+		_reportedMissingWidgets = true;
+		StringBuilder stringBuilder = new StringBuilder();
+		if (_titleWidget == null)
+		{
+			stringBuilder.Append(" _titleWidget");
+		}
+		if (_recipeStepSelectVerticalWidget == null)
+		{
+			stringBuilder.Append(" _recipeStepSelectVerticalWidget");
+		}
+		if (_materialSelectWidget == null)
+		{
+			stringBuilder.Append(" _materialSelectWidget");
+		}
+		if (_estimateResultWidget == null)
+		{
+			stringBuilder.Append(" _estimateResultWidget");
+		}
+		if (_confirmButton == null)
+		{
+			stringBuilder.Append(" _confirmButton");
+		}
+		if (_craftWarning == null)
+		{
+			stringBuilder.Append(" _craftWarning");
+		}
+		if (stringBuilder.Length != 0)
+		{
+			Debug.LogWarning("[CraftGroupBase] prefab '" + base.name + "' ไม่ได้ผูกวิดเจ็ต:" + stringBuilder);
+		}
 	}
 }

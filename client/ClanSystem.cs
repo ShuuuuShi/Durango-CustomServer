@@ -83,13 +83,14 @@ public class ClanSystem : GameSystem<ClanSystem>
 		GetAllySlots();
 	}
 
-	public void GetAllySlots()
-	{
-		if (PlayerBehavior.LocalPlayer.HasClan)
+public void GetAllySlots()
 		{
-			Connections.Frontend.Send(default(GetAllySlots));
+			// LocalPlayer อาจยังไม่พร้อมตอน OnReady (เช่น MakePlayerObject ล้ม) — กัน NRE
+			if (PlayerBehavior.LocalPlayer != null && PlayerBehavior.LocalPlayer.HasClan)
+			{
+				Connections.Frontend.Send(default(GetAllySlots));
+			}
 		}
-	}
 
 	private void OnAllySlots(AllySlots slots, PacketHeader header)
 	{

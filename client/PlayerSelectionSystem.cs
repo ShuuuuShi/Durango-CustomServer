@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using BestHTTP;
 using Durango.Logic.Clusters;
 using Durango.Prologue;
+using Durango.Development;
 using Durango.System;
 using Durango.Utils;
 using Newtonsoft.Json;
@@ -89,14 +90,20 @@ public class PlayerSelectionSystem : GameSystem<PlayerSelectionSystem>
 		Singleton<GameManager>.Instance().MoveToTitle();
 	}
 
-	public void CreateNewPlayer(bool skipPrologue)
-	{
-		GameManager.IsPlayerIdSelected = true;
-		GameManager.PlayerId = string.Empty;
-		GameManager.PlayerSlotIndex = KUtility.GetSize(_players);
-		PrologueManager.ToBeSkipped = skipPrologue;
-		Singleton<GameManager>.Instance().MoveToTitle();
-	}
+public void CreateNewPlayer(bool skipPrologue)
+		{
+			GameManager.IsPlayerIdSelected = true;
+			GameManager.PlayerId = string.Empty;
+			GameManager.PlayerSlotIndex = KUtility.GetSize(_players);
+			// บังคับไม่ข้ามโปรล็อกสำหรับตัวใหม่ — แม้ caller ส่ง true มา
+			PrologueManager.ToBeSkipped = false;
+			if (skipPrologue)
+			{
+				Debug.LogWarning("[PlayerSelection] ขอล้าง ToBeSkipped — ตัวใหม่ต้องเข้าโปรล็อกสอนเล่น");
+			}
+			DeveloperSettings.SkipPrologue = false;
+			Singleton<GameManager>.Instance().MoveToTitle();
+		}
 
 	public void RequestDeletePlayer(PlayerInfo playerInfo, Action<bool> action)
 	{

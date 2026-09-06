@@ -168,13 +168,19 @@ public class PlayerController : Durango.Utils.Singleton<PlayerController>
 
 	protected override void OnAwake()
 	{
-		ParticleManager.Cache(_dieParticleType);
-		PlayerBehavior playerBehavior = (PlayerBehavior.LocalPlayer = Durango.Utils.Singleton<PlayerManager>.Instance().MakePlayerObject(male: false, null, GameManager.PlayerId, "Barehand_Stand", loadClips: false));
-		playerBehavior.gameObject.name = "Player";
-		playerBehavior.Revived += Player_Revived;
-		playerBehavior.Died += Player_Died;
-		playerBehavior.TileChanged += Player_TileChanged;
-		playerBehavior.MotionConditionChanged += Player_MotionConditionChanged;
+ParticleManager.Cache(_dieParticleType);
+			PlayerBehavior playerBehavior = Durango.Utils.Singleton<PlayerManager>.Instance().MakePlayerObject(male: false, null, GameManager.PlayerId, "Barehand_Stand", loadClips: false);
+			if (playerBehavior == null)
+			{
+				Debug.LogError("[PlayerController] สร้างตัวละครท้องถิ่นไม่ได้ — หยุด OnAwake (ดู log ของ PlayerManager/PlatformResources)");
+				return;
+			}
+			PlayerBehavior.LocalPlayer = playerBehavior;
+			playerBehavior.gameObject.name = "Player";
+			playerBehavior.Revived += Player_Revived;
+			playerBehavior.Died += Player_Died;
+			playerBehavior.TileChanged += Player_TileChanged;
+			playerBehavior.MotionConditionChanged += Player_MotionConditionChanged;
 		CheatMoveSpeedMultiply = 1f;
 		_rotateSpeed = 540f;
 		Durango.Utils.Singleton<TerrainBase>.Instance().OnReady(OnInitialized);
@@ -190,17 +196,16 @@ public class PlayerController : Durango.Utils.Singleton<PlayerController>
 		{
 			RefreshPlayerOutline();
 		});
-		GameSystem<InputSystem>.Instance().On(InputCommand.MoveToPositionByDragging, delegate(InputCommandMessage message)
-		{
-			ProcessInputPickingMove(message, showMoveCursor: false);
-		});
-		if (Platform.Instance.UsePCUI)
-		{
+GameSystem<InputSystem>.Instance().On(InputCommand.MoveToPositionByDragging, delegate(InputCommandMessage message)
+			{
+				ProcessInputPickingMove(message, showMoveCursor: false);
+			});
+			// **ค่าของเรา** (ยกจาก OpenCode) — คลิกเดินใช้ได้ทั้งโหมด UI PC และมือถือ
+			// เดิมผูกเฉพาะ UsePCUI ทั้งที่ InputMouse ส่ง MoveToPosition อยู่แล้ว
 			GameSystem<InputSystem>.Instance().On(InputCommand.MoveToPosition, delegate(InputCommandMessage message)
 			{
 				ProcessInputPickingMove(message, showMoveCursor: true);
 			});
-		}
 		AkAudioListener akAudioListener = UnityEngine.Object.FindObjectOfType<AkAudioListener>();
 		if (akAudioListener != null)
 		{

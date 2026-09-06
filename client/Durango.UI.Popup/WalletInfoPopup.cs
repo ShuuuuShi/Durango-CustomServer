@@ -55,7 +55,11 @@ public class WalletInfoPopup : TooltipBase
 		Currency[] array2 = array;
 		foreach (Currency currency in array2)
 		{
-			if (currency == Currency.Invalid || currency == Currency.Coin || (!Platform.Instance.UsePCCoin && currency == Currency.PcCoin))
+			// [7 ก.ย. 2026] เซิร์ฟนี้ใช้สกุลเงินเดียวคือ T Stone
+			// ของเดิมวนทั้ง enum Currency แล้วสร้างแถวให้ทุกสกุล ⇒ หน้าต่าง "สกุลเงิน" มี 7 แถว
+			// และทุกแถวโชว์ยอดเดียวกัน เพราะ WalletExtension.Normalize() แปลงทุกสกุลเป็น TStone
+			// ⇒ ข้ามทุกสกุลที่ไม่ใช่ TStone ไปเลย ให้เหลือแถวเดียว
+			if (currency != Currency.TStone)
 			{
 				continue;
 			}

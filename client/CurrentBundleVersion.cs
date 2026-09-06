@@ -15,7 +15,9 @@ public static class CurrentBundleVersion
 		_versionTextAsset = Resources.Load<TextAsset>("client_version");
 		if (_versionTextAsset == null)
 		{
-			return string.Empty;
+			// **ค่าของเรา** — แพ็กเกจบางชุดไม่มี Resources/client_version
+			_version = "LastHuman";
+			return _version;
 		}
 		_version = _versionTextAsset.text.Trim();
 		if (_version.IndexOf('.') == _version.LastIndexOf('.'))

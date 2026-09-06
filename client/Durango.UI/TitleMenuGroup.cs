@@ -541,24 +541,54 @@ public class TitleMenuGroup : MonoBehaviour
 				gameObject2.SetActive(value: true);
 			}
 		}
-		// [แก้เอง 6 ก.ย. 2026] บรรทัดนี้เคยโยน DllNotFoundException: avformat-57 บน Android
-		// แล้วพาโค้ดที่เหลือของ ApplyEmigrationMode + StartGame ตายตามไปทั้งหมด
-		// (เสียง · _fontSetting.Init() · CurState = State.Initial) ⇒ หน้าไตเติลเป็นกล่องขาว
-		// ดูเหตุผลเต็มที่ Durango.System.NativeMedia
-		global::Durango.System.NativeMedia.Try("วิดีโอพื้นหลังหน้าไตเติล",
-			() => _videoPlayer.Load(titleOptions.VideoName));
-		AkAudioListener akAudioListener = UnityEngine.Object.FindObjectOfType<AkAudioListener>();
-		if (akAudioListener != null)
-		{
-			SoundManager.SetListenerObject(akAudioListener.gameObject);
+// พื้นหลังไตเติ้ล: โหมด UI มือถือ (รวมบน PC) ใช้ภาพนิ่ง — วิดีโอมือถือ/ExternalLibrary พังง่าย
+			// ดู ShowMobileStillBackground · StreamingAssets/title_bg.jpg
+			if (!Platform.Instance.UsePCUI || Application.isMobilePlatform)
+			{
+				StartCoroutine(ShowMobileStillBackground());
+			}
+			else
+			{
+				// [แก้เอง 6 ก.ย. 2026] เคยโยน DllNotFoundException: avformat-57 บน Android
+				// แล้วพา StartGame ตายทั้งก้อน ⇒ หน้าไตเติลกล่องขาว — ดู Durango.System.NativeMedia
+				global::Durango.System.NativeMedia.Try("วิดีโอพื้นหลังหน้าไตเติล",
+					() => _videoPlayer.Load(titleOptions.VideoName));
+			}
+			AkAudioListener akAudioListener = UnityEngine.Object.FindObjectOfType<AkAudioListener>();
+			if (akAudioListener != null)
+			{
+				SoundManager.SetListenerObject(akAudioListener.gameObject);
+			}
+			if (!string.IsNullOrEmpty(titleOptions.SoundEvent.Path))
+			{
+				SoundManager.IgnorePreparedCheck = true;
+				_soundInstanceId = SoundManager.PlayEvent(titleOptions.SoundEvent, SoundPosition.Empty, exclusive: true);
+				SoundManager.IgnorePreparedCheck = false;
+			}
 		}
-		if (!string.IsNullOrEmpty(titleOptions.SoundEvent.Path))
+
+		/// <summary>พื้นหลังไตเติ้ลโหมด UI มือถือ — โหลด JPG จาก StreamingAssets ยัดใส่ UITexture ที่วิดีโอเคยใช้</summary>
+		private IEnumerator ShowMobileStillBackground()
 		{
-			SoundManager.IgnorePreparedCheck = true;
-			_soundInstanceId = SoundManager.PlayEvent(titleOptions.SoundEvent, SoundPosition.Empty, exclusive: true);
-			SoundManager.IgnorePreparedCheck = false;
+			string url = Application.streamingAssetsPath + "/title_bg.jpg";
+			using (WWW www = new WWW(url))
+			{
+				yield return www;
+				if (!string.IsNullOrEmpty(www.error))
+				{
+					Debug.LogWarning("[durango] โหลด title_bg.jpg ไม่ได้: " + www.error);
+					yield break;
+				}
+				Texture2D tex = new Texture2D(2, 2, TextureFormat.RGB24, mipmap: false);
+				tex.LoadImage(www.bytes);
+				MediaPlayer2UITexture[] targets = UnityEngine.Object.FindObjectsOfType<MediaPlayer2UITexture>();
+				for (int i = 0; i < targets.Length; i++)
+				{
+					targets[i].SetStill(tex);
+				}
+				Debug.Log("[durango] พื้นหลังไตเติ้ลมือถือ: ใส่ภาพนิ่งให้ " + targets.Length + " จุด");
+			}
 		}
-	}
 
 	private void CheckPrerequsite()
 	{

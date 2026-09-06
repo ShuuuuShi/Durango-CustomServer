@@ -59,6 +59,11 @@ public class Gateway
     public string AdminToken { get; set; }
 
     /// <summary>
+    /// โฟลเดอร์ data ของเซิร์ฟ — ใช้สำหรับอ่าน/เขียน config files ใน admin API
+    /// </summary>
+    public string DataDir { get; set; }
+
+    /// <summary>
     /// เวอร์ชันตัวเกมต่ำสุดที่ยอมให้เข้า — <c>null</c> = รับทุกเวอร์ชัน (ค่าตั้งต้น)
     /// ตั้งด้วย <c>--min-client-version</c> · ดูเหตุผลที่ยังไม่บังคับโดยปริยายที่เส้น /knock
     /// </summary>
@@ -258,9 +263,20 @@ public class Gateway
             string tcpHost = !string.IsNullOrEmpty(PublicHost)
                 ? PublicHost
                 : (request.UserHostName?.Split(':').FirstOrDefault() ?? "127.0.0.1");
+            // [7 ก.ย. 2026] เติม radiotower_addresses — ช่องแชท/แจ้งเตือนของเผ่ากับสังคม
+            //
+            // client/Durango.UI/TitleMenuGroup.cs:949-952 อ่านคีย์นี้แล้วส่งให้
+            // SocialSystem.SetEndpoints ⇒ ไม่มีคีย์ = รายการ endpoint ว่าง = สาย Radiotower
+            // ไม่เคยต่อติดเลยสักครั้ง ⇒ ToggleClanNotification(4025) ·
+            // GetClanNotificationEnabled(4027) · ResubscribeClanChannel(24) ที่ลงทะเบียนไว้
+            // ใน Player.Clan.cs ไม่มีทางถูกเรียกถึง
+            //
+            // เซิร์ฟนี้มี Connection เดียวต่อผู้เล่น (ไม่ได้แยกโปรเซส radiotower แบบ NEXON)
+            // ⇒ ชี้มาพอร์ตเกมเดียวกัน handler ชุดเดิมรับได้เลย ไม่ต้องเปิดพอร์ตใหม่
             return new WebServer.JsonResponse(new JObject
             {
                 ["frontend_addresses"] = new JArray($"{tcpHost}:{_gameServer.Port}"),
+                ["radiotower_addresses"] = new JArray($"{tcpHost}:{_gameServer.Port}"),
                 ["cluster_mode"] = Host.ClusterMode.ToString()
             }.ToString());
         };
@@ -400,6 +416,51 @@ public class Gateway
             return new WebServer.JsonResponse(new JObject { ["unbanned"] = done }.ToString());
         };
 
+        // เงินทั้งเซิร์ฟ — ไว้เฝ้าเงินเฟ้อ (เซิร์ฟนี้ใช้สกุลเดียว ดู Core/Player.Wallet.cs)
+        // เรียกซ้ำแล้วเทียบ total_tstone ตามเวลา ถ้ามันโตเร็วกว่าจำนวนตัวละคร = ก๊อกแรงเกินท่อระบาย
+        // ?top=N เพื่อดูผู้ถือรายใหญ่มากกว่า 20 อันดับ
+        _webServer.GetRoute["/admin/economy"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            int top = 20;
+            string raw = request.QueryString?["top"];
+            if (!string.IsNullOrEmpty(raw) && int.TryParse(raw, out int parsed) && parsed > 0) top = Math.Min(parsed, 500);
+            return new WebServer.JsonResponse(Json.Write(_host.DescribeEconomy(top)));
+        };
+
+        // ตั้งยอดเงินของตัวละครหนึ่งตัว — ไว้ปรับสมดุล/เทส
+        // ตั้ง "ค่าที่ต้องการ" ไม่ใช่ "บวกเพิ่ม" เพราะกดซ้ำแล้วผลไม่เพี้ยน (idempotent)
+        // ⚠️ นี่คือก๊อกน้ำที่ใหญ่ที่สุดในเซิร์ฟ — ผ่านด่านแอดมินเดียวกับ ban/kick
+        //    และเขียน log ทุกครั้งเพื่อให้ยอดที่เห็นใน /admin/economy อธิบายที่มาได้เสมอ
+        _webServer.PostRoute["/admin/economy/set"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string entityId = postData.Get("entity_id");
+            string rawAmount = postData.Get("amount");
+            if (!long.TryParse(rawAmount, out long amount) || amount < 0)
+            {
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "amount ต้องเป็นจำนวนเต็มไม่ติดลบ" }.ToString(),
+                    HttpStatusCode.BadRequest);
+            }
+            PlayerContext target = _host.FindContextByEntityId(entityId);
+            if (target == null)
+            {
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "ไม่พบตัวละคร" }.ToString(), HttpStatusCode.NotFound);
+            }
+            long before = target.TStone;
+            target.TStone = amount;
+            // ⚠️ ต้องสั่งเซฟเอง — คนที่ไม่ได้ออนไลน์ไม่มี Player ให้เรียก OnContextChanged
+            //    ถ้าไม่เซฟ ยอดจะอยู่แค่ในหน่วยความจำแล้วหายตอนรีสตาร์ตเซิร์ฟ
+            target.Save();
+            Console.WriteLine($"[เงิน] แอดมินตั้งยอดของ {entityId} จาก {before:N0} เป็น {amount:N0} T Stone");
+            // ถ้าคนนั้นออนไลน์อยู่ ต้องดันยอดใหม่ไปให้เห็นทันที ไม่งั้นหน้าจอค้างยอดเก่าจนกว่าจะเข้าใหม่
+            _host.PushWalletTo(entityId);
+            return new WebServer.JsonResponse(
+                new JObject { ["entity_id"] = entityId, ["before"] = before, ["after"] = amount }.ToString());
+        };
+
         _webServer.GetRoute["/admin/bans"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
         {
             if (!IsAdminAllowed(request)) return Forbidden();
@@ -431,6 +492,168 @@ public class Gateway
                 : "[ดูแล] ปิดโหมดปิดปรับปรุง — เปิดรับคนใหม่ตามปกติ");
             return new WebServer.JsonResponse(new JObject { ["maintenance"] = Host.Maintenance }.ToString());
         };
+
+        // ══ Admin Web Tool — จัดการ config / islands / whitelist ═══════════════════════════════════
+
+        // อ่าน config.json ทั้งหมด
+        _webServer.GetRoute["/admin/config"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string path = Path.Combine(DataDir ?? Json.DataDir, "config.json");
+            if (!File.Exists(path))
+                return new WebServer.JsonResponse(new JObject { ["error"] = "ไม่พบ config.json" }.ToString(), HttpStatusCode.NotFound);
+            return new WebServer.JsonResponse(File.ReadAllText(path));
+        };
+
+        // เขียน config.json (partial update — ส่ง key/value ที่ต้องการเปลี่ยน)
+        _webServer.PostRoute["/admin/config"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string json = postData.Get("json");
+            if (string.IsNullOrEmpty(json))
+                return new WebServer.JsonResponse(new JObject { ["error"] = "ต้องมี json" }.ToString(), HttpStatusCode.BadRequest);
+            // ตรวจว่า JSON ถูกต้องก่อนเขียน
+            try { JObject.Parse(json); }
+            catch (Exception e)
+            {
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "JSON ผิดรูปแบบ: " + e.Message }.ToString(), HttpStatusCode.BadRequest);
+            }
+            string path = Path.Combine(DataDir ?? Json.DataDir, "config.json");
+            File.WriteAllText(path, json);
+            Console.WriteLine("[admin] config.json ถูกอัปเดตแล้ว");
+            return new WebServer.JsonResponse(new JObject { ["saved"] = true }.ToString());
+        };
+
+        // อ่าน config-meta.json (schema/descriptions สำหรับ admin UI)
+        _webServer.GetRoute["/admin/config/meta"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string path = Path.Combine(DataDir ?? Json.DataDir, "config-meta.json");
+            if (!File.Exists(path))
+                return new WebServer.JsonResponse(new JObject { ["error"] = "ไม่พบ config-meta.json" }.ToString(), HttpStatusCode.NotFound);
+            return new WebServer.JsonResponse(File.ReadAllText(path));
+        };
+
+        // อ่าน islands.json
+        _webServer.GetRoute["/admin/islands"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string path = Path.Combine(DataDir ?? Json.DataDir, "islands.json");
+            if (!File.Exists(path))
+                return new WebServer.JsonResponse(new JObject { ["error"] = "ไม่พบ islands.json" }.ToString(), HttpStatusCode.NotFound);
+            return new WebServer.JsonResponse(File.ReadAllText(path));
+        };
+
+        // เขียน islands.json
+        _webServer.PostRoute["/admin/islands"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string json = postData.Get("json");
+            if (string.IsNullOrEmpty(json))
+                return new WebServer.JsonResponse(new JObject { ["error"] = "ต้องมี json" }.ToString(), HttpStatusCode.BadRequest);
+            try { JObject.Parse(json); }
+            catch (Exception e)
+            {
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "JSON ผิดรูปแบบ: " + e.Message }.ToString(), HttpStatusCode.BadRequest);
+            }
+            string path = Path.Combine(DataDir ?? Json.DataDir, "islands.json");
+            File.WriteAllText(path, json);
+            Console.WriteLine("[admin] islands.json ถูกอัปเดตแล้ว");
+            return new WebServer.JsonResponse(new JObject { ["saved"] = true }.ToString());
+        };
+
+        // อ่าน whitelist.txt
+        _webServer.GetRoute["/admin/whitelist"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string path = Path.Combine(DataDir ?? Json.DataDir, "whitelist.txt");
+            if (!File.Exists(path))
+                return new WebServer.JsonResponse(new JObject { ["error"] = "ไม่พบ whitelist.txt" }.ToString(), HttpStatusCode.NotFound);
+            string[] lines = File.ReadAllLines(path);
+            JArray arr = new();
+            foreach (string line in lines)
+            {
+                string trimmed = line.Trim();
+                if (trimmed.Length > 0 && !trimmed.StartsWith("#"))
+                    arr.Add(trimmed);
+            }
+            return new WebServer.JsonResponse(new JObject { ["entries"] = arr }.ToString());
+        };
+
+        // เขียน whitelist.txt
+        _webServer.PostRoute["/admin/whitelist"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string entries = postData.Get("entries");
+            if (string.IsNullOrEmpty(entries))
+                return new WebServer.JsonResponse(new JObject { ["error"] = "ต้องมี entries" }.ToString(), HttpStatusCode.BadRequest);
+            string path = Path.Combine(DataDir ?? Json.DataDir, "whitelist.txt");
+            File.WriteAllText(path, "# รายชื่อที่อนุญาตให้เข้าเซิร์ฟ (entity id หรือชื่อตัวละคร บรรทัดละ 1)\n" + entries);
+            Console.WriteLine("[admin] whitelist.txt ถูกอัปเดตแล้ว");
+            return new WebServer.JsonResponse(new JObject { ["saved"] = true }.ToString());
+        };
+
+        // อ่าน per-island config
+        _webServer.GetRoute["/admin/island/config"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string islandId = request.QueryString.Get("id");
+            if (string.IsNullOrEmpty(islandId))
+                return new WebServer.JsonResponse(new JObject { ["error"] = "ต้องมี ?id=" }.ToString(), HttpStatusCode.BadRequest);
+            // กัน path traversal
+            if (islandId.Contains("..") || islandId.Contains('/') || islandId.Contains('\\'))
+                return new WebServer.BadRequestResponse();
+            string path = Path.Combine(DataDir ?? Json.DataDir, "islands", islandId, "config.json");
+            if (!File.Exists(path))
+                return new WebServer.JsonResponse(new JObject { ["error"] = $"ไม่พบ config ของ {islandId}" }.ToString(), HttpStatusCode.NotFound);
+            return new WebServer.JsonResponse(File.ReadAllText(path));
+        };
+
+        // เขียน per-island config
+        _webServer.PostRoute["/admin/island/config"] = delegate(HttpListenerRequest request, Dictionary<string, string> postData)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            string islandId = postData.Get("id");
+            string json = postData.Get("json");
+            if (string.IsNullOrEmpty(islandId) || string.IsNullOrEmpty(json))
+                return new WebServer.JsonResponse(new JObject { ["error"] = "ต้องมี id และ json" }.ToString(), HttpStatusCode.BadRequest);
+            if (islandId.Contains("..") || islandId.Contains('/') || islandId.Contains('\\'))
+                return new WebServer.BadRequestResponse();
+            try { JObject.Parse(json); }
+            catch (Exception e)
+            {
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "JSON ผิดรูปแบบ: " + e.Message }.ToString(), HttpStatusCode.BadRequest);
+            }
+            string dir = Path.Combine(DataDir ?? Json.DataDir, "islands", islandId);
+            Directory.CreateDirectory(dir);
+            string path = Path.Combine(dir, "config.json");
+            File.WriteAllText(path, json);
+            Console.WriteLine($"[admin] islands/{islandId}/config.json ถูกอัปเดตแล้ว");
+            return new WebServer.JsonResponse(new JObject { ["saved"] = true }.ToString());
+        };
+
+        // Reload config (hot reload)
+        _webServer.PostRoute["/admin/reload"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
+        {
+            if (!IsAdminAllowed(request)) return Forbidden();
+            try
+            {
+                DataStore.Load(DataDir ?? Json.DataDir);
+                Console.WriteLine("[admin] Reload config สำเร็จ");
+                return new WebServer.JsonResponse(new JObject { ["reloaded"] = true }.ToString());
+            }
+            catch (Exception e)
+            {
+                return new WebServer.JsonResponse(
+                    new JObject { ["error"] = "Reload ไม่สำเร็จ: " + e.Message }.ToString(), HttpStatusCode.InternalServerError);
+            }
+        };
+
+        // ══ Admin Web UI — เสิร์ฟไฟล์ admin/index.html, style.css, app.js ══════════════════════════
+        // เข้า /admin/ จะได้ index.html, /admin/style.css ได้ CSS, /admin/app.js ได้ JS
 
         _webServer.GetRoute["/health"] = delegate(HttpListenerRequest request, Dictionary<string, string> _)
         {
@@ -671,6 +894,65 @@ public class Gateway
 
     private WebServer.RouteFunction UnhandledUrl(string url)
     {
+        // ══ Admin Web UI — เสิร์ฟไฟล์จาก server/admin/ ═══════════════════════════════════════════
+        // /admin/ → index.html, /admin/style.css → CSS, /admin/app.js → JS
+        // ต้องเปิด admin token ถึงจะเข้าได้ (กันคนนอกเห็นหน้าจัดการเซิร์ฟ)
+        if (url.StartsWith("/admin", StringComparison.OrdinalIgnoreCase))
+        {
+            string adminDir = Path.Combine(AppContext.BaseDirectory, "admin");
+            // ถ้าไม่มีโฟลเดอร์ admin ข้าง executable ให้ลองหาใน DataDir
+            if (!Directory.Exists(adminDir))
+            {
+                adminDir = Path.Combine(DataDir ?? Json.DataDir, "..", "admin");
+                adminDir = Path.GetFullPath(adminDir);
+            }
+            if (!Directory.Exists(adminDir))
+            {
+                return (HttpListenerRequest _, Dictionary<string, string> __) =>
+                    new WebServer.TextResponse("text/plain", "Admin UI ไม่พบ — วางไฟล์ admin/ ไว้ข้าง executable", HttpStatusCode.NotFound);
+            }
+
+            string adminFile = url.Split('?')[0];
+            string targetFile;
+            if (adminFile == "/admin" || adminFile == "/admin/" || adminFile == "/admin/index.html")
+            {
+                targetFile = Path.Combine(adminDir, "index.html");
+            }
+            else
+            {
+                // เสิร์ฟไฟล์ static ใน admin/ (style.css, app.js, login.html, etc.)
+                string fileName = adminFile.Substring("/admin/".Length);
+                if (fileName.Contains("..") || Path.IsPathRooted(fileName))
+                    return (HttpListenerRequest _, Dictionary<string, string> __) => new WebServer.BadRequestResponse();
+                targetFile = Path.Combine(adminDir, fileName.Replace('/', Path.DirectorySeparatorChar));
+            }
+
+            if (!File.Exists(targetFile))
+                return (HttpListenerRequest _, Dictionary<string, string> __) =>
+                    new WebServer.TextResponse("text/plain", "ไม่พบไฟล์", HttpStatusCode.NotFound);
+
+            // ใช้ TextResponse แทน FileResponse เพื่อกำหนด Content-Type ถูกต้อง
+            // (FileResponse ใช้ DirectLength ซึ่งข้าม Content-Type header → browser ดาวน์โหลดแทน render)
+            string fileContentType = "application/octet-stream";
+            if (targetFile.EndsWith(".html", StringComparison.OrdinalIgnoreCase)) fileContentType = "text/html; charset=utf-8";
+            else if (targetFile.EndsWith(".css", StringComparison.OrdinalIgnoreCase)) fileContentType = "text/css; charset=utf-8";
+            else if (targetFile.EndsWith(".js", StringComparison.OrdinalIgnoreCase)) fileContentType = "application/javascript; charset=utf-8";
+            else if (targetFile.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) fileContentType = "application/json; charset=utf-8";
+            else if (targetFile.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) fileContentType = "image/png";
+            else if (targetFile.EndsWith(".ico", StringComparison.OrdinalIgnoreCase)) fileContentType = "image/x-icon";
+
+            string ct = fileContentType;
+            string fPath = targetFile;
+            // RawBytesResponse อยู่ที่ server/Support/RawBytesResponse.cs — สืบทอด WebServer.Response
+            // ไม่ได้แก้ไฟล์ต้นฉบับใน GameCode (ดูเหตุผลเต็มในไฟล์นั้น)
+            //
+            // ⚠️ ต้องเป็น ReadAllBytes ไม่ใช่ ReadAllText+GetBytes — รายการ content type ข้างบน
+            // มี image/png กับ image/x-icon ด้วย ไฟล์ไบนารีที่ผ่าน string จะถูกแปลงอักขระจนพัง
+            // (byte ที่ไม่ใช่ UTF-8 ที่ถูกต้องจะกลายเป็น U+FFFD แล้วเขียนกลับเป็น EF BF BD)
+            return (HttpListenerRequest _, Dictionary<string, string> __) =>
+                new RawBytesResponse(File.ReadAllBytes(fPath), ct);
+        }
+
         // [5 ก.ย. 2026] ตารางข้อมูลเกมสำหรับโหมด Online — client/Yaml.Util/Loader.cs:155-185
         // ยิง GET <gateway>/assets/<ชื่อ> (ไม่มีนามสกุล) แล้ว Json.Read<T> ผลลัพธ์ตรง ๆ
         // ไฟล์จริงอยู่ที่ <AssetsDir>/<ชื่อ>.json — เกมขอ 71 เส้นทาง เรามีครบใน data/assets

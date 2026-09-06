@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Durango.Network;
 using Durango.Utils;
 using Messages;
+using Shared.Animal;   // AnimalStatus — สถานะที่ส่งไปกับ CombatInteraction
 using Shared.Battle;
 
 namespace Durango.Online;
@@ -124,16 +125,70 @@ public partial class Player
         bool hunting = animal.AggroTargetId == EntityId;
         if (!hunting && !info.IsAggressive) return;             // สัตว์กินพืชไม่แตะคนก่อน
 
-        if (!IsWithinTiles(animal.Tile, AnimalAggroTiles)) return;
-        if (now < animal.NextAttackAt) return;
+        // นอกระยะเห็นเหยื่อ = ไม่สนใจ
+        if (!IsWithinTiles(animal.Tile, AnimalAggroTiles))
+        {
+            // [7 ก.ย. 2026] หนีไปไกลนานพอแล้ว ⇒ เลิกโกรธ
+            //
+            // ⚠️ เดิม AggroTargetId ถูกตั้งแล้ว **ไม่มีจุดไหนเคลียร์เลยสักที่** (grep ทั้งเซิร์ฟ)
+            // และ AnimalManager.Process ข้ามการเดินเล่นตลอดถ้ายังมี aggro
+            // ⇒ ปล่อยไว้นาน ๆ สัตว์ทั้งเกาะค้างท่าเตรียมสู้แล้วยืนนิ่งหมด
+            if (hunting && animal.AggroSeenAt > 0.0 && now - animal.AggroSeenAt > AggroForgetSeconds)
+            {
+                animal.AggroTargetId = null;
+                animal.AggroSeenAt = 0.0;
+                _world.BroadCast(animal.ToMotionMessage());                      // กลับท่ายืนปกติ
+                _world.BroadCast(CombatStatus(animal, AnimalStatus.Peace, lookAt: false));
+            }
+            return;
+        }
+        animal.AggroSeenAt = now;
 
-        animal.NextAttackAt = now + Math.Max(0.5f, info.AttackCooltime);
         if (string.IsNullOrEmpty(animal.AggroTargetId))
         {
             animal.AggroTargetId = EntityId;
             _world.BroadCast(animal.ToMotionMessage());   // เข้าโหมดสู้ — เปลี่ยนท่ายืน
+            // บอกฝั่งเกมว่าเข้าโหมดสู้แล้ว — ไอคอนสถานะบนหัว + หันหน้ามองเป้า
+            _world.BroadCast(CombatStatus(animal, AnimalStatus.Battle, lookAt: true));
         }
         animal.AggroTargetId = EntityId;
+
+        // [7 ก.ย. 2026] เห็นเหยื่อแล้วต้อง "เดินเข้าไปหา" ก่อนกัด
+        //
+        // ⚠️ เดิมกัดได้ทันทีตั้งแต่ระยะ 4 ช่อง โดยไม่ขยับเลย ⇒ บนจอเห็นไดโนยืนนิ่งอยู่ไกล ๆ
+        // แล้วเลือดผู้เล่นลดเอง (อาการที่ผู้เล่นแจ้ง) — ของจริงสัตว์ต้องวิ่งเข้ามาประชิดก่อน
+        if (!IsWithinTiles(animal.Tile, AnimalAttackTiles))
+        {
+            // กำลังเดินอยู่ = ปล่อยให้เดินให้จบก่อน ไม่สั่งเส้นทางใหม่ทับ (ตัวจะกระตุก)
+            if (animal.StopWalkingAt > now) return;
+
+            WorldPosition target = PlayerWorldPosition();
+            if (target.x == 0f && target.y == 0f) return;      // ยังไม่รู้ตำแหน่งผู้เล่น
+
+            Move chase = _world.AnimalManager?.BuildChase(animal, target, AttackStopDistance, now)
+                         ?? default;
+            if (chase.Movements != null)
+            {
+                _world.BroadCast(chase);
+                Console.WriteLine($"[ล่าสัตว์] {info.Name} วิ่งเข้าหา {Short(EntityId)} " +
+                                  $"→ [{animal.Tile.x},{animal.Tile.y}]");
+            }
+            return;                                       // รอบนี้เดิน รอบหน้าค่อยกัด
+        }
+
+        if (now < animal.NextAttackAt) return;
+        animal.NextAttackAt = now + Math.Max(0.5f, info.AttackCooltime);
+
+        // [7 ก.ย. 2026] ส่งท่าโจมตีให้เห็นบนจอ — เดิมส่งแต่ Damaged ⇒ สัตว์ยืนนิ่งแต่เลือดลด
+        Move attackMotion = animal.ToAttackMotionMessage();
+        if (!string.IsNullOrEmpty(attackMotion.Movements?[0].MotionName))
+        {
+            _world.BroadCast(attackMotion);
+        }
+
+        // วงแหวนเตือน "กำลังจะฟาด" ก่อนดาเมจเข้า
+        // client/ObjectManager.cs:138 หารด้วย 1000 เอง ⇒ ต้องส่งเป็น **มิลลิวินาที**
+        _world.BroadCast(CombatStatus(animal, AnimalStatus.Battle, lookAt: true, noticeAttack: true));
 
         // ป้องกันของผู้เล่น: players.json → player.defense (ข้อมูลจริงเป็น 0 ⇒ กินเต็ม ๆ)
         // เกราะจากชุดที่ใส่ยังไม่ได้คิด — ระบบค่าสถานะจากอุปกรณ์ยังไม่มี
@@ -152,7 +207,9 @@ public partial class Player
                 Part = BodyPart.Body,
                 Direction = CombatTuning.HitDirection,
                 AttackType = BodyAttackTypeOf(info),
-                Effects = DamageEffects.None
+                // [7 ก.ย. 2026] เดิมเป็น None เสมอ ⇒ ฝั่งเกมไม่เล่นท่าเจ็บ/กระเด็นให้เลย
+                // (client/Durango.Logic.Combat/DamagedProcesser.cs อ่าน flag ชุดนี้)
+                Effects = HitEffectOf(info)
             }
         });
 
@@ -180,6 +237,30 @@ public partial class Player
     /// </summary>
     private const int AnimalAggroTiles = 4;
 
+    /// <summary>
+    /// **ค่าของเรา** — ต้องเข้ามาใกล้กี่ช่องถึงจะกัดได้จริง
+    ///
+    /// 4 ช่องของ <see cref="AnimalAggroTiles"/> คือ "ระยะเห็นเหยื่อแล้วเริ่มไล่"
+    /// ส่วนระยะกัดต้องประชิดกว่านั้นมาก ไม่งั้นเห็นสัตว์ตีข้ามจอ
+    /// 1 ช่อง = 200 หน่วย ≈ ระยะที่ตัวสัตว์กับผู้เล่นเกือบชนกันบนจอ
+    /// </summary>
+    private const int AnimalAttackTiles = 1;
+
+    /// <summary>**ค่าของเรา** — สัตว์หยุดห่างจากผู้เล่นกี่หน่วยตอนวิ่งเข้าหา (ไม่ให้เดินทับตัว)</summary>
+    private const float AttackStopDistance = 150f;
+
+    /// <summary>ตำแหน่งผู้เล่นในพิกัดโลก — ใช้เป็นปลายทางตอนสัตว์วิ่งเข้าหา</summary>
+    private WorldPosition PlayerWorldPosition()
+    {
+        Movement[] movements = _context.AppearPlayer.Move.Movements;
+        if (movements == null || movements.Length == 0 ||
+            movements[0].Path == null || movements[0].Path.Length == 0)
+        {
+            return default;
+        }
+        return movements[0].Path[0].Position;
+    }
+
     /// <summary>เลือดต่ำกว่านี้ถือว่าตาย — เผื่อความชันของหลอดที่ไต่ขึ้นระหว่างอ่านค่า</summary>
     private const float DeadLifeThreshold = 1f;
 
@@ -197,6 +278,50 @@ public partial class Player
     /// </summary>
     private static AttackType BodyAttackTypeOf(AnimalTypes.Info info) =>
         (info?.SizeLevel ?? 1) >= 4 ? AttackType.LargeBody : AttackType.SmallBody;
+
+    /// <summary>
+    /// เอฟเฟกต์ตอนโดนสัตว์กัด — **ค่าของเรา**
+    /// ข้อมูลเกมไม่ได้บอกว่าตัวไหนควรทำให้กระเด็น ⇒ ผูกกับขนาดตัวซึ่งเป็นค่าจริงจาก
+    /// animal.json (size_level) เกณฑ์เดียวกับ <see cref="BodyAttackTypeOf"/>
+    /// </summary>
+    private static DamageEffects HitEffectOf(AnimalTypes.Info info) =>
+        (info?.SizeLevel ?? 1) >= 4 ? DamageEffects.Blow : DamageEffects.KnockBack;
+
+    /// <summary>
+    /// **ค่าของเรา** — เป้าออกนอกระยะนานเกินกี่วินาทีถึงเลิกโกรธ
+    /// ตั้งให้พอไล่ต่อได้ถ้าผู้เล่นแค่ถอยหลบ แต่ไม่ค้างโกรธตลอดกาล
+    /// </summary>
+    private const double AggroForgetSeconds = 12.0;
+
+    /// <summary>
+    /// สถานะการต่อสู้ของสัตว์ (CombatInteraction 23)
+    ///
+    /// ฝั่งเกมรับที่ client/ObjectManager.cs —
+    ///   <c>Details["status"]</c>        → AnimalBehavior.Status (ไอคอนบนหัว + โหมดสู้)
+    ///   <c>Details["notice_attack"]</c> → AnimalBehavior.AttackNotice (วงแหวนเตือนก่อนฟาด · มิลลิวินาที)
+    ///   <c>Details["look_at"]</c>       → หันหัวมองเป้า (ใช้คู่กับ TargetId)
+    /// และมันข้ามเองถ้า TargetId ไม่ใช่ผู้เล่นในเครื่องนั้น ⇒ broadcast ได้ปลอดภัย
+    ///
+    /// ⚠️ ไม่ส่ง = สัตว์ไม่มีไอคอนสถานะ ไม่หันหน้ามอง ไม่มีวงแหวนเตือน
+    /// ผู้เล่นเห็นแค่ "ยืนนิ่งแล้วเลือดลด"
+    /// </summary>
+    private CombatInteraction CombatStatus(AnimalManager.Animal animal, AnimalStatus status,
+                                           bool lookAt, bool noticeAttack = false)
+    {
+        var details = new Dictionary<string, long>
+        {
+            ["status"] = (long)status,
+            ["look_at"] = lookAt ? 1L : 0L
+        };
+        // notice_attack เป็นเวลาแบบจำนวนเต็ม (มิลลิวินาที) — Times.UnixTimeNow() คืน double
+        if (noticeAttack) details["notice_attack"] = (long)(Times.UnixTimeNow() * 1000.0);
+        return new CombatInteraction
+        {
+            EntityId = animal.EntityId,
+            TargetId = EntityId,
+            Details = details
+        };
+    }
 
     /// <summary>ผู้เล่นอยู่ในระยะกี่ช่องจากจุดนี้ไหม (1 ช่อง = 200 หน่วยพิกัดโลก)</summary>
     private bool IsWithinTiles(Point2 tile, int tiles)
@@ -299,7 +424,8 @@ public partial class Player
                 Part = BodyPart.Body,
                 Direction = CombatTuning.HitDirection,
                 AttackType = CurrentAttackType(),
-                Effects = DamageEffects.None
+                // เหตุผลเดียวกับตอนสัตว์กัดเรา — ไม่ใส่ flag = สัตว์ไม่มีท่าเจ็บให้เห็นตอนโดนตี
+                Effects = DamageEffects.KnockBack
             }
         });
 
@@ -311,6 +437,25 @@ public partial class Player
             // ⚠️ EntityDied อย่างเดียวไม่พอ — client/AnimalBehavior.cs:830 OnDie ไม่เล่นท่าตายให้
             // (แค่เปลี่ยน layer กับไล่สีจาง) ⇒ ไม่ส่งท่ามา สัตว์ตายแล้วยังยืนท่าเดิม
             _world.BroadCast(animal.ToMotionMessage());
+
+            // [7 ก.ย. 2026] ให้ exp ตอนฆ่าเท่านั้น — ห้ามให้ทุกครั้งที่ตีโดน (ฟาร์มเลเวลพัง)
+            // Arrow/Stone = ระยะ · อื่น ๆ = ประชิด (ตาม AttackType ของอาวุธที่ถือ)
+            AttackType atk = CurrentAttackType();
+            Shared.Skill.Category combatCat =
+                atk is AttackType.Arrow or AttackType.Stone
+                    ? Shared.Skill.Category.RangedCombat
+                    : Shared.Skill.Category.MeleeCombat;
+            AddExpForAction(SkillTuning.KillWeight, combatCat, "ล่าสัตว์");
+
+            // [7 ก.ย. 2026] เป้าตายแล้วต้องออกจากโหมดต่อสู้ — เดิมไม่เคยส่ง BattleEnded
+            // ⇒ ตัวละครค้างท่าถืออาวุธ และ client/InteractionSystem กรองเมนูเหลือแต่ของโหมดสู้
+            //   ทำให้แตะซากแล้วไม่มีปุ่ม "ชำแหละ" (เมนู Collect ถูกซ่อนระหว่างอยู่ในโหมดสู้)
+            if (string.Equals(_battleTargetId, animal.EntityId, StringComparison.Ordinal) ||
+                string.IsNullOrEmpty(_battleTargetId))
+            {
+                _battleTargetId = null;
+                SetBattleMode(false);
+            }
 
             Console.WriteLine($"[ล่าสัตว์] {EntityId[..Math.Min(8, EntityId.Length)]} ล้ม " +
                               $"{hit?.Name ?? animal.EntityType.ToString()} lv{animal.CombatLevel} " +

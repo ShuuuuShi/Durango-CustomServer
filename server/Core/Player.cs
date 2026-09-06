@@ -134,13 +134,11 @@ public partial class Player
         // ⚠️ ห้ามตอบกลับเด็ดขาด และห้าม BroadCast ต่อ — ไม่มีใครรับ Depart ในเกมเลย
         // (grep ทั้ง client/ เจอแค่ไฟล์ struct กับจุดที่ยิง)
         //
-        // ประโยชน์จริง: เร่งให้เลิก "นั่งพัก" ทันทีที่เริ่มขยับ แทนที่จะรอ Move ก้อนแรกมาถึง
-        // (~0.5 วิ) — สถานะพักมีแท็ก clear_on_move อยู่แล้ว ดู HandleMoveMsg
+        // [7 ก.ย. 2026] เดิมเคลียร์ rest ทันทีที่นี่ แต่เกมยิง Depart ตอนเปลี่ยนท่าด้วย
+        // (รวมถึงตอนกดนั่งพัก) ⇒ ไอคอน rest เด้งแล้วหายในเสี้ยววิ
+        // ⇒ อย่าเคลียร์ที่นี่ ให้ HandleMoveMsg เคลียร์เมื่อตำแหน่งเปลี่ยนจริงเท่านั้น
         _connection.Recv(delegate(Depart msg, PacketHeader header)
         {
-            _lastMovedAt = Gauge.CurrentTime;
-            _survival.SetResting(false);      // คืน void — เรียก Flush ตามเสมอเหมือน HandleMoveMsg
-            FlushSurvival();
         });
 
         _connection.Recv(delegate(Cheat msg, PacketHeader header)
@@ -185,6 +183,9 @@ public partial class Player
             // ไม่ใช่รอรอบตรวจ (ค่าจาก status_effects.json → "rest" ดู SurvivalTuning)
             // เลิกพักเองตอนขยับ ตามแท็ก "clear_on_move" ของสถานะนั้น — ดู HandleMoveMsg
             _survival.SetResting(true);
+            // [7 ก.ย. 2026] ใส่ไอคอน rest ด้วย — Until=0 จนกว่าจะเดิน (ตรงแท็ก clear_on_move)
+            ApplyTimedStatusEffect("rest", 1, durationOverride: 0);
+            SendStatusEffects();
             FlushSurvival();
             OnContextChanged();
         });
@@ -281,7 +282,7 @@ public partial class Player
         // ทั้งสองฟิลด์เป็น nullable — ยังไม่มีระบบที่ดิน จึงตอบว่างไปก่อน (เกมรับได้)
         _connection.Recv(delegate(GetPersonalRegionInfo msg, PacketHeader header)
         {
-            Send(default(PersonalRegionInfo), header.Seq);
+            Send(BuildPersonalRegionInfo(), header.Seq);
         });
         // ── สถานะตัวละคร ────────────────────────────────────────────────────────────
         // ⚠️ ตัวนี้กระทบระบบล่องเรือโดยตรง: client/StatisticsSystem.cs:33
@@ -452,7 +453,7 @@ public partial class Player
         });
         _connection.Recv(delegate(GetEstateLicenses msg, PacketHeader header)
         {
-            Send(default(EstateLicenses), header.Seq);
+            Send(BuildEstateLicenses(), header.Seq);
         });
         _connection.Recv(delegate(OpenGate msg, PacketHeader header)
         {
@@ -495,7 +496,11 @@ public partial class Player
                     return;
                 }
             }
-            Send(default(Abort), header.ReplyOf);
+            // ⚠️ ห้ามส่ง default(Abort) — Text เป็น null แล้ว **ฝั่งเกมแครช**
+            // nil → UnpackGettextFromMsgPack คืน null (client/LocalizeSystem.cs:548)
+            // → LimitText(null).Length → NRE (client/GameManager.cs:292)
+            // ไม่ใช่บั๊กของโปรโตคอล ⇒ แก้ที่ต้นทาง ห้ามแตะ GameCode/Messages
+            Send(new Abort { Text = "ทำรายการนี้ไม่ได้" }, header.ReplyOf);
         });
         _connection.Recv(delegate(TakeOutItem msg, PacketHeader header)
         {
@@ -505,7 +510,8 @@ public partial class Player
             }
             else
             {
-                Send(default(Abort), header.ReplyOf);
+                // เหตุผลเดียวกับข้างบน — ห้ามส่ง Abort ที่ไม่มีข้อความ
+                Send(new Abort { Text = "ทำรายการนี้ไม่ได้" }, header.ReplyOf);
             }
         });
         _connection.Recv(delegate(GetGrazedPets msg, PacketHeader header)
@@ -675,22 +681,45 @@ public partial class Player
     // Stacked = 0 ตรงกับ stack_size = 0 ในไฟล์ data (ไม่ซ้อนชั้น)
     private void SendStatusEffects(uint replyOf = 0u)
     {
+        // รวม toggle (AFK) + timed (อาหาร/อากาศ/พัก) เป็นลิสต์เดียว
+        // client แทนที่ทั้งก้อนทุกครั้ง — ห้ามส่งแค่ส่วนที่เปลี่ยน
+        var list = new List<StatusEffect>();
+        foreach (KeyValuePair<string, double> effect in _toggledStatusEffects)
+        {
+            list.Add(new StatusEffect
+            {
+                Id = effect.Key,
+                EffectId = effect.Key,
+                Level = 1,
+                Since = effect.Value,
+                Until = 0.0,
+                Stacked = 0,
+                DurationHidden = true,
+                Effects = Array.Empty<EffectDetail>()
+            });
+        }
+        foreach (TimedStatusEffect effect in _timedStatusEffects.Values)
+        {
+            // ถ้า id ซ้ำกับ toggle ให้ timed ทับ (เช่น rest ที่เซิร์ฟเป็นคนคุม)
+            int idx = list.FindIndex(e => string.Equals(e.EffectId, effect.Id, StringComparison.OrdinalIgnoreCase));
+            var packed = new StatusEffect
+            {
+                Id = effect.Id,
+                EffectId = effect.Id,
+                Level = effect.Level,
+                Since = effect.Since,
+                Until = effect.Until,
+                Stacked = 0,
+                DurationHidden = effect.Until <= 0,
+                Effects = Array.Empty<EffectDetail>()
+            };
+            if (idx >= 0) list[idx] = packed;
+            else list.Add(packed);
+        }
         Send(new StatusEffects
         {
             EntityId = EntityId,
-            _StatusEffects = _toggledStatusEffects
-                .Select(effect => new StatusEffect
-                {
-                    Id = effect.Key,
-                    EffectId = effect.Key,
-                    Level = 1,
-                    Since = effect.Value,
-                    Until = 0.0,
-                    Stacked = 0,
-                    DurationHidden = true,
-                    Effects = Array.Empty<EffectDetail>()
-                })
-                .ToArray()
+            _StatusEffects = list.ToArray()
         }, replyOf);
     }
 
@@ -759,6 +788,20 @@ public partial class Player
         {
             _artifactSet.Add(item2.EntityId);
             Send(item2);
+        }
+        // ส่งที่ดินในรัศมี chunk ที่เพิ่งเข้า
+        var estateChunks = new System.Collections.Generic.List<Point2>();
+        for (int ex = _centerX - 1; ex <= _centerX + 1; ex++)
+        for (int ey = _centerY - 1; ey <= _centerY + 1; ey++)
+        {
+            if (ex >= 0 && ey >= 0 && ex < _world.NumChunksX && ey < _world.NumChunksY)
+            {
+                estateChunks.Add(new Point2(ex, ey));
+            }
+        }
+        if (estateChunks.Count > 0)
+        {
+            Send(_world.BuildEstateGridsForChunks(estateChunks));
         }
     }
 
@@ -836,7 +879,13 @@ public partial class Player
             {
                 _lastMovedAt = Gauge.CurrentTime;
                 // สถานะ "rest" ติดแท็ก clear_on_move ในไฟล์ data (survival/status_effects.json)
+                bool wasResting = _timedStatusEffects.ContainsKey("rest");
                 _survival.SetResting(false);
+                if (wasResting && ClearTimedStatusEffect("rest"))
+                {
+                    SendStatusEffects();
+                    FlushSurvival();
+                }
             }
         }
     }
@@ -1088,13 +1137,29 @@ public partial class Player
                 // ⚠️ ห้ามใช้ `flag` มาคุมตัวนี้: flag คือ Mode.Editable (เกาะสร้างสรรค์ของโหมดออฟไลน์)
                 // แต่การสร้างบ้านเป็นแกนหลักของเกมที่ต้องใช้ได้ทุกเกาะ — ผูกกับ flag แล้ว
                 // เซิร์ฟที่รันโหมด Online (ค่าปัจจุบันใน data/config.json) จะสร้างอะไรไม่ได้เลย
-                if (_world.ArtifactManager.Get(touch.EntityId) is { } building)
-                {
-                    // เจ้าของเท่านั้นที่รื้อ/เก็บได้ — ตัวจริงที่บังคับคือ MayTouchArtifact ตอนรับคำสั่ง
-                    // ตรงนี้แค่ไม่โชว์ปุ่มที่กดไปก็โดนปฏิเสธ (ของคนอื่นจะไม่มีปุ่มพวกนี้เลย)
-                    bool mine = string.Equals(_world.ArtifactManager.OwnerOf(touch.EntityId),
-                                              EntityId, StringComparison.Ordinal);
+                AppearArtifact? touched = _world.ArtifactManager.Get(touch.EntityId);
 
+                // [6 ก.ย. 2026] เมนู "ใช้งาน" ทุกตัวต้องรอสร้างเสร็จก่อน
+                //
+                // ⚠️ เจอตอนเทส: หลุมกองไฟที่ยังไม่ใส่วัสดุสักชิ้น กลับ "พักผ่อนเต็มที่" ได้เลย
+                // เพราะเมนูที่มาจาก component ถูกใส่ทุกกรณีโดยไม่ดู BuildingState
+                // ต้นฉบับผูก component พวกนี้กับของที่สร้างเสร็จแล้วเท่านั้น
+                //
+                // หลังที่ไม่รู้จัก (ไม่อยู่ใน ArtifactManager — คนละเกาะ/ของระบบ) ปล่อยผ่านเหมือนเดิม
+                // เพราะเช็คสถานะไม่ได้ ไม่ใช่เพราะมันสร้างเสร็จ
+                bool completed = !touched.HasValue
+                                 || touched.Value.States.BuildingState == Shared.Building.BuildingState.Completed;
+
+                // เจ้าของเท่านั้นที่รื้อ/เก็บ/เขียนป้ายได้ — ตัวจริงที่บังคับคือ MayTouchArtifact ตอนรับคำสั่ง
+                // ตรงนี้แค่ไม่โชว์ปุ่มที่กดไปก็โดนปฏิเสธ (ของคนอื่นจะไม่มีปุ่มพวกนี้เลย)
+                //
+                // [7 ก.ย. 2026] ย้ายออกมานอกบล็อก `touched` เพราะเมนูที่มาจาก component
+                // (ป้าย/ประตู/หุ่น) อยู่ข้างล่างและต้องใช้ค่านี้ด้วย
+                bool mine = string.Equals(_world.ArtifactManager.OwnerOf(touch.EntityId),
+                                          EntityId, StringComparison.Ordinal);
+
+                if (touched is { } building)
+                {
                     switch (building.States.BuildingState)
                     {
                         case Shared.Building.BuildingState.Occupied:
@@ -1126,6 +1191,28 @@ public partial class Player
                     // ⇒ ผูกกับ "เป็นเจ้าของ" แทน ซึ่งตรงกับด่านจริงที่ HandleDestructMsg ใช้อยู่แล้ว
                     if (mine || flag) list.Add(Shared.System.Interaction.DestructArtifact);
                 }
+                if (!completed)
+                {
+                    // ยังสร้างไม่เสร็จ — มีได้แค่เมนูของงานก่อสร้างข้างบน (สร้าง/สำเร็จ/รื้อ)
+                    msg.Interactions = list.Select(o => (int)o).ToArray();
+                    msg.Mannequin = _world.ArtifactManager.GetMannequin(touch.EntityId);
+                    Send(msg, seq);
+                    OnContextChanged();
+                    return;
+                }
+
+                // [6 ก.ย. 2026] "제작" — โต๊ะทำงาน กองไฟทำอาหาร เตาเผา ฯลฯ
+                //
+                // ⚠️ ไม่ใส่บรรทัดนี้ = แตะโต๊ะทำงานชนิดไหนก็ **ไม่มีเมนูคราฟเลย**
+                // ทั้งที่ระบบคราฟฝั่งเซิร์ฟทำครบแล้ว (Player.Crafting.cs — CheckWorkbench
+                // ก็ดู component "Workbench" ตัวเดียวกันนี้)
+                // ฝั่งเกมผูกหน้าจอเลือกสูตรไว้กับ Interaction.Craft
+                // (client/Durango.UI/RecipeSelectorGroup.cs:112 AddInteractionHandler)
+                // และไม่ได้ดู components เอง มันเชื่อรายการที่เซิร์ฟส่งมาล้วน ๆ
+                //
+                // ข้อมูลจริง entity_types/artifact.json: prototype ที่มี component นี้ 61 ชนิด
+                // เช่น s02_bonfire (7111) = 요리용 모닥불 "กองไฟทำอาหาร"
+                if (blueprint.Components.Contains("Workbench")) list.Add(Shared.System.Interaction.Craft);
                 if (blueprint.Components.Contains("Washable")) list.Add(Shared.System.Interaction.Wash);
                 if (blueprint.Components.Contains("Shelter")) list.Add(Shared.System.Interaction.Rest);
 
@@ -1158,7 +1245,18 @@ public partial class Player
                     list.Add(Shared.System.Interaction.AddOnManage);
                     list.Add(Shared.System.Interaction.RemodelArtifact);
                 }
-                if (blueprint.Components.Contains("Scribble") && flag)
+                // [7 ก.ย. 2026] ป้าย/กระดาน — เขียนข้อความและวาดรูปลงบนป้ายที่สร้างเอง
+                //
+                // ⚠️ เดิมผูกกับ `flag` (Mode.Editable) แบบเดียวกับปุ่มรื้อที่แก้ไปแล้ว
+                // ⇒ เซิร์ฟที่รันโหมด Online (ค่าจริงใน data/config.json) **แตะป้ายแล้วไม่มีปุ่มเขียนเลย**
+                // ทั้งที่ handler ฝั่งเซิร์ฟทำครบแล้ว (Scribble → ArtifactManager.Scribble)
+                // ฝั่งเกมไม่ได้ดู components เอง มันเชื่อรายการที่เซิร์ฟส่งมาล้วน ๆ
+                //
+                // ข้อมูลจริง entity_types/artifact.json: prototype ที่มี component นี้ 13 ชนิด
+                // (표지판 7020 · 칠판 7081 · 화이트보드 7098 ฯลฯ) ทั้งหมดเป็นป้าย/กระดานที่ผู้เล่นสร้างเอง
+                //
+                // ผูกกับ "เป็นเจ้าของ" แทน ให้ตรงกับปุ่มรื้อ — คนอื่นเดินมาลบข้อความป้ายเราไม่ได้
+                if (blueprint.Components.Contains("Scribble") && (mine || flag))
                 {
                     list.Add(Shared.System.Interaction.ScribbleDrawing);
                     list.Add(Shared.System.Interaction.ScribbleText);
@@ -1611,7 +1709,8 @@ public partial class Player
         }
         else
         {
-            Send(default(Abort), seq);
+            // ห้ามส่ง Abort ที่ไม่มีข้อความ (ฝั่งเกม NRE — ดูเหตุผลเต็มที่จุดแรกในไฟล์นี้)
+            Send(new Abort { Text = "ทำรายการนี้ไม่ได้" }, seq);
         }
     }
 
@@ -1662,6 +1761,11 @@ public partial class Player
         msg.InventoryItems.EntityId = EntityId;
         msg.InventoryInfos.MaxSize = 200;
         msg.InventoryItems.Items = _context.InventoryItems.ToArray();
+        // [7 ก.ย. 2026] ⚠️ เส้นนี้คือ inventory "ของตัวผู้เล่นเอง" ที่ส่งตอนเข้าเกม
+        // เดิมไม่เคยใส่ Wallet เลย ⇒ ฝั่งเกมได้ค่า default (null) แล้วยอดเงินเป็น 0 ตลอด
+        // ถึงจะแก้เส้นตู้/คลังใน Core/Player.Inventory.cs แล้วก็ไม่พอ เพราะคนละเส้นกัน
+        // (ตัวจริงที่ทำให้ "ไม่มีเงินในตัวละครเลย" คือบรรทัดนี้)
+        msg.Wallet = BuildWallet();
         Send(msg);
     }
 
@@ -1755,22 +1859,60 @@ public partial class Player
             if (weapon?.BattleSpeed is > 0f) { battle = weapon.BattleSpeed.Value; break; }
         }
 
+        // [7 ก.ย. 2026] ความเหนื่อยมีผลเดินช้า — ค่าเป็น **ค่าของเรา**
+        // ใช้เกณฑ์ FatigueCaution/FatigueDanger ที่ส่งให้ client อยู่แล้ว
+        // ต่ำกว่า caution = ปกติ · ระหว่าง caution→danger = ค่อย ๆ ช้า · ถึง danger = ช้าสุด
+        float fatigueMul = FatigueMoveMultiplier();
+        int normal = Math.Max(1, (int)Math.Round(DefaultNormalSpeed * fatigueMul));
+        int battleSpeed = Math.Max(1, (int)Math.Round(battle * fatigueMul));
+
+        // ไม่ยิงซ้ำถ้าค่าไม่เปลี่ยน — กันสแปมทุกเฟรมตอน Process
+        if (_lastSentNormalSpeed == normal && _lastSentBattleSpeed == battleSpeed)
+        {
+            return;
+        }
+        _lastSentNormalSpeed = normal;
+        _lastSentBattleSpeed = battleSpeed;
+
         Send(new SetBaseMoveSpeed
         {
             EntityId = EntityId,
-            NormalSpeed = (int)DefaultNormalSpeed,        // players.json → player.moving.default_normal_speed
-            BattleSpeed = (int)battle
+            NormalSpeed = normal,
+            BattleSpeed = battleSpeed
         });
+    }
+
+    /// <summary>
+    /// ตัวคูณความเร็วจากความเหนื่อย — **ค่าของเรา**
+    /// 0%..Caution → 1.0 · Danger → 0.55 · เกิน Danger → 0.40
+    /// </summary>
+    private float FatigueMoveMultiplier()
+    {
+        float fatigue = _survival.ValueAt(SurvivalState.KeyFatigue, Gauge.CurrentTime);
+        float caution = SurvivalTuning.FatigueCaution;
+        float danger = SurvivalTuning.FatigueDanger;
+        if (fatigue <= caution) return 1f;
+        if (fatigue >= danger) return 0.40f;
+        float t = (fatigue - caution) / Math.Max(1f, danger - caution);
+        return 1f - (0.45f * t); // caution→danger: 1.0 → 0.55
     }
 
     /// <summary>ค่าสำรองตรงกับ players.json เป๊ะ — มีไว้กันไฟล์หาย ไม่ใช่ค่าที่คิดเอง</summary>
     private const float DefaultNormalSpeed = 500f;
     private const float DefaultBareHandsBattleSpeed = 350f;
+    private int _lastSentNormalSpeed = -1;
+    private int _lastSentBattleSpeed = -1;
 
     public void Process()
     {
         _connection.Process();
+        if (ExpireTimedStatusEffects())
+        {
+            SendStatusEffects();
+        }
         UpdateSurvival();
+        // รีเฟรชความเร็วตามความเหนื่อยเป็นระยะ (ไม่ทุกเฟรม — SendBaseMoveSpeed กันค่าซ้ำเอง)
+        SendBaseMoveSpeed();
     }
 
     /// <summary>
@@ -1931,7 +2073,9 @@ public partial class Player
         }
         // เกาะที่เราไม่รู้จัก — ตอบ Error ให้เกมเลิกรอ (client/MapSystem.cs:650 มี .On<Error> รออยู่)
         Console.WriteLine($"[sail] ไม่รู้จักเกาะ '{msg.RegionId}'");
-        Send(default(Error), seq);
+        // Error มีสอง string: TypeName ต้นฉบับกัน null ให้แล้ว แต่ Text ไม่ได้กัน
+        // ⇒ default(Error) ทำให้ฝั่งเกมแครชด้วยเหตุผลเดียวกับ Abort
+        Send(new Error { Text = "ไม่พบเกาะปลายทาง" }, seq);
     }
 
     /// <summary>
@@ -1950,7 +2094,9 @@ public partial class Player
     private void HandleTravelMsg(string regionId, uint seq)
     {
         string target = regionId;
-        if (!string.IsNullOrEmpty(target) && !RegionCatalog.TryGet(target, out _))
+        bool knownCatalog = !string.IsNullOrEmpty(target) && RegionCatalog.TryGet(target, out _);
+        bool knownPersonal = !string.IsNullOrEmpty(target) && (string.Equals(target, _context.PersonalRegionId, StringComparison.OrdinalIgnoreCase) || target.StartsWith("personal_", StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrEmpty(target) && !knownCatalog && !knownPersonal)
         {
             Console.WriteLine($"[sail] ปฏิเสธ: ไม่รู้จักเกาะ '{target}'");
             Send(new Abort { Text = "ไม่พบเกาะปลายทาง" }, seq);

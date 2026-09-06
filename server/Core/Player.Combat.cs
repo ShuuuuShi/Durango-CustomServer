@@ -515,13 +515,16 @@ public partial class Player
 
         float bonus = attack.damage_bonus > 0f ? attack.damage_bonus : 1f;
         float raw = attacker.CurrentAttackPower() * bonus;
-        float defense = stats.defense * defenseRatio * (1f - Math.Clamp(attack.armor_penetration, 0f, 1f));
+        // [7 ก.ย. 2026] เกราะ/หลบใช้ค่า Derived ของผู้ถูกตีหลังรวมสกิล ไม่ใช่ค่าฐานดิบอย่างเดียว
+        float baseDefense = CurrentDerivedDefense();
+        float defense = baseDefense * defenseRatio * (1f - Math.Clamp(attack.armor_penetration, 0f, 1f));
         int value = Math.Max(CombatTuning.MinDamage, (int)Math.Round((raw - defense) * directionRatio));
 
-        // โดนหรือหลบ — ด้วยตัวเลขในไฟล์ (accuracy 100 · dodge 0) ผลคือโดนเสมอ แต่เขียนเป็นสูตรไว้
-        // เพื่อให้พอมีค่าจากอุปกรณ์/สกิลจริงแล้วใช้ต่อได้เลย
-        bool dodged = stats.dodge > 0 && stats.dodge * (attack.accuracy_ratio > 0f ? attack.accuracy_ratio : 1f)
-                      > stats.accuracy;
+        // โดนหรือหลบ — ใช้ Derived.Dodge / Accuracy ของทั้งสองฝ่ายหลังรวมสกิล
+        float myDodge = CurrentDerivedDodge();
+        float atkAccuracy = attacker.CurrentDerivedAccuracy();
+        bool dodged = myDodge > 0 && myDodge * (attack.accuracy_ratio > 0f ? attack.accuracy_ratio : 1f)
+                      > atkAccuracy;
 
         var damaged = new Damaged
         {
@@ -573,13 +576,16 @@ public partial class Player
     /// ไม่มีอาวุธ ⇒ ใช้ players.json → player.bare_hands.attack_type ("bare_hands")
     /// </summary>
     /// <summary>
-    /// ค่าโจมตีรวมของตัวละครตอนนี้ = ค่าฐาน + ค่าของอาวุธที่ถืออยู่
+    /// ค่าโจมตีรวมของตัวละครตอนนี้ = ค่าโจมตีจากสกิล/สเตตัส + ค่าของอาวุธที่ถืออยู่
     ///
     /// [5 ก.ย. 2026] เดิมใช้ค่าฐานอย่างเดียว (40) เพราะค่าอาวุธในไฟล์เป็นสูตรข้อความ
     /// (<c>performance.json → weapon.attack = "72.02 + (level * 1.3)"</c>) แล้วยังไม่มีตัวคิดสูตร
     /// ผลคือถืออะไรก็ดาเมจเท่ากัน และตีสัตว์เลเวลกลาง ๆ ไม่เข้าเลย
     /// (สัตว์ lv25 มีเกราะ 125 &gt; ค่าฐาน 40 ⇒ ทุกครั้งได้ดาเมจขั้นต่ำ 1 ⇒ ต้องตี 1,800 ครั้ง)
     /// ตอนนี้คิดสูตรได้แล้วด้วย <see cref="StatFormula"/> ⇒ อาวุธมีความหมายจริง
+    ///
+    /// [7 ก.ย. 2026] ใช้ <c>Derived.Attack</c> จากระบบสกิลแทนค่าฐานดิบใน players.json
+    /// เพื่อให้เรียนสกิล/โมดิฟายเออร์แล้วดาเมจเปลี่ยนจริง ไม่ใช่แค่โชว์บนหน้าตัวละคร
     /// </summary>
     private float CurrentAttackPower()
     {
@@ -592,7 +598,31 @@ public partial class Player
             float attack = BattleDataStore.WeaponAttack(item2.Prototype, item2.Level);
             if (attack > best) best = attack;      // ถือได้หลายช่อง เอาชิ้นที่แรงสุด
         }
-        return BattleDataStore.Stats.attack + best;
+        return CurrentDerivedAttack() + best;
+    }
+
+    /// <summary>ค่าโจมตีตัวละครหลังรวมสกิล — ตกไปค่าฐานในไฟล์ถ้ายังไม่มีสถานะสกิล</summary>
+    private float CurrentDerivedAttack() =>
+        DerivedOrBase(Shared.Ability.Derived.Attack, BattleDataStore.Stats.attack);
+
+    private float CurrentDerivedDefense() =>
+        DerivedOrBase(Shared.Ability.Derived.Defense, BattleDataStore.Stats.defense);
+
+    private float CurrentDerivedDodge() =>
+        DerivedOrBase(Shared.Ability.Derived.Dodge, BattleDataStore.Stats.dodge);
+
+    private float CurrentDerivedAccuracy() =>
+        DerivedOrBase(Shared.Ability.Derived.Accuracy, BattleDataStore.Stats.accuracy);
+
+    private float DerivedOrBase(Shared.Ability.Derived key, float fallback)
+    {
+        if (_lastDerivedAbilities != null &&
+            _lastDerivedAbilities.TryGetValue(key, out float value) &&
+            value > 0f)
+        {
+            return value;
+        }
+        return fallback;
     }
 
     private AttackType CurrentAttackType()
