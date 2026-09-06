@@ -261,25 +261,42 @@
 ### ของที่เกมยิงมาจริงบนเซิร์ฟ VPS แต่ยังไม่มี handler (5 ก.ย. 2026)
 
 เก็บจาก `grep 'ไม่มี handler' /var/log/durango-lasthuman.log` หลังเล่นจริงหนึ่งรอบ
+สถานะ 6 ก.ย.: ปิดแล้วเกือบหมด — เหลือน้อยตัว
 
-| กระทบการเล่นตรง ๆ | | ระบบที่ยังไม่เริ่ม | |
-|---|---|---|---|
-| `OccupyArtifactSite` | 2057 | `GetParty` | 20001 |
-| `ReturnToHome` | 2100 | `GetSocial` | 2402 |
-| `Dashed` | 2491 | `GetMemos` | 2439 |
-| `WarpToPort` | 9081241 | `GetFactions` | 3600 |
-| `SearchPOIs` | 904 | `GetMissions` | 3620 |
-| `GetLastSearchedTime` | 906 | `GetClanCreationCosts` | 3667 |
-| `GetQuestState` | 398132 | `GetSupportRequests` | 2347809 |
-| `GetAttachableAccessories` | 9823457 | `GetNomadInfo` | 100000 |
-| `Depart` | 2448 | `GetReturnerInfo` | 3450983 |
-| | | `GetExpiredProducts` · `EngagementAgreementChanged` | 5015 · 1444250 |
+| กระทบการเล่นตรง ๆ | | สถานะ 6 ก.ย. |
+|---|---|---|
+| `OccupyArtifactSite` | 2057 | ✅ ระบบสร้าง (fa66ec9) |
+| `ReturnToHome` | 2100 | ✅ `Player.Warp.cs` — ข้ามเกาะกลับเกาะตั้งต้น (Emigrated Type=Warp) |
+| `Dashed` | 2491 | ✅ `Player.Warp.cs` — no-op (client ไม่รอตอบ) |
+| `WarpToPort` | 9081241 | ✅ `Player.Warp.cs` — ท่าเรือจาก pois.yml ที่ใกล้ตัว (Timer + Teleported) |
+| `SearchPOIs` | 904 | ✅ `Player.Exploration.cs` |
+| `GetLastSearchedTime` | 906 | ✅ `Player.Exploration.cs` |
+| `GetQuestState` | 398132 | ✅ `Player.Quest.cs` |
+| `GetAttachableAccessories` | 9823457 | ⬜ ยังไม่มี |
+| `Depart` | 2448 | ⬜ ยังไม่มี |
+| `GetMissions` | 3620 | ✅ `Player.Missions.cs` |
+| `GetFactions` | 3600 | ✅ `Player.Missions.cs` |
+| `GetParty`/`GetSocial`/`GetMemos` | 20001/2402/2439 | 🔄 `Player.Social.cs` (กำลังทำ) |
+| `GetClanCreationCosts`/`GetSupportRequests` | 3667/2347809 | 🔄 `Player.Social.cs` |
+| `GetNomadInfo`/`GetReturnerInfo` | 100000/3450983 | 🔄 `Player.Social.cs` |
+| `GetExpiredProducts` | 5015 | 🔄 `Player.Social.cs` |
+| เพิ่มจาก log 6 ก.ย.: `Confirm`/`DrawWater`/`WashBody`/`PlayEmoticon`/`GetSoldProducts`/`GetPurchasedProducts` | 3649/3493/3494/9592636/5012/5013 | ⬜ ยังไม่มี |
 
 **วิธีรู้ว่าขาดอะไรต่อ:** อ่าน log เซิร์ฟตอนเล่นจริง มันพิมพ์เองทุกครั้งที่เกมยิงของที่ยังไม่ได้ทำ
 ```
 [conn] ไม่มี handler สำหรับ type=204 (bytes=3) — จะไม่เตือนซ้ำอีก
 ```
 หาชื่อจากเลข: `grep -l "TypeCode = 204u" server/GameCode/Messages/*.cs` → `GetDefoggedChunks.cs`
+
+### ระบบที่ปิดเพิ่ม 6 ก.ย. 2026
+
+| ระบบ | ไฟล์ | หมายเหตุ |
+|---|---|---|
+| ตลาดวัสดุ "กดรับฟรี" | `Core/MarketManager.cs` | เติมหมวด material/mineral/plant_collectible/animal_collectible (~546 ชิ้น) ราคา 0 สต๊อกไม่หมด — ไว้เบต้าเทส ไม่ต้องเดินเก็บ |
+| กลุ่มเวป/กลับบ้าน/ท่าเรือ | `Core/Player.Warp.cs` | Timer(warp_time=2) + Teleported — ท่าเรือเลือกจาก pois.yml ที่ใกล้ตัว · กลับบ้าน = เกาะตั้งต้น |
+| เควส/ภารกิจ (โครงว่าง) | `Core/Player.Quest.cs` · `Player.Missions.cs` | GetQuestState/GetMissions/GetQuests/GetFactions — UI ไม่ค้าง |
+| ค้นหาหมุด/เรดาร์ | `Core/Player.Exploration.cs` | SearchPOIs/GetLastSearchedTime |
+| client กัน NRE | `client/` (BuildSystem, ExpectResultWidget, CraftGroupBase, SelectPersonalRegion, GameManager) | กดหลุมก่อสร้าง/เลือกเกาะส่วนตัวแล้ว NRE เงียบ — อ้าง output_log stack |
 
 ---
 

@@ -453,7 +453,7 @@ public partial class Player
                     return;
                 }
             }
-            Send(default(Abort), header.ReplyOf);
+            Send(new Abort { Text = "เปลี่ยนหุ่นโชว์ไม่สำเร็จ" }, header.ReplyOf);
         });
         _connection.Recv(delegate(TakeOutItem msg, PacketHeader header)
         {
@@ -463,7 +463,7 @@ public partial class Player
             }
             else
             {
-                Send(default(Abort), header.ReplyOf);
+                Send(new Abort { Text = "นำของออกไม่สำเร็จ" }, header.ReplyOf);
             }
         });
         _connection.Recv(delegate(GetGrazedPets msg, PacketHeader header)
@@ -1465,7 +1465,7 @@ public partial class Player
         Item[] array = _world.MarketManager.BuyProduct(msg.ProductId);
         if (array == null)
         {
-            Send(default(Messages.Error), seq);
+            Send(new Messages.Error { Text = "ซื้อสินค้าไม่สำเร็จ" }, seq);
             return;
         }
         InventoryUpdated msg2 = new()
@@ -1524,7 +1524,7 @@ public partial class Player
         }
         else
         {
-            Send(default(Abort), seq);
+            Send(new Abort { Text = "ไม่มีเพลงในช่องนี้" }, seq);
         }
     }
 
@@ -1844,7 +1844,7 @@ public partial class Player
         }
         // เกาะที่เราไม่รู้จัก — ตอบ Error ให้เกมเลิกรอ (client/MapSystem.cs:650 มี .On<Error> รออยู่)
         Console.WriteLine($"[sail] ไม่รู้จักเกาะ '{msg.RegionId}'");
-        Send(default(Error), seq);
+        Send(new Error { Text = "ไม่พบเกาะปลายทาง" }, seq);
     }
 
     /// <summary>

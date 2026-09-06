@@ -21,15 +21,16 @@ public struct Error
 		{
 			packer.PackArrayHeader(2);
 		}
-		if (val.TypeName == null)
-		{
-			packer.PackString(string.Empty);
-		}
-		else
-		{
-			packer.PackString(val.TypeName);
-		}
-		packer.PackString(val.Text);
+if (val.TypeName == null)
+			{
+				packer.PackString(string.Empty);
+			}
+			else
+			{
+				packer.PackString(val.TypeName);
+			}
+			// Text เป็น null ได้เมื่อส่ง default(Error) — กัน PackString(null) โยน NRE
+			packer.PackString(val.Text ?? string.Empty);
 	}
 
 	public static Error Unpack(Unpacker unpacker)

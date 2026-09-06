@@ -33,6 +33,11 @@ public partial class Player
         RegisterPetSaveHandlers();     // Player.PetSave.cs   — โหลด/เซฟสัตว์เลี้ยง+จำนวนครั้งที่ตาย
         RegisterMapHandlers();         // Player.Map.cs       — หมุดจุดสำคัญบนแผนที่ (ทับ handler เดิมใน Player.cs)
         RegisterBuildingHandlers();    // Player.Building.cs  — จองพื้นที่/ใส่วัสดุ/สร้าง/ทำให้สมบูรณ์
+        RegisterWarpHandlers();        // Player.Warp.cs      — กลับบ้าน/ไปท่าเรือ/กระโดด
+        RegisterExplorationHandlers(); // Player.Exploration.cs — ค้นหาจุดสำคัญ/คูลดาวน์เรดาร์
+        RegisterMissionHandlers();     // Player.Missions.cs  — ภารกิจกลุ่ม (ตอบโครงว่างให้ระบบเริ่ม)
+        RegisterQuestHandlers();       // Player.Quest.cs     — GetQuests/GetQuestState (ทับของ Player.cs)
+        RegisterSocialHandlers();      // Player.Social.cs    — ปาร์ตี้/เพื่อน/บันทึก/แคลน/โนมัด/ผู้กลับ/ตลาดหมดประกาศ
 
         // ── หลังทุกระบบพร้อมแล้ว ─────────────────────────────────────────────────
         ReviveIfDeadOnLogin();         // Player.Hunting.cs   — กันตัวละครค้างตายถาวร

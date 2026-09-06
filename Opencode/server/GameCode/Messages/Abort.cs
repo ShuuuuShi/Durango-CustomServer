@@ -19,7 +19,9 @@ public struct Abort
 		{
 			packer.PackArrayHeader(1);
 		}
-		packer.PackString(val.Text);
+		// Text เป็น null ได้เมื่อส่ง default(Abort) — PackString(null) โยน NRE แล้วข้อความ
+			// exception หลุดไปโชว์บนจอเกมผ่าน SystemMsg
+			packer.PackString(val.Text ?? string.Empty);
 	}
 
 	public static Abort Unpack(Unpacker unpacker)

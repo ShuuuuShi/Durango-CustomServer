@@ -27,6 +27,18 @@ public class Constants : Singleton<Constants>
     // client ไม่ parse บล็อกนี้ เป็นสูตรฝั่งเซิร์ฟล้วน ๆ
     [JsonProperty("energy")]
     public EnergyConstants Energy;
+
+    // พอร์ตเพิ่ม [6 ก.ย. 2026]: เวลาเวป — ReturnToHome/WarpToPort ฝั่งเกมรอ Timer(1134) กลับ
+    // แล้วเอา Duration ไปเล่นอนิเมชัน "Warp_Begin" (client/MapSystem.cs:587-613 DoWarp)
+    // ไฟล์จริง: warp.warp_time = 2 (วินาที)
+    [JsonProperty("warp")]
+    public WarpConstants Warp;
+}
+
+public class WarpConstants
+{
+    [JsonProperty("warp_time")]
+    public float WarpTime;
 }
 
 public class EnergyConstants
