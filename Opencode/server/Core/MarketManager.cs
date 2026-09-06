@@ -18,6 +18,14 @@ public class MarketManager
 
     private static readonly string[] Tags = { "door", "window", "wall_deco", "empty_door", "plantable", "armor", "weapon", "instrument" };
 
+    // [6 ก.ย. 2026] วัสดุ — ผู้เล่นขอให้ "กดรับวัสดุจากตลาดได้เลย ไม่ต้องเดินเก็บเอง" (เบต้าเทส)
+    // หมวดมาจากข้อมูลจริง item/prototype_data.json → category:
+    //   material = วัสดุแปรรูป 384 · mineral = หิน/แร่ 54 ·
+    //   plant_collectible = ไม้/กิ่ง/ผลดิบ 52 · animal_collectible = หนัง/เอ็น 56
+    // หมวดพวกนี้เป็นหมวดเดียวกับที่ฝั่งเกมสร้างแท็บตลาด (nexonSRC/MarketSystem.cs:108-152
+    // InitMarketCategoires ลูป prototype เดียวกัน) ⇒ ค้นหมวดไหนก็เจอของหมวดนั้น
+    private static readonly string[] MaterialCategories = { "material", "mineral", "plant_collectible", "animal_collectible" };
+
     public Product[] Products
     {
         get
@@ -25,14 +33,18 @@ public class MarketManager
             if (_products == null)
             {
                 var list = new List<Product>();
-                list.AddRange(
-                    from pair in SingletonDict<string, List<Prototype>>.Instance
-                    where pair.Value != null && Tags.Any(tag => pair.Value.Any(x => x.Tags.ContainsKey(tag)))
-                    select MakeProduct(pair.Key));
-                list.AddRange(
-                    from pair in SingletonDict<string, List<Prototype>>.Instance
-                    where IsCraftRein(pair.Key)
-                    select MakeProduct(pair.Key));
+                var added = new HashSet<string>();
+                foreach (var pair in SingletonDict<string, List<Prototype>>.Instance)
+                {
+                    if (pair.Value == null) continue;
+                    bool byTag = Tags.Any(tag => pair.Value.Any(x => x.Tags.ContainsKey(tag)));
+                    bool byRein = IsCraftRein(pair.Key);
+                    bool byMaterial = pair.Value.Any(x => x.Category != null && MaterialCategories.Contains(x.Category));
+                    if ((byTag || byRein || byMaterial) && added.Add(pair.Key))
+                    {
+                        list.Add(MakeProduct(pair.Key));
+                    }
+                }
                 _products = list.ToArray();
             }
             return _products;

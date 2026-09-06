@@ -262,9 +262,15 @@ public partial class Player
     {
         if (_world.ArtifactManager.Get(msg.EntityId) is not { } artifact)
         {
+            // ⚠️ ต้อง log — จุดนี้ตอบ Abort แล้วฝั่งเกม "ไม่มี UI ใส่วัสดุ" แบบเงียบ ๆ
+            // (client/BuildSystem.cs:376 .On<ArtifactMaterials> ไม่โดน ⇒ ม่านโหลดหายเฉย ไม่มี error)
+            Console.WriteLine($"[สร้าง] {Short(EntityId)} ขอสถานะหลุม {msg.EntityId[..Math.Min(8, msg.EntityId.Length)]} " +
+                              $"ที่ [{msg.Tile.x},{msg.Tile.y}] — ไม่พบในโลกนี้ (id ไม่ตรง/ข้ามเกาะ)");
             Send(new Abort { Text = "ไม่พบสิ่งปลูกสร้างนี้" }, seq);
             return;
         }
+        Console.WriteLine($"[สร้าง] {Short(EntityId)} เปิดหลุมชนิด {artifact.EntityType} ที่ " +
+                          $"[{artifact.Tile.x},{artifact.Tile.y}] (state={artifact.States.BuildingState})");
         Send(new ArtifactMaterials
         {
             EntityId = artifact.EntityId,
