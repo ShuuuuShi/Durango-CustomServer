@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Durango.Utils.Extensions;
+using JetBrains.Annotations;
 using Messages;
 using UnityEngine;
 using Yaml;
@@ -159,6 +160,45 @@ public class ArtifactManager
     // ══ ระบบสร้างสิ่งปลูกสร้าง ═══════════════════════════════════════════════════════
     // ใช้จาก Core/Player.Building.cs — เก็บไว้ที่นี่เพราะเป็นสถานะของ "หลัง" ไม่ใช่ของผู้เล่น
     // (คนอื่นมาช่วยใส่วัสดุ/ช่วยสร้างต่อได้ และต้องรอดจากการรีสตาร์ตเซิร์ฟ)
+
+    /// <summary>
+    /// มีสิ่งปลูกสร้างกินพื้นที่นี้อยู่แล้วไหม — คืน entity ของหลังที่ทับ (null = ว่าง)
+    ///
+    /// ⚠️ [6 ก.ย. 2026] **ก่อนหน้านี้ทั้งเซิร์ฟไม่มีการตรวจการชนกันเลยสักบรรทัด**
+    /// (ค้น overlap/collide/canbuild แล้วไม่เจอ · <c>Player.IsOverlapped</c> เป็นคนละเรื่อง —
+    ///  มันเช็คว่าอยู่ในกรอบ 3×3 chunk รอบตัวผู้เล่นไหม ใช้ตัดสินว่าจะส่ง/ถอนภาพ)
+    ///
+    /// ผลคือเอาของไปวางคร่อมประตูบ้านคนอื่น หรือจองพื้นที่ล้อมฐานทั้งฐานได้
+    /// แล้วเหยื่อรื้อคืนไม่ได้เพราะด่านเจ้าของบล็อกไว้ ⇒ **ระบบสิทธิ์กลายเป็นเครื่องมือของผู้บุกรุก**
+    ///
+    /// เทียบสี่เหลี่ยม <c>Tile..Tile+Size</c> บนชั้นเดียวกันเท่านั้น (คนละชั้นไม่ถือว่าทับ)
+    /// </summary>
+    [CanBeNull]
+    public string FindOverlapping(Point2 tile, Point2 size, int? floor)
+    {
+        int ax0 = tile.x, ay0 = tile.y;
+        int ax1 = ax0 + Math.Max(1, size.x), ay1 = ay0 + Math.Max(1, size.y);
+
+        foreach (var pair in _artifacts)
+        {
+            AppearArtifact other = pair.Value;
+            // ⚠️ **ห้ามเขียน (a.Floor ?? 0) == (b.Floor ?? 0)** — ดูเหมือนถูกแต่พังทั้งระบบ
+            //
+            // ในเกมนี้ null กับ 0 คนละความหมาย:
+            //   Floor = null → วางกลางแจ้ง
+            //   Floor = 0    → วาง"ในบ้าน" (client/Durango.UI.InGame/BuildLocator.cs GetResult()
+            //                  ตั้ง Floor = 0 เฉพาะตอนช่องเป้าหมายมี artifact ที่ IsEnterable)
+            // และเซิร์ฟทิ้ง ModularEntityId ⇒ เฟอร์นิเจอร์ในบ้านถูกเก็บเป็น artifact ธรรมดา
+            // ที่ทับ tile ของบ้านอยู่แล้ว**โดยชอบ**
+            // ⇒ รวม null กับ 0 เข้าด้วยกันเมื่อไหร่ = วางเฟอร์นิเจอร์ในบ้านไม่ได้อีกเลย
+            if (other.Floor != floor) continue;
+
+            int bx0 = other.Tile.x, by0 = other.Tile.y;
+            int bx1 = bx0 + Math.Max(1, other.Size.x), by1 = by0 + Math.Max(1, other.Size.y);
+            if (ax0 < bx1 && bx0 < ax1 && ay0 < by1 && by0 < ay1) return pair.Key;
+        }
+        return null;
+    }
 
     /// <summary>วัสดุที่ใส่ไว้แล้วในหลังนี้ — คืนตารางว่างถ้ายังไม่มีใครใส่อะไร (ไม่คืน null)</summary>
     public Dictionary<string, List<Item>> GetBuildMaterials(string entityId)

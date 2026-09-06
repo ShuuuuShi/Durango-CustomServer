@@ -33,12 +33,20 @@ public static class BuildTuning
     private static string _buildEnergy = "1";
     private static float _defaultDurability = 7f;
     private static float _cancelTime = 3f;
+    private static float _capsulatingTime = 0.5f;
+    private static float _placingTime = 0.5f;
 
     public static string SiteDuration { get { EnsureLoaded(); return _siteDuration; } }
     public static string SiteEnergy { get { EnsureLoaded(); return _siteEnergy; } }
     public static string BuildEnergy { get { EnsureLoaded(); return _buildEnergy; } }
     public static float DefaultDurability { get { EnsureLoaded(); return _defaultDurability; } }
     public static float CancelTime { get { EnsureLoaded(); return _cancelTime; } }
+
+    /// <summary>วินาทีที่ใช้ "แพ็ก" สิ่งปลูกสร้างเก็บเป็นไอเทม (capsulating.capsulating_time.default)</summary>
+    public static float CapsulatingTime { get { EnsureLoaded(); return _capsulatingTime; } }
+
+    /// <summary>วินาทีที่ใช้ "วาง" ของที่แพ็กไว้ลงพื้น (capsulating.placing_time)</summary>
+    public static float PlacingTime { get { EnsureLoaded(); return _placingTime; } }
 
     /// <summary>คิดสูตรที่มีตัวแปร <c>area</c> — คืนค่าสำรองถ้าสูตรเสีย</summary>
     public static double EvalByArea(string formula, int area, double fallback)
@@ -64,5 +72,9 @@ public static class BuildTuning
         _buildEnergy = (string)build["building"]?["energy"] ?? _buildEnergy;
         _defaultDurability = (float?)build["default_durability"] ?? _defaultDurability;
         _cancelTime = (float?)build["cancel_time"] ?? _cancelTime;
+        // capsulating.capsulating_time เป็นตารางแยกตามชนิด ({default, "0", "2", "4"})
+        // ค่าจริงในไฟล์เท่ากันหมด (0.5) ⇒ ใช้ default ตัวเดียวพอ ไม่ต้องแยกตามชนิด
+        _capsulatingTime = (float?)build["capsulating"]?["capsulating_time"]?["default"] ?? _capsulatingTime;
+        _placingTime = (float?)build["capsulating"]?["placing_time"] ?? _placingTime;
     }
 }

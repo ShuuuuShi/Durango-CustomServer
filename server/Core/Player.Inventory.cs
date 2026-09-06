@@ -106,6 +106,19 @@ public partial class Player
                 HandleDyeMsg(msg, header.Seq);
             });
         }
+        // [6 ก.ย. 2026] ธงประดับที่ผู้เล่นติดได้ — client/EquipSystem.cs:86-89 ยิงตัวนี้
+        // ทุกครั้งที่เข้าเกม (AddOnReady) แล้วรับด้วย **global handler** ที่ลงทะเบียนไว้ตั้งแต่ Awake
+        // (บรรทัด 85 On<AttachableAccessories>) — ตัวที่ยิงไม่ได้ต่อ .On() ไว้เลย
+        //
+        // ⚠️ **ต้องตอบด้วย ReplyOf = 0 เท่านั้น** ตอบที่ seq จะไม่มีใครรับ
+        //
+        // ⚠️ ต้องตอบแม้รายการจะว่าง: OnAttachableAccessories เริ่มด้วย _attachableAccessories.Clear()
+        // ⇒ ไม่ตอบ = รายการค้างจากเซสชันก่อนไม่ถูกล้าง (สลับตัวละครแล้วเห็นธงของตัวเก่า)
+        _connection.Recv(delegate(GetAttachableAccessories msg, PacketHeader header)
+        {
+            SendAttachableAccessories();
+        });
+
         // สลับชุดสวมใส่ — client/EquipSystem.cs:238-262 ChangePreset รอ OK ถึงจะสลับ preset จริง
         _connection.Recv(delegate(ChangeEquipSlotType msg, PacketHeader header)
         {
@@ -140,6 +153,13 @@ public partial class Player
         _connection.Recv(delegate(SetSectionItemOrder msg, PacketHeader header)
         {
             WarehouseStore.SetItemOrder(msg.EntityId, msg.SectionName, msg.ItemOrder);
+        });
+        // สร้างแท็บใหม่ในคลัง — client/InventorySystem.cs:700-711 ใช้ .All() ⇒ รับคำตอบชนิดใดก็ได้
+        // แล้วตัดสินสำเร็จ/ไม่สำเร็จจาก Packet.IsSuccess ⇒ ตอบ OK พอ
+        // ไม่ตอบ = ปุ่ม "เพิ่มแท็บ" ค้างหมุนตลอดไป
+        _connection.Recv(delegate(MakeSection msg, PacketHeader header)
+        {
+            HandleMakeSectionMsg(msg, header.Seq);
         });
         // GetWarehouse (3683) อยู่หมวด "อื่น ๆ" ของเอกสาร ไม่ใช่ของไฟล์นี้ — แต่ถ้าไม่มีใครตอบ
         // handler คลัง 5 ตัวข้างบนจะไม่มีวันถูกยิง เพราะ client ต้องได้รายชื่อแท็บก่อน
@@ -285,6 +305,71 @@ public partial class Player
     /// ค่าที่ใช้มาจากไฟล์จริง data/assets/performance.json → "food" → &lt;prototype&gt; → "[minLv, maxLv]"
     /// ⇒ ของทุกชิ้นใช้สูตรของตัวเองตามเลเวลไอเทม ไม่มีการเดาตัวเลข
     /// </summary>
+    /// <summary>
+    /// ธงประดับที่ผู้เล่นคนนี้ติดได้ — <c>AttachableAccessories</c>(9823458)
+    ///
+    /// ข้อมูลจริง <c>data/assets/accessories.json</c> มี **3 รายการ** ทั้งหมดเป็นธงแคลน
+    /// (<c>clan_honour_04/05/06</c> · <c>type = 1</c> = <c>AccessoryType.ClanDefense</c>)
+    /// ปลดล็อกด้วย <c>limits {"1": N}</c> = <c>AccessoryLimit.DefenseCount</c>
+    /// คือ "ป้องกันฐานแคลนสำเร็จติดกัน N ครั้ง"
+    ///
+    /// ⇒ เซิร์ฟยังไม่มีระบบแคลนและไม่มีการป้องกันฐาน **ไม่มีใครปลดล็อกได้เลยตามนิยามของข้อมูลเอง**
+    /// จึงตอบอาเรย์ว่าง ซึ่งเป็นคำตอบที่ถูกต้อง ไม่ใช่การยอมแพ้ — ส่ง id ทั้งสามไปให้เฉย ๆ
+    /// จะกลายเป็นการแจกของที่ข้อมูลเกมบอกว่าต้องได้มาด้วยเงื่อนไข
+    /// </summary>
+    private void SendAttachableAccessories()
+    {
+        Send(new AttachableAccessories { Accessories = Array.Empty<string>() });
+    }
+
+    /// <summary>
+    /// สร้างแท็บใหม่ในคลังของสิ่งปลูกสร้าง — ตัวเก็บของมีอยู่แล้วที่ WarehouseStore.MakeSection
+    ///
+    /// ใช้ด่านเจ้าของตัวเดียวกับการเปิดคลัง เพราะการเพิ่มแท็บคือการแก้ของในหลังนั้น
+    /// </summary>
+    /// <summary>
+    /// หลังนี้ยังมีของค้างอยู่ในตู้/คลังไหม — ใช้กันไม่ให้ "เก็บ/รื้อ" แล้วของหายเงียบ ๆ
+    ///
+    /// ⚠️ <c>ArtifactManager.RemoveArtifact</c> ล้างแค่ addOns/owners/plantings/buildMaterials
+    /// **ไม่แตะ WarehouseStore** ⇒ ของยังค้างในหน่วยความจำใต้ entity id เดิม แต่รอบเซฟถัดไป
+    /// <c>WarehouseStore.Export(Artifacts?.Keys)</c> กรองด้วยรายชื่อหลังที่ยังอยู่ ⇒ **หายจากไฟล์ถาวร**
+    /// และดึงคืนไม่ได้เลยแม้ก่อนรีสตาร์ต เพราะ <c>MayTouchArtifact</c> ล้มเหลวเมื่อหลังนั้นไม่มีแล้ว
+    ///
+    /// ⇒ ปฏิเสธไปเลยดีกว่า ให้ผู้เล่นขนของออกเองก่อน (ด่านเดียวกับของบนหุ่นโชว์)
+    /// </summary>
+    internal bool HasStoredItems(string entityId)
+    {
+        if (string.IsNullOrEmpty(entityId)) return false;
+        foreach (string section in WarehouseStore.SectionNames(entityId))
+        {
+            List<Item> items = WarehouseStore.Items(entityId, section, create: false);
+            if (items is { Count: > 0 }) return true;
+        }
+        return false;
+    }
+
+    private void HandleMakeSectionMsg(MakeSection msg, uint seq)
+    {
+        if (!MayTouchArtifact(msg.EntityId, "สร้างแท็บคลัง"))
+        {
+            Send(new Abort { Text = "ทำกับสิ่งปลูกสร้างนี้ไม่ได้" }, seq);
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(msg.SectionName))
+        {
+            Send(new Abort { Text = "ต้องตั้งชื่อแท็บ" }, seq);
+            return;
+        }
+        if (!WarehouseStore.MakeSection(msg.EntityId, msg.SectionName))
+        {
+            Send(new Abort { Text = "มีแท็บชื่อนี้อยู่แล้ว" }, seq);
+            return;
+        }
+        Console.WriteLine($"[คลัง] {Short(EntityId)} เพิ่มแท็บ '{msg.SectionName}' ใน {msg.EntityId[..Math.Min(8, msg.EntityId.Length)]}");
+        _world.Save();
+        Send(default(OK), seq);
+    }
+
     private void HandleUseItemMsg(UseItem msg, uint seq)
     {
         int idx = _context.InventoryItems.FindIndex(it => it.Id == msg.ItemId);
@@ -299,6 +384,37 @@ public partial class Player
             Send(new Abort { Text = "ไอเทมถูกล็อกอยู่" }, seq);
             return;
         }
+        // ── [6 ก.ย. 2026] บังเหียนที่มีสัตว์เชื่องแล้วอยู่ข้างใน = "ผูกพัน" (귀속) ──────────
+        //
+        // ฝั่งเกมไม่มีข้อความเฉพาะสำหรับการผูกพัน — มันยิง UseItem ตัวเดียวกับการกินอาหาร
+        // (client/Durango.UI/InventoryContainerBase.cs:1116-1119 DoImprinting → InventorySystem.UseItem)
+        // แล้วรอ OK หรือ StartTimer กลับมา (client/InventorySystem.cs:787-817)
+        //
+        // ⚠️ ไม่มีสาขานี้ = บังเหียนที่ฝึกเสร็จแล้ว **ใช้ไม่ได้เลย** ตกลงไปที่ Abort ข้างล่าง
+        // ซึ่งเป็นเหตุผลที่ Player.Domestication.cs เคยต้องยัดสัตว์เข้า PetStore ตั้งแต่ตอนเอาออก
+        // จากกรง (ดูคอมเมนต์ HandleTakeOutReinFromCageMsg) — ตอนนี้ทำตามของจริงได้แล้ว
+        if (item.Ext is Reins)
+        {
+            if (!TryImprintRein(item, out string imprintError))
+            {
+                Send(new Abort { Text = imprintError ?? "ใช้บังเหียนนี้ไม่ได้" }, seq);
+                return;
+            }
+            _context.InventoryItems.RemoveAt(idx);
+            _lockedItemIds.Remove(item.Id);
+            Send(new InventoryUpdated
+            {
+                EntityId = EntityId,
+                RemovedItemIds = new[] { item.Id }
+            });
+            Send(default(OK), seq);
+            // หน้าจอสัตว์เลี้ยงเปิดทันทีหลังได้ OK แล้วอ่านรายชื่อจากชุดที่เซิร์ฟส่งให้
+            // ⇒ ต้องส่งชุดใหม่ ไม่งั้นสัตว์ที่เพิ่งผูกพันไม่โผล่จนกว่าจะเข้าเกมใหม่
+            SendPetsInfo(0u);
+            OnContextChanged();
+            return;
+        }
+
         FoodTable.Effect food = FoodTable.Get(item.Prototype, item.Level);
         if (food == null)
         {

@@ -186,6 +186,12 @@ public partial class Player
     /// </summary>
     private void HandlePutInReinsToCageMsg(PutInReinsToCage msg, uint seq)
     {
+        // ด่านเจ้าของ — ไม่มี = ยัดของลงกรงคนอื่นได้ (เหตุผลเต็มที่ TryFindRein)
+        if (!MayTouchArtifact(msg.EntityId, "ใส่บังเหียนลงกรงฝึก"))
+        {
+            Send(new Abort { Text = "กรงนี้ไม่ใช่ของคุณ" }, seq);
+            return;
+        }
         DomesticCage? cageOpt = _world.ArtifactManager.GetDomesticCage(msg.EntityId);
         if (!cageOpt.HasValue)
         {
@@ -199,6 +205,19 @@ public partial class Player
             return;
         }
         Item item = _context.InventoryItems[idx];
+
+        // ⚠️ [6 ก.ย. 2026] บังเหียนที่ "มีสัตว์เชื่องแล้วอยู่ข้างใน" ห้ามยัดกลับเข้ากรง
+        //
+        // handler นี้สร้างช่องใหม่ด้วย NewDomesticationInfo(item, rein) ซึ่งเป็นสถานะ "สัตว์ป่า"
+        // แล้วลบไอเทมออกจากกระเป๋า ⇒ **สัตว์ที่ฝึกมาทั้งเรื่องหายถาวร ไม่มีข้อความเตือน**
+        // และเพราะ RollDomesticatedRank สุ่มแรงก์ใหม่ทุกครั้งที่ฝึกจบ ⇒ วนยัดกลับ-ฝึกใหม่
+        // จนได้แรงก์ที่ต้องการได้ไม่จำกัด (แรงก์เป็นตัวกำหนดมูลค่าสัตว์ทั้งหมด)
+        if (item.Ext is Reins { Domesticated: true })
+        {
+            Send(new Abort { Text = "สัตว์ตัวนี้เชื่องแล้ว — ต้องกดผูกพันจากกระเป๋าเท่านั้น" }, seq);
+            return;
+        }
+
         DomesticationTables.ReinInfo rein = DomesticationTables.ReinOf(item.Prototype);
         if (rein == null)
         {
@@ -578,14 +597,15 @@ public partial class Player
     ///   ยังไม่เชื่อง (CageStatus.Wild) → คืน "บังเหียน" กลับเข้ากระเป๋า เอาไปใส่กรงอื่นต่อได้
     ///   เชื่องแล้ว                     → ได้ **สัตว์เลี้ยงจริง** เข้า PetStore ของ Player.Animals.cs
     ///
-    /// ⚠️ **จุดที่เราตัดสินใจต่างจากเกมจริง (ตั้งใจ ไม่ใช่ลืม):**
-    /// ของจริงคืนเป็น "บังเหียนที่มีสัตว์อยู่ข้างใน" (Item.Ext = Reins{Domesticated=true, Pet=…})
-    /// แล้วผู้เล่นต้องกด 귀속 (Imprint) จากกระเป๋าอีกทีถึงจะได้สัตว์ ซึ่งวิ่งผ่าน UseItem
-    /// (client/Durango.UI/InventoryContainerBase.cs:1090-1136) — handler ของ UseItem อยู่ใน
-    /// Core/Player.Inventory.cs:288 ซึ่งไฟล์นี้แก้ไม่ได้ และตอนนี้ตอบ Abort กับของที่ไม่ใช่อาหาร
-    /// ⇒ ถ้าคืนเป็นไอเทม สัตว์จะค้างในกระเป๋าใช้ไม่ได้ = หายในสายตาผู้เล่น (ผิดกฎข้อ 2)
-    /// จึงเข้า PetStore ให้เลยตรงนี้ · ผลข้างเคียงที่ยอมรับ: ข้อความในเกมบอกว่า "ย้ายเข้ากระเป๋าแล้ว"
-    /// แต่สัตว์ไปโผล่ที่หน้าจอสัตว์เลี้ยงแทน (ดูรายงาน — ต้องแก้ UseItem ถึงจะตรงของจริง)
+    /// **[6 ก.ย. 2026] ตรงกับของจริงแล้ว** — เดิมยัดสัตว์เข้า PetStore ตรงนี้เลย เพราะตอนนั้น
+    /// <c>UseItem</c> ยังตอบ Abort กับของที่ไม่ใช่อาหาร ⇒ คืนเป็นไอเทมแล้วสัตว์จะค้างใช้ไม่ได้
+    /// ตอนนี้ Core/Player.Inventory.cs รับบังเหียนแล้ว (ดู TryImprintRein) จึงคืนเป็น
+    /// "บังเหียนที่มีสัตว์อยู่ข้างใน" ตามลำดับของเกมจริง:
+    ///   เอาออกจากกรง → ได้ไอเทมเข้ากระเป๋า → กด 귀속 (Imprint) → ถึงได้เป็นสัตว์เลี้ยง
+    /// (client/Durango.UI/InventoryContainerBase.cs:1090-1136 DoImprinting)
+    ///
+    /// ข้อดีที่ตามมา: ผู้เล่นเห็นสัตว์ในกระเป๋าก่อนตัดสินใจ · ย้าย/ขายก่อนผูกพันได้เหมือนของจริง
+    /// (หลังผูกพันแล้วเกมห้ามขาย — ข้อความยืนยันของเกมบอกไว้เอง)
     /// </summary>
     private void HandleTakeOutReinFromCageMsg(TakeOutReinFromCage msg, uint seq)
     {
@@ -600,14 +620,42 @@ public partial class Player
             return;
         }
 
+        // ── เชื่องแล้ว: คืนเป็นบังเหียนที่ "มีสัตว์อยู่ข้างใน" รอผู้เล่นกดผูกพัน ─────────────
         if (info.Domesticated)
         {
-            // ลำดับสำคัญ: ประกอบสัตว์ให้ได้ก่อน → เอาออกจากกรงให้สำเร็จก่อน → ค่อยใส่เข้าสโตร์
-            // สลับลำดับเมื่อไหร่จะได้สัตว์ซ้ำสองตัว (ลบไม่ติด) หรือสัตว์หายเฉย ๆ (ประกอบไม่ได้)
+            // ลำดับสำคัญ: ประกอบให้ครบก่อน → เช็คกระเป๋า → เอาออกจากกรง → ค่อยใส่กระเป๋า
+            // สลับลำดับเมื่อไหร่จะได้สัตว์ซ้ำสองตัว หรือสัตว์หายเฉย ๆ ตอนประกอบไม่สำเร็จ
             PetStore.Entry entry = BuildTamedPetEntry(info);
             if (entry == null)
             {
                 Send(new Abort { Text = "สร้างสัตว์เลี้ยงไม่สำเร็จ (ไม่พบข้อมูลสัตว์ชนิดนี้)" }, seq);
+                return;
+            }
+            Item? withPet = RebuildReinItem(info);
+            if (!withPet.HasValue)
+            {
+                Send(new Abort { Text = "สร้างบังเหียนคืนไม่ได้ (ไม่พบแบบไอเทมของสัตว์ชนิดนี้)" }, seq);
+                return;
+            }
+
+            Item tamedItem = withPet.Value;
+            // ยัดสัตว์ที่ประกอบไว้ลงในบังเหียน — นี่คือสิ่งที่ทำให้ปุ่ม "귀속" โผล่ฝั่งเกม
+            // (client/Durango.Logic.Item/ItemData.cs:552 IsDomesticatedPet = Reins.Domesticated)
+            tamedItem.Ext = new Reins
+            {
+                PetEntityType = (ushort)info.PetEntityType,
+                VehicleEntityType = (ushort)(PetTables.PetOf(info.PetEntityType)?.VehicleEntityType ?? 0),
+                Size = (ushort)DomesticationTables.SizeOfPet(info.PetEntityType),
+                Pet = entry.Pet,
+                Domesticated = true,
+                DomesticateDuration = 0f,
+                DomesticateSuccessRate = 1f
+            };
+
+            int usedSize = _context.InventoryItems.Sum(it => Math.Max(1, it.Size));
+            if (usedSize + Math.Max(1, tamedItem.Size) > PetTuning.PlayerInventoryMaxSize)
+            {
+                Send(new Abort { Text = "กระเป๋าเต็ม" }, seq);
                 return;
             }
             if (!RemoveReinFromCage(msg.EntityId, msg.ItemId))
@@ -615,15 +663,17 @@ public partial class Player
                 Send(new Abort { Text = "เอาสัตว์ออกจากกรงไม่สำเร็จ" }, seq);
                 return;
             }
-            PetStore.Add(EntityId, entry);
-            Console.WriteLine($"[ทำให้เชื่อง] {EntityId} ได้สัตว์เลี้ยงใหม่ {entry.Pet.Name} " +
-                              $"แรงก์ {entry.Pet.Rank} เลเวล {info.Level}");
+
+            _context.InventoryItems.Add(tamedItem);
+            Console.WriteLine($"[ทำให้เชื่อง] {EntityId[..Math.Min(8, EntityId.Length)]} ได้บังเหียนที่มีสัตว์ " +
+                              $"{entry.Pet.Name} แรงก์ {entry.Pet.Rank} เลเวล {info.Level} — รอกดผูกพัน");
             Send(default(OK), seq);
-            // หน้าจอสัตว์เลี้ยงเปิดทีหลังแล้วยิง GetPetsInfo เอง (Player.Animals.cs:390) จึงไม่ต้อง push
+            Send(new InventoryUpdated { EntityId = EntityId, Items = new[] { tamedItem } });
+            OnContextChanged();
             return;
         }
 
-        // ── ยังไม่เชื่อง: คืนบังเหียนกลับกระเป๋า ──────────────────────────────────────────
+        // ── ยังไม่เชื่อง: คืนบังเหียนเปล่ากลับกระเป๋า ────────────────────────────────────
         Item? rebuilt = RebuildReinItem(info);
         if (!rebuilt.HasValue)
         {
@@ -679,9 +729,27 @@ public partial class Player
     // ══════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>หาสัตว์หนึ่งช่องในกรง — คืนเหตุผลเป็นข้อความไทยพร้อมส่งเป็น Abort ให้เลย</summary>
+    /// <summary>
+    /// หาสัตว์หนึ่งตัวในกรง — **พร้อมด่านเจ้าของ**
+    ///
+    /// ⚠️ [6 ก.ย. 2026] เดิมไม่มีด่านเลยสักจุดในไฟล์นี้ ⇒ ใครก็เอาสัตว์ที่คนอื่นฝึกไว้ออกได้
+    /// <c>ItemId</c> ของสัตว์ทุกตัวถูกกระจายฟรีอยู่ใน <c>AppearArtifact.States.DomesticCage.Reins[]</c>
+    /// ให้ทุกคนที่เดินผ่านกรง ⇒ ไม่ต้องเดาอะไรเลย
+    ///
+    /// และตั้งแต่รอบนี้สัตว์ที่ฝึกเสร็จออกมาเป็น "ไอเทมพกพา" ⇒ ของที่ยึดมาย้าย/ซ่อน/ขายต่อได้
+    /// ก่อนผูกพันด้วย ⇒ ช่องนี้ร้ายแรงกว่าเดิมมาก (เจอตอนตรวจความพร้อม deploy)
+    ///
+    /// กรงเลี้ยง (GrowCage) เช็คระดับตัวสัตว์อยู่แล้วที่ Player.Cage.cs — ที่นี่เช็คระดับ "หลัง"
+    /// เพราะ <c>DomesticationInfo</c> ไม่มีฟิลด์เจ้าของให้ตรวจ
+    /// </summary>
     private bool TryFindRein(string entityId, string itemId, out DomesticationInfo info, out string error)
     {
         info = default;
+        if (!MayTouchArtifact(entityId, "ยุ่งกับกรงฝึก"))
+        {
+            error = "กรงนี้ไม่ใช่ของคุณ";
+            return false;
+        }
         DomesticCage? cage = _world.ArtifactManager.GetDomesticCage(entityId);
         if (!cage.HasValue)
         {
@@ -766,6 +834,77 @@ public partial class Player
     }
 
     /// <summary>
+    /// ประกอบ <c>PetStore.Entry</c> จากบังเหียนที่ "มีสัตว์อยู่ข้างในแล้ว" — ใช้ตอนผู้เล่นกดผูกพัน
+    ///
+    /// ต่างจาก <see cref="BuildTamedPetEntry"/> ตรงที่ **ไม่สร้างสัตว์ใหม่**: สัตว์ตัวนี้ถูกประกอบ
+    /// ไว้ตั้งแต่ตอนออกจากกรงฝึกแล้ว (ค่าสถานะ/แท็ก/หลอด เป็นของตัวนั้นจริง ๆ)
+    /// สร้างใหม่ = ผู้เล่นฝึกมาทั้งเรื่องแล้วได้สัตว์คนละตัวกับที่เห็นในหน้าต่างยืนยัน
+    ///
+    /// เพดานหลอดต้องคิดจากตัวสัตว์เอง ไม่ใช่จากตาราง เพราะแท็กที่ได้ระหว่างฝึกมีผลกับ
+    /// <c>DerivedAbilities</c> ไปแล้ว (เกณฑ์เดียวกับ BuildTamedPetEntry)
+    /// </summary>
+    [CanBeNull]
+    private static PetStore.Entry BuildPetEntryFromReins(Reins reins)
+    {
+        if (!reins.Pet.HasValue) return null;
+        Messages.Pet pet = reins.Pet.Value;
+        if (string.IsNullOrEmpty(pet.EntityId)) return null;
+
+        PetTables.ReinPerf perf = PetTables.PerfOf(pet.EntityType, pet.Statistics.Level);
+        return new PetStore.Entry
+        {
+            Pet = pet,
+            Grazing = false,
+            LifeMax = pet.Statistics.DerivedAbilities?.GetValueOrDefault(Derived.LifeMax) ?? 0f,
+            HungryMax = pet.Statistics.DerivedAbilities?.GetValueOrDefault(Derived.HungryMax) ?? 0f,
+            HungryVelocity = perf?.HungryVelocity ?? 0f
+        };
+    }
+
+    /// <summary>
+    /// ผู้เล่นกด "ผูกพัน" (귀속) กับบังเหียนที่มีสัตว์อยู่ข้างใน — เรียกจาก UseItem
+    ///
+    /// คืน <c>true</c> เมื่อผูกพันสำเร็จ (ผู้เรียกต้องลบไอเทมออกจากกระเป๋าแล้วตอบ OK)
+    /// คืน <c>false</c> พร้อม <paramref name="error"/> เมื่อไอเทมนี้ไม่ใช่บังเหียนที่ผูกพันได้
+    ///
+    /// เกณฑ์ "ผูกพันได้" ตรงกับฝั่งเกม: <c>ItemData.IsDomesticatedPet()</c> =
+    /// <c>Reins.HasValue &amp;&amp; Reins.Value.Domesticated</c>
+    /// (client/Durango.Logic.Item/ItemData.cs:552 · Useable.cs:128-131 → UseType.Imprint)
+    /// </summary>
+    private bool TryImprintRein(Item item, out string error)
+    {
+        error = null;
+        if (item.Ext is not Reins reins) { error = null; return false; }   // ไม่ใช่บังเหียน — ให้ผู้เรียกไปทางอื่น
+
+        if (!reins.Domesticated || !reins.Pet.HasValue)
+        {
+            error = "บังเหียนนี้ยังไม่มีสัตว์ที่เชื่องแล้วอยู่ข้างใน";
+            return false;
+        }
+
+        PetStore.Entry entry = BuildPetEntryFromReins(reins);
+        if (entry == null)
+        {
+            error = "ข้อมูลสัตว์ในบังเหียนเสียหาย";
+            return false;
+        }
+
+        List<PetStore.Entry> store = PetStore.Of(EntityId);
+        // กันกดซ้ำ/แพ็กเก็ตซ้ำ — สัตว์ตัวเดิมเข้าสองครั้งจะได้สัตว์ผีที่ลบไม่ออก
+        if (store.Any(e => e.Pet.EntityId == entry.Pet.EntityId))
+        {
+            error = "ผูกพันสัตว์ตัวนี้ไปแล้ว";
+            return false;
+        }
+
+        store.Add(entry);
+        Console.WriteLine($"[ทำให้เชื่อง] {EntityId[..Math.Min(8, EntityId.Length)]} ผูกพัน " +
+                          $"{entry.Pet.EntityId[..Math.Min(8, entry.Pet.EntityId.Length)]} " +
+                          $"(ชนิด {entry.Pet.EntityType} เลเวล {entry.Pet.Statistics.Level})");
+        return true;
+    }
+
+    /// <summary>
     /// ประกอบไอเทมบังเหียนคืนจากสถานะในกรง (ใช้ตอนเอาสัตว์ที่ยังไม่เชื่องออก)
     ///
     /// ไม่ได้เก็บไอเทมตัวเดิมไว้ เพราะของที่เก็บในหน่วยความจำจะหายตอนรีสตาร์ทเซิร์ฟ
@@ -809,6 +948,16 @@ public partial class Player
     /// Support/CageTypes.cs:NormalizeLoaded) ⇒ สร้างใหม่จากข้อมูลจริงทุกครั้ง ปลอดภัยกว่าแปลงกลับ
     ///
     /// เรียกจาก RegisterDomesticationHandlers() ซึ่งอยู่ก่อน SendInventory() ในตัวสร้าง Player
+    ///
+    /// ⚠️ **[6 ก.ย. 2026] บรรทัด `if (item.Ext is Reins) continue;` ข้างล่างสำคัญกว่าที่เห็น**
+    /// ตั้งแต่ระบบผูกพันใช้งานได้ บังเหียนที่ออกจากกรงฝึกจะ **มีสัตว์อยู่ข้างใน**
+    /// (<c>Reins.Pet</c> + <c>Domesticated = true</c>) ซึ่งสร้างใหม่จาก prototype ไม่ได้เลย
+    /// ⇒ เอาบรรทัดนั้นออกเมื่อไหร่ = สัตว์ที่ผู้เล่นฝึกมาทั้งเรื่องหายทุกครั้งที่เข้าเกม
+    ///
+    /// ของที่โหลดจากไฟล์กู้ไปแล้วก่อนถึงตรงนี้: <c>PlayerContext.Initialize</c> เรียก
+    /// <c>ItemExtRepair.Normalize(InventoryItems)</c> ซึ่งรู้จัก <c>Reins</c> และแปลงกลับด้วย
+    /// <c>Json.Setting</c> ชุดเดียวกับตอนเขียน (ได้ GaugeConverter ⇒ หลอดของสัตว์ไม่หาย)
+    /// ⇒ มาถึงตรงนี้ Ext เป็น <c>Reins</c> จริงแล้ว ไม่ใช่ JObject
     /// </summary>
     private void NormalizeReinItems()
     {
@@ -824,7 +973,7 @@ public partial class Player
             {
                 if (item.Ext is JObject)
                 {
-                    Console.WriteLine($"[ทำให้เชื่อง] บังเหียน {item.Prototype} โหลดกลับมาเป็น JObject — สร้างใหม่จากข้อมูลจริง");
+                    Console.WriteLine($"[ทำให้เชื่อง] บังเหียน {item.Prototype} โหลดกลับมาเป็น JObject (ไม่มีสัตว์ข้างใน) — สร้างใหม่จากข้อมูลจริง");
                 }
                 item.Ext = ext;
                 items[i] = item;

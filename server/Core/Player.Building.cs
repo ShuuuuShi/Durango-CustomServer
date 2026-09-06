@@ -81,6 +81,29 @@ public partial class Player
     /// <summary>**ค่าของเรา** — เพดานจำนวนวัสดุต่อช่อง (กันสูตร size_factor เพี้ยนขอของหลักหมื่น)</summary>
     private const int MaxSlotItems = 200;
 
+    /// <summary>
+    /// **ค่าของเรา** — จำนวนพื้นที่ที่จองค้างไว้ (สถานะ Occupied) ได้พร้อมกันต่อผู้เล่นหนึ่งคน
+    ///
+    /// ผู้เล่นปกติจองทีละหลังแล้วสร้างให้เสร็จ · 8 เผื่อคนที่วางผังทั้งฐานก่อนค่อยทยอยสร้าง
+    /// ไม่จำกัด = ยิงรัว ๆ ทำให้เซิร์ฟ fsync ไฟล์เกาะทุกแพ็กเก็ต (ดูจุดที่ใช้)
+    /// </summary>
+    private const int MaxOccupiedSitesPerPlayer = 8;
+
+    /// <summary>จำนวนไซต์ที่ผู้เล่นคนนี้จองค้างไว้และยังไม่ได้สร้าง</summary>
+    private int CountMyOccupiedSites()
+    {
+        int count = 0;
+        foreach (AppearArtifact a in _world.ArtifactManager.Enumerable(
+                     a => a.States.BuildingState == BuildingState.Occupied))
+        {
+            if (string.Equals(_world.ArtifactManager.OwnerOf(a.EntityId), EntityId, StringComparison.Ordinal))
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
     private void RegisterBuildingHandlers()
     {
         _connection.Recv(delegate(OccupyArtifactSite msg, PacketHeader header)
@@ -106,6 +129,23 @@ public partial class Player
         _connection.Recv(delegate(CompleteArtifact msg, PacketHeader header)
         {
             HandleCompleteArtifactMsg(msg, header.Seq);
+        });
+        // ⚠️ ตัวนี้ถูกยิง **ก่อน** CapsulateArtifact เสมอ และถ้าไม่ตอบ
+        // กล่องยืนยันจะไม่เด้งเลย ⇒ ปุ่ม "포장" กดแล้วเงียบสนิท ไม่มี error อะไรให้เห็น
+        // (client/Durango.Logic.Interactions/ArtifactInteractions.cs:398-417 Capsulate
+        //  → Send(GetCapsulatingCost).On<Cost>(… ShowPayConfirm … → DoCapsulateArtifact))
+        // **เจอจากการเทสในเกมจริง** — อ่านแต่ DoCapsulateArtifact อย่างเดียวจะมองไม่เห็นด่านนี้
+        _connection.Recv(delegate(GetCapsulatingCost msg, PacketHeader header)
+        {
+            HandleGetCapsulatingCostMsg(msg, header.Seq);
+        });
+        _connection.Recv(delegate(CapsulateArtifact msg, PacketHeader header)
+        {
+            HandleCapsulateArtifactMsg(msg, header.Seq);
+        });
+        _connection.Recv(delegate(PlaceCapsulatedArtifact msg, PacketHeader header)
+        {
+            HandlePlaceCapsulatedArtifactMsg(msg, header.Seq);
         });
         _connection.ConnetionClosed += ClearBuildTimers;
     }
@@ -140,6 +180,25 @@ public partial class Player
             BuildTuning.EvalByArea(BuildTuning.SiteDuration, area, 2 + area), 0.0, MaxBuildSeconds);
         float energy = (float)Math.Max(0.0,
             BuildTuning.EvalByArea(BuildTuning.SiteEnergy, area, 1 + area * 2));
+
+        // ⚠️ [6 ก.ย. 2026] ทับของเดิมไม่ได้ — ไม่มีด่านนี้ = วางคร่อมบ้านคนอื่นได้
+        // แล้วเหยื่อรื้อคืนไม่ได้เพราะด่านเจ้าของบล็อก (ดู ArtifactManager.FindOverlapping)
+        if (_world.ArtifactManager.FindOverlapping(msg.Tile, size, msg.Floor) is { } blocking)
+        {
+            Console.WriteLine($"[สร้าง] ปฏิเสธ {Short(EntityId)}: ช่อง [{msg.Tile.x},{msg.Tile.y}] " +
+                              $"ทับ {blocking[..Math.Min(8, blocking.Length)]}");
+            Send(new Abort { Text = "ตรงนี้มีของวางอยู่แล้ว" }, seq);
+            return;
+        }
+
+        // ⚠️ เพดานไซต์ที่ค้างอยู่ต่อคน — ไม่มี = จองรัว ๆ ได้ไม่จำกัด และทุกครั้งเซิร์ฟ
+        // serialize ไฟล์เกาะทั้งไฟล์ + fsync บนลูปหลัก (World.Save → WorldContext.Save)
+        // ⇒ ไฟล์เกาะบวมด้วยขยะ และ .bak ของผู้เล่นจริงถูกไล่ทับจนไม่เหลือจุดย้อนกลับ
+        if (CountMyOccupiedSites() >= MaxOccupiedSitesPerPlayer)
+        {
+            Send(new Abort { Text = $"มีพื้นที่ที่จองค้างไว้ครบ {MaxOccupiedSitesPerPlayer} จุดแล้ว — สร้างให้เสร็จหรือรื้อทิ้งก่อน" }, seq);
+            return;
+        }
 
         AppearArtifact site = MakeSiteArtifact(blueprint, msg, size);
 
@@ -219,8 +278,8 @@ public partial class Player
             Tile = msg.Tile,
             Size = size,
             Height = blueprint.Height,
-            Floor = msg.Floor,
-            Stories = msg.Stories,
+            Floor = ClampFloor(msg.Floor),
+            Stories = ClampStories(blueprint, msg.Stories),
             Rotation = msg.Rotation,
             FounderEntityId = EntityId,
             ArchitectEntityIds = new[] { EntityId }
@@ -244,6 +303,34 @@ public partial class Player
         artifact.States.MaxHealth = Cheats.ArtifactMaxHealth;
         artifact.States.Durability = FullDurability();
         return artifact;
+    }
+
+    /// <summary>
+    /// จำนวนชั้นที่ยอมรับ — **ไม่ clamp = client ส่งเลขอะไรมาก็ได้แล้วเครื่องคนอื่นแครช**
+    ///
+    /// ⚠️ ฝั่งเกมคิด <c>num = Stories * Size.x * Size.y</c> แล้ว <c>new Artifact[num]</c> ทันที
+    /// ⇒ ส่ง Stories หลักร้อยล้านคู่กับรั้ว 32×32 = จองอาเรย์หลายร้อย MB ⇒ OutOfMemory
+    /// ของ **ทุกคนที่เดินเข้าใกล้** · ค่าติดลบ = ArgumentException
+    /// และเพราะของชิ้นนี้ค้างในไฟล์ .world ⇒ ทุกคนแครชซ้ำทุกครั้งที่ล็อกอิน จนกว่าแอดมินจะลบให้
+    ///
+    /// เพดานมาจากข้อมูลจริง <c>constants.json → artifact_floor → max_stories</c> (= 3)
+    /// ซึ่งเป็นค่าเดียวกับที่ฝั่งเกมใช้ปิดปุ่มต่อเติม (client/BuildSystem.cs:456)
+    /// แบบแปลนที่ไม่ใช่ Modular ไม่มีแนวคิดเรื่องชั้น ⇒ บังคับเป็น null
+    /// </summary>
+    private static int? ClampStories(MergedBlueprint blueprint, int? requested)
+    {
+        bool modular = blueprint.Components != null && blueprint.Components.Contains("Modular");
+        if (!modular || !requested.HasValue) return null;
+        return Math.Clamp(requested.Value, 1, ArtifactFloorTuning.MaxStories);
+    }
+
+    /// <summary>
+    /// ชั้นที่วางของ — เหตุผลเดียวกับ <see cref="ClampStories"/> (ฝั่งเกมคูณ Floor เข้ากับความสูงภาพ)
+    /// </summary>
+    private static int? ClampFloor(int? requested)
+    {
+        if (!requested.HasValue) return null;
+        return Math.Clamp(requested.Value, 0, ArtifactFloorTuning.MaxStories);
     }
 
     /// <summary>
@@ -516,6 +603,211 @@ public partial class Player
         var completed = new ArtifactCompleted { EntityId = artifact.EntityId };
         Send(completed, seq);
         _world.BroadCast(completed);
+    }
+
+    // ── 7. เก็บ/วาง (ย้ายสิ่งปลูกสร้าง) ──────────────────────────────────────────────
+    //
+    // client → CapsulateArtifact(4020) {EntityId, Tile}
+    //          server → Timer(1134) ที่ seq · แล้วลบหลังนั้นออกจากโลก + ให้ไอเทมห่อ
+    //          (client/Durango.Logic.Interactions/ArtifactInteractions.cs:420-431)
+    //
+    // client → PlaceCapsulatedArtifact(4021) {ItemId, Tile, Floor, Rotation}
+    //          server → Timer(1134) ที่ seq · แล้วสร้างหลังกลับจากข้อมูลในไอเทม
+    //          (client/BuildSystem.cs:337-350)
+    //
+    // ⚠️ ข้อมูลทั้งหลังถูกยัดลง Item.Ext เป็น ArtifactCapsule ซึ่งเป็นชนิด object
+    // ⇒ ผ่านไฟล์เซฟแล้วกลับมาเป็น JObject เหมือนทุกครั้ง — ตัวกู้มีอยู่แล้วที่
+    // Core/PlayerContext.cs RebuildCapsule (รู้จัก ArtifactCapsule และกู้ State.Cage ที่ซ้อน
+    // อยู่ข้างในอีกชั้นให้ด้วย) ⇒ ระบบนี้ไม่ต้องทำอะไรเพิ่มเรื่องการเซฟ
+
+    /// <summary>prototype ของไอเทม "สิ่งปลูกสร้างที่ห่อไว้" — item/prototype_data.json</summary>
+    private const string CapsuleProtoId = "artifact_capsule";
+
+    /// <summary>
+    /// ค่าเก็บของ — <c>Cost</c>(4023) ตอบที่ seq เดิม
+    ///
+    /// ข้อมูลจริง <c>constants.json → build → capsulating → cost</c>:
+    /// <code>{"inside": "0", "outside": "t_stone_reference * level"}</code>
+    /// อยู่ในอาคาร = ฟรี · นอกอาคาร = คิดตามเลเวลด้วยหน่วย t_stone
+    ///
+    /// ⇒ **คิดค่าไม่ได้ตอนนี้** เพราะสองอย่าง: เซิร์ฟไม่มีระบบเงิน (ไม่มีกระเป๋า t_stone ให้หัก)
+    /// และไม่มีค่า <c>t_stone_reference</c> ในชุดข้อมูลที่สกัดมา
+    /// ⇒ ตอบ 0 = ฟรี ซึ่งเป็นค่าที่ไฟล์เองใช้สำหรับกรณี "อยู่ในอาคาร" อยู่แล้ว
+    /// ไม่ใช่ตัวเลขที่เดาขึ้นมา · เหตุผลเดียวกับที่ค่าเดินเรือให้ฟรีไปก่อน (Player.HandleGetRoutesMsg)
+    /// </summary>
+    private void HandleGetCapsulatingCostMsg(GetCapsulatingCost msg, uint seq)
+    {
+        Send(new Cost { Currency = Shared.Economy.Currency.TStone, Amount = 0L }, seq);
+    }
+
+    private void HandleCapsulateArtifactMsg(CapsulateArtifact msg, uint seq)
+    {
+        if (!TryGetBuildTarget(msg.EntityId, "เก็บ", out AppearArtifact artifact,
+                               out MergedBlueprint blueprint, out string error))
+        {
+            Send(new Abort { Text = error }, seq);
+            return;
+        }
+
+        // เก็บได้เฉพาะหลังที่สร้างเสร็จแล้ว — หลังที่ยังก่อสร้างค้างมีวัสดุอยู่ข้างใน
+        // ถ้าเก็บได้จะได้ของคืนฟรีโดยไม่เสียอะไร (การยกเลิกงานก่อสร้างเป็นคนละเส้นทาง)
+        if (artifact.States.BuildingState != BuildingState.Completed)
+        {
+            Send(new Abort { Text = "เก็บได้เฉพาะสิ่งปลูกสร้างที่สร้างเสร็จแล้ว" }, seq);
+            return;
+        }
+        // ข้อมูลเกมบอกเองว่าชนิดไหนเก็บไม่ได้ — เช็คแค่ Permanent ไม่พอ
+        // (capsulizable = false อยู่ 101 จาก 560 ชนิด เช่น สระว่ายน้ำ · ห้องเรียนโมดูลาร์)
+        if (blueprint.Permanent || !blueprint.Capsulizable)
+        {
+            Send(new Abort { Text = "สิ่งปลูกสร้างนี้เก็บไม่ได้" }, seq);
+            return;
+        }
+        // ของบนหุ่นโชว์เก็บอยู่คนละตารางกับ AppearArtifact — เก็บหลังไปแล้วของจะค้างไร้เจ้าของ
+        if (_world.ArtifactManager.GetMannequin(artifact.EntityId).HasValue)
+        {
+            Send(new Abort { Text = "ต้องเอาของออกจากหุ่นโชว์ก่อน" }, seq);
+            return;
+        }
+        // ⚠️ [6 ก.ย. 2026] ของในตู้/คลังก็อยู่คนละตารางเหมือนกัน และ **หายถาวร** ถ้าเก็บหลังไป
+        // (เหตุผลเต็มที่ Player.Inventory.HasStoredItems) — เจอตอนตรวจความพร้อม deploy
+        if (HasStoredItems(artifact.EntityId))
+        {
+            Send(new Abort { Text = "ต้องเอาของออกจากตู้ก่อน" }, seq);
+            return;
+        }
+
+        Item? made = Cheats.MakeItem(CapsuleProtoId, Math.Max(1, (int)artifact.States.Level));
+        if (!made.HasValue)
+        {
+            Send(new Abort { Text = "สร้างไอเทมห่อไม่สำเร็จ" }, seq);
+            return;
+        }
+
+        Item capsuleItem = made.Value;
+        capsuleItem.Ext = new ArtifactCapsule
+        {
+            EntityId = artifact.EntityId,
+            BlueprintId = blueprint.Id,
+            ArtifactLevel = artifact.States.Level,
+            Tags = artifact.Tags._Tags,
+            Performance = Array.Empty<Messages.Performance>(),
+            Display = artifact.Display,
+            State = artifact.States,
+            LookNames = new Dictionary<string, string>(),
+            // ขนาดที่จะกินตอนวางกลับ — ต้องเก็บไว้เพราะแบบแปลนที่ปรับขนาดได้สร้างขนาดเดิม
+            // กลับจาก blueprint ไม่ได้ (รั้ว 1×8 กับ 1×3 ใช้แบบแปลนเดียวกัน)
+            OccupySize = artifact.Size
+        };
+
+        int usedSize = _context.InventoryItems.Sum(it => Math.Max(1, it.Size));
+        if (usedSize + Math.Max(1, capsuleItem.Size) > PetTuning.PlayerInventoryMaxSize)
+        {
+            Send(new Abort { Text = "กระเป๋าเต็ม" }, seq);
+            return;
+        }
+
+        // ลำดับสำคัญ: ประกอบของให้ครบ → เช็คกระเป๋า → ค่อยลบหลังจริง
+        // ลบก่อนแล้วพลาดทีหลัง = บ้านหายโดยไม่ได้อะไรคืน
+        _world.DestructArtifact(artifact.EntityId);
+        _context.InventoryItems.Add(capsuleItem);
+        OnContextChanged();
+
+        Console.WriteLine($"[สร้าง] {Short(EntityId)} เก็บ {blueprint.Id} " +
+                          $"ที่ [{artifact.Tile.x},{artifact.Tile.y}] ใส่กระเป๋า");
+
+        Send(new Messages.Timer { Duration = Math.Max(0f, BuildTuning.CapsulatingTime) }, seq);
+        Send(new InventoryUpdated { EntityId = EntityId, Items = new[] { capsuleItem } });
+        // เอฟเฟกต์ให้ทุกคนบนเกาะเห็น (client/BuildSystem.cs On<ArtifactCapsulated>)
+        _world.BroadCast(new ArtifactCapsulated
+        {
+            Tile = artifact.Tile,
+            Floor = artifact.Floor,
+            Size = artifact.Size
+        });
+    }
+
+    private void HandlePlaceCapsulatedArtifactMsg(PlaceCapsulatedArtifact msg, uint seq)
+    {
+        int index = _context.InventoryItems.FindIndex(it => it.Id == msg.ItemId);
+        if (index < 0)
+        {
+            Send(new Abort { Text = "ไม่พบไอเทมในกระเป๋า" }, seq);
+            return;
+        }
+        Item item = _context.InventoryItems[index];
+        if (item.Ext is not ArtifactCapsule capsule)
+        {
+            Send(new Abort { Text = "ไอเทมนี้ไม่ใช่สิ่งปลูกสร้างที่ห่อไว้" }, seq);
+            return;
+        }
+
+        MergedBlueprint blueprint = BlueprintStore.GetBlueprint(capsule.BlueprintId);
+        if (blueprint == null)
+        {
+            Send(new Abort { Text = "ไม่รู้จักแบบแปลนของสิ่งปลูกสร้างนี้" }, seq);
+            return;
+        }
+
+        Point2 size = capsule.OccupySize ?? blueprint.Size;
+        if (!IsWithinTiles(msg.Tile, ArtifactReachTiles + Math.Max(size.x, size.y)))
+        {
+            Console.WriteLine($"[สร้าง] ปฏิเสธ {Short(EntityId)}: วางที่ [{msg.Tile.x},{msg.Tile.y}] ไกลเกินไป");
+            Send(new Abort { Text = "อยู่ไกลเกินไป" }, seq);
+            return;
+        }
+
+        // ทับของเดิมไม่ได้ (เหตุผลเดียวกับตอนจองพื้นที่)
+        if (_world.ArtifactManager.FindOverlapping(msg.Tile, size, msg.Floor) is { } blocking)
+        {
+            Console.WriteLine($"[สร้าง] ปฏิเสธ {Short(EntityId)}: วางทับ {blocking[..Math.Min(8, blocking.Length)]}");
+            Send(new Abort { Text = "ตรงนี้มีของวางอยู่แล้ว" }, seq);
+            return;
+        }
+
+        // ประกอบหลังกลับจากข้อมูลในไอเทม — **entity id ต้องเป็นตัวใหม่**
+        // ใช้ id เดิมที่เก็บไว้ในห่อไม่ได้ เพราะของในตู้ที่เคยผูกกับ id นั้นถูกล้างไปตอนเก็บแล้ว
+        // และถ้าบังเอิญมีของอื่นใช้ id ซ้ำอยู่ จะทับกันเงียบ ๆ
+        var placed = new AppearArtifact
+        {
+            EntityId = Guid.NewGuid().ToString(),
+            EntityType = (ushort)blueprint.EntityType,
+            IsAlive = true,
+            Tile = msg.Tile,
+            Size = size,
+            Height = blueprint.Height,
+            Floor = ClampFloor(msg.Floor),
+            Rotation = msg.Rotation,
+            Display = capsule.Display,
+            Tags = new Tags { _Tags = capsule.Tags },
+            States = capsule.State,
+            FounderEntityId = EntityId,
+            ArchitectEntityIds = new[] { EntityId }
+        };
+        // สามฟิลด์นี้อ้าง entity ของตัวเอง — ไม่เขียนทับ ข้อความอัปเดตทุกตัวจะถูกทิ้งเงียบ
+        // (เหตุผลเต็มที่ Cheats.MakeAppearArtifact)
+        placed.Display.EntityId = placed.EntityId;
+        placed.States.EntityId = placed.EntityId;
+        placed.Tags.EntityId = placed.EntityId;
+        // วางแล้วต้องใช้งานได้ทันที ไม่ใช่กลับไปเป็นไซต์ก่อสร้าง
+        placed.States.BuildingState = BuildingState.Completed;
+        placed.States.Postprocess = null;
+
+        _context.InventoryItems.RemoveAt(index);
+        _world.ConstructArtifact(placed, null, EntityId);
+        OnContextChanged();
+
+        Console.WriteLine($"[สร้าง] {Short(EntityId)} วาง {blueprint.Id} " +
+                          $"ที่ [{msg.Tile.x},{msg.Tile.y}] {size.x}×{size.y}");
+
+        Send(new Messages.Timer { Duration = Math.Max(0f, BuildTuning.PlacingTime) }, seq);
+        Send(new InventoryUpdated { EntityId = EntityId, RemovedItemIds = new[] { item.Id } });
+        _world.BroadCast(new ArtifactPlaced
+        {
+            Tile = placed.Tile,
+            Size = placed.Size,
+            Floor = placed.Floor
+        });
     }
 
     // ── ตัวช่วย ─────────────────────────────────────────────────────────────────────

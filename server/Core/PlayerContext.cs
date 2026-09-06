@@ -102,6 +102,41 @@ public class PlayerContext
     [JsonProperty("death_count")]
     public int DeathCount;
 
+    /// <summary>
+    /// [6 ก.ย. 2026] entity ของสิ่งปลูกสร้างที่ผู้เล่นตั้งเป็น "จุดกลับ" (귀환 지점)
+    ///
+    /// ตั้งผ่าน <c>SetAsHome</c>(2102) ที่เตียง — ข้อมูลจริงมี 12 แบบแปลนที่มี component
+    /// <c>Home</c> (bed_01..bed_04 · tent · temptent ฯลฯ ดู entity_types/artifact.json)
+    /// ใช้ตอนผู้เล่นกดปุ่มบ้านบนแผนที่ (<c>ReturnToHome</c> 2100)
+    ///
+    /// ⚠️ เก็บเป็น entity id ไม่ใช่พิกัด เพราะบ้านถูกรื้อได้ — เก็บพิกัดไว้จะวาร์ปไปที่ว่าง
+    /// เปล่ากลางเกาะหลังบ้านหาย ⇒ ต้องเช็คว่าหลังนั้นยังอยู่ทุกครั้งก่อนวาร์ป
+    /// </summary>
+    [JsonProperty("home_artifact_id", NullValueHandling = NullValueHandling.Ignore)]
+    public string HomeArtifactId;
+
+    /// <summary>
+    /// จุดเกิดใหม่/จุดกลับที่ผู้เล่นตั้งเอง (<c>SetReturningPoint</c> 2105) — หน่วยเป็นช่อง
+    ///
+    /// ไม่มีค่า = ใช้จุดเข้าเกาะของโลก (<c>World.EntryPoint</c>) เหมือนเดิม
+    /// เก็บเป็นตัวเลขสองตัวไม่ใช่ <c>Point2</c> ด้วยเหตุผลเดียวกับ <see cref="ExploredPoint"/>
+    /// (struct ของโปรโตคอลผ่าน JSON แล้วอ่านกลับไม่ตรงชนิด)
+    /// </summary>
+    [JsonProperty("returning_x", NullValueHandling = NullValueHandling.Ignore)]
+    public int? ReturningX;
+
+    [JsonProperty("returning_y", NullValueHandling = NullValueHandling.Ignore)]
+    public int? ReturningY;
+
+    /// <summary>
+    /// เวลา (unix) ที่ผู้เล่นกดค้นหาจุดสำคัญครั้งล่าสุด — <c>SearchPOIs</c>(904)
+    ///
+    /// ต้องเก็บลงไฟล์เพราะฝั่งเกมถามกลับมาทุกครั้งที่เปิดเมนู (<c>GetLastSearchedTime</c> 906)
+    /// เพื่อโชว์เวลาที่ค้นล่าสุด — เก็บแค่ในหน่วยความจำจะรีเซ็ตทุกครั้งที่ต่อใหม่
+    /// </summary>
+    [JsonProperty("poi_searched_at", NullValueHandling = NullValueHandling.Ignore)]
+    public double POISearchedAt;
+
     [JsonIgnore]
     public string Path { get; private set; }
 
@@ -147,9 +182,17 @@ public class PlayerContext
         // ⚠️ ซ่อม Item.Ext ที่โหลดกลับมาเป็น JObject **ก่อน** ที่ใครจะเอาไอเทมไปแพ็กลงแพ็กเก็ต
         // (เหตุผลเต็ม ๆ ดูที่หัวคลาส ItemExtRepair ท้ายไฟล์ — ไม่ทำ = ไอเทมทั้งชิ้นเลื่อนช่อง)
         ItemExtRepair.Normalize(InventoryItems, "กระเป๋าผู้เล่น");
+        // [6 ก.ย. 2026] ไอเทมที่เซฟไว้ก่อนมีระบบคำแปล เก็บ "ชื่อ" เป็นข้อความเกาหลีลงไฟล์ไปแล้ว
+        // ⇒ โหลดกลับมาก็ยังเกาหลี ทั้งที่ของใหม่เป็นไทยหมดแล้ว (ดู Support/MoCatalog.cs)
+        // แปลตอนโหลดครั้งเดียว แล้วรอบเซฟถัดไปจะเขียนทับเป็นไทยเอง
+        ItemNames.Localize(InventoryItems, "กระเป๋าผู้เล่น");
         foreach (PetSaveData pet in Pets)
         {
-            if (pet != null) ItemExtRepair.Normalize(pet.Bag, "กระเป๋าสัตว์");
+            if (pet != null)
+            {
+                ItemExtRepair.Normalize(pet.Bag, "กระเป๋าสัตว์");
+                ItemNames.Localize(pet.Bag, "กระเป๋าสัตว์");
+            }
         }
         // [5 ก.ย. 2026] สร้าง/ซ่อมหลอดสถานะจากข้อมูลจริงทุกครั้งที่เปิด context ไม่ใช่แค่ตอนสร้างใหม่
         //
@@ -302,6 +345,41 @@ public class PetSaveData
 /// ซึ่งเป็นซอร์สของ NEXON ไม่ได้) ⇒ ดูจาก "ชื่อฟิลด์ที่มีเฉพาะในชนิดนั้น" แบบเดียวกับที่
 /// Support/CageTypes.NormalizeLoaded ใช้ฟิลด์ Tasks แยก GrowCage ออกจาก Cage
 /// </summary>
+/// <summary>
+/// แปลชื่อ/คำอธิบายไอเทมที่ค้างเป็นภาษาเกาหลีอยู่ในไฟล์เซฟ
+///
+/// ═══ ทำไมต้องมี ═══
+/// <c>Messages.Item.Name</c> เป็น <c>string</c> ที่เซิร์ฟ "ตัดสินใจแล้ว" ตอนสร้างไอเทม
+/// (Cheats.MakeItem หยิบจาก <c>Prototype.Name</c> ซึ่งเป็น <see cref="Durango.Utils.Gettext"/>)
+/// ⇒ ไอเทมที่สร้างก่อนมีระบบคำแปล ถูกเขียนลงไฟล์เป็นภาษาเกาหลีถาวร
+/// และฝั่งเกมเอาไปโชว์ตรง ๆ ไม่แปลซ้ำ (client/Durango.Logic.Item/ItemData.cs:132)
+///
+/// ⚠️ ไม่แปลตรงนี้ = ผู้เล่นเก่าเห็นของเก่าเป็นเกาหลี ของใหม่เป็นไทย ปนกันในกระเป๋าเดียว
+///
+/// ปลอดภัยที่จะทำซ้ำ: <see cref="MoCatalog.Translate"/> คืนข้อความเดิมถ้าไม่เจอคำแปล
+/// และคำแปลไทยจะไม่ตรงกับ msgid เกาหลีอยู่แล้ว ⇒ แปลรอบสองไม่เปลี่ยนอะไร
+/// </summary>
+internal static class ItemNames
+{
+    public static void Localize([CanBeNull] List<Item> items, string where)
+    {
+        if (items == null || items.Count == 0 || !MoCatalog.Ready) return;
+        int changed = 0;
+        for (int i = 0; i < items.Count; i++)
+        {
+            Item item = items[i];
+            string name = MoCatalog.Translate(item.Name);
+            string desc = MoCatalog.Translate(item.Description);
+            if (ReferenceEquals(name, item.Name) && ReferenceEquals(desc, item.Description)) continue;
+            item.Name = name;
+            item.Description = desc;
+            items[i] = item;
+            changed++;
+        }
+        if (changed > 0) Console.WriteLine($"[ภาษา] แปลชื่อไอเทมใน{where} {changed} ชิ้น");
+    }
+}
+
 internal static class ItemExtRepair
 {
     public static void Normalize([CanBeNull] List<Item> items, string where)

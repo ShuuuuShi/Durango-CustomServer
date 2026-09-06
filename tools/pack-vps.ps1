@@ -213,9 +213,14 @@ if (-not $SkipGame) {
     else {
         if (Test-Path $GameOut) { Remove-Item $GameOut -Recurse -Force }
         # ตัดของที่ไม่ควรติดไปกับชุดแจก: เซฟของเครื่องเรา · log · DLL สำรอง · session ของ launcher
+        #
+        # ⚠️ account.key สำคัญที่สุด — เป็น "กุญแจบัญชีประจำเครื่อง" ของคนแพ็ก
+        # ติดไปกับชุดแจกเมื่อไหร่ = ผู้เล่นทุกคนใช้กุญแจเดียวกัน ⇒ เห็นและเข้าตัวละครเดียวกันหมด
+        # ⇒ ระบบบัญชีทั้งระบบไร้ความหมายทันที (client/Durango.System/DeviceAccount.cs สร้างใหม่
+        #    ให้เองถ้าไม่มีไฟล์ ⇒ ต้องไม่มีมาแต่แรก)
         $exclude = @('AppData', 'Users', 'MemoryBotCaptures', 'mods', 'logs')
         & robocopy $gameSrc $GameOut /E /NFL /NDL /NJH /NJS /NP `
-            /XD $exclude /XF '*.log' '*.bak-*' 'launcher.session' '*.pid' | Out-Null
+            /XD $exclude /XF '*.log' '*.bak-*' 'launcher.session' '*.pid' 'account.key' | Out-Null
         if ($LASTEXITCODE -ge 8) { Say '   ก๊อปตัวเกมไม่สำเร็จ' Red; exit 1 }
 
         # ชี้ไปเซิร์ฟ VPS — ไฟล์นี้ตัวเกมอ่านตอนขึ้นหน้า Title (TitleMenuGroup.ReadLocalClusterJson)

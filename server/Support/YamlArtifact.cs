@@ -75,6 +75,7 @@ public class ArtifactPrototype
     public int[][] effect_tiles { get; set; }
     public bool time_limited { get; set; }
     public bool is_craft { get; set; }
+    public bool capsulizable { get; set; } = true;   // เก็บใส่กระเป๋าได้ไหม (101/560 เป็น false)
     public string[] musics { get; set; }
     public string gender { get; set; }
 }

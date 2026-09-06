@@ -161,6 +161,9 @@ internal static class Program
         Console.WriteLine($"[boot] data={dataDir} terrains={TerrainLoader.TerrainDir}");
 
         // ---- game data (เทียบเท่า Loader ของ client) ----
+        // ⚠️ ต้องโหลด**ก่อน** DataStore — ตัวนั้นอ่าน JSON แล้วสร้าง Gettext ทันที
+        // ซึ่ง Gettext.ToString() จะไปหยิบคำแปลจาก catalog นี้ (ดู Support/MoCatalog.cs)
+        MoCatalog.Load(dataDir);
         DataStore.Load(dataDir);
 
         // สารบัญเกาะ — ระบบล่องเรือใช้ตอบว่าจากท่าเรือนี้ไปไหนได้บ้าง (ต้องหลัง TerrainLoader.TerrainDir)

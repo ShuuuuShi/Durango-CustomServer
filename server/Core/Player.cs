@@ -115,6 +115,34 @@ public partial class Player
             _world.BroadCast(msg);
             HandleMoveMsg(msg.Movements);
         });
+        // [6 ก.ย. 2026] กระโดดหลบ — ฝั่งเกม **ไม่รอคำตอบเลย** (client/PlayerController.cs:656
+        // ยิง Send(default(Dashed)) แล้วทิ้งค่าที่คืนมา ไม่ต่อ .On/.Rest สักตัว)
+        // ⇒ ห้ามตอบอะไรกลับ · หน้าที่เดียวของเซิร์ฟคือหักหลอดความอึด
+        // ไม่หัก = กระโดดรัวได้ไม่จำกัด (หลอด stamina ฝั่งเกมเป็นแค่ภาพ เซิร์ฟเป็นเจ้าของค่าจริง)
+        _connection.Recv(delegate(Dashed msg, PacketHeader header)
+        {
+            if (!_context.AppearPlayer.IsAlive) return;
+            // constants.json → dash → stamina (ของจริง = 20 · หลอดเต็ม 100 ฟื้น 5/วินาที
+            // ⇒ กระโดดรัวได้ 5 ครั้งแล้วต้องรอ ~4 วินาที ตรงกับเกมจริง)
+            _survival.Add(SurvivalState.KeyStamina, -DashTuning.Stamina);
+            FlushSurvival();   // ค่ากระโดด ⇒ ส่งเส้นใหม่ทันที ไม่รอรอบตรวจ
+        });
+
+        // [6 ก.ย. 2026] เริ่มออกเดิน — ฝั่งเกมยิงตอนขอบขาขึ้นของการเคลื่อนที่
+        // (client/MoveMsgGenerator.cs:92) และ **ไม่รอคำตอบเช่นกัน**
+        //
+        // ⚠️ ห้ามตอบกลับเด็ดขาด และห้าม BroadCast ต่อ — ไม่มีใครรับ Depart ในเกมเลย
+        // (grep ทั้ง client/ เจอแค่ไฟล์ struct กับจุดที่ยิง)
+        //
+        // ประโยชน์จริง: เร่งให้เลิก "นั่งพัก" ทันทีที่เริ่มขยับ แทนที่จะรอ Move ก้อนแรกมาถึง
+        // (~0.5 วิ) — สถานะพักมีแท็ก clear_on_move อยู่แล้ว ดู HandleMoveMsg
+        _connection.Recv(delegate(Depart msg, PacketHeader header)
+        {
+            _lastMovedAt = Gauge.CurrentTime;
+            _survival.SetResting(false);      // คืน void — เรียก Flush ตามเสมอเหมือน HandleMoveMsg
+            FlushSurvival();
+        });
+
         _connection.Recv(delegate(Cheat msg, PacketHeader header)
         {
             // ⚠️ เดิมรับจากทุก connection ไม่มีด่านเลย ⇒ ผู้เล่นคนไหนก็เสกไอเทมทุกชิ้นทุกเลเวล
@@ -128,6 +156,20 @@ public partial class Player
             }
             HandleCheatMsg(msg._Cheat, header.Seq);
         });
+        // สถานะปุ่มสลับในแผงคำสั่งของแอดมิน — client/Durango.UI/CommandButtonGroup.cs:154,365
+        //
+        // ⚠️ **ต้องตอบ ReplyOf = 0** — ฝั่งเกมรับด้วย global On<CheatFlags> (บรรทัด 68)
+        // ตัวที่ยิงไม่ได้ผูก .On() ไว้เลย ⇒ ตอบที่ seq จะไม่มีใครรับ
+        //
+        // ⚠️ ตอบตารางว่างไม่ได้: OnCheatFlags เขียน flags["ar"] ลงไปทันทีที่รับ
+        // ⇒ ส่ง Flags = null มา ฝั่งเกมจะ NullReferenceException ตอนแตะ index
+        _connection.Recv(delegate(GetCheatFlags msg, PacketHeader header)
+        {
+            // เซิร์ฟไม่มีสถานะโกงค้างไว้เลยสักตัว (คำสั่ง cheat เป็นแบบยิงแล้วจบ)
+            // ⇒ ตารางว่างคือคำตอบที่ถูก ไม่ใช่การยอมแพ้ — ฝั่งเกมเติม "ar" ของมันเองต่อ
+            Send(new CheatFlags { Flags = new Dictionary<string, bool>() });
+        });
+
         _connection.Recv(delegate(Messages.Touch msg, PacketHeader header)
         {
             HandleTouchMsg(msg, header.Seq);
@@ -1036,7 +1078,6 @@ public partial class Player
             {
                 msg.EntityName = blueprint.Name;
                 var list = new List<Shared.System.Interaction>();
-                if (flag) list.Add(Shared.System.Interaction.DestructArtifact);
 
                 // [6 ก.ย. 2026] เมนูก่อสร้าง — ผูกกับ **สถานะของหลัง** ไม่ใช่โหมดเกาะ
                 //
@@ -1049,6 +1090,11 @@ public partial class Player
                 // เซิร์ฟที่รันโหมด Online (ค่าปัจจุบันใน data/config.json) จะสร้างอะไรไม่ได้เลย
                 if (_world.ArtifactManager.Get(touch.EntityId) is { } building)
                 {
+                    // เจ้าของเท่านั้นที่รื้อ/เก็บได้ — ตัวจริงที่บังคับคือ MayTouchArtifact ตอนรับคำสั่ง
+                    // ตรงนี้แค่ไม่โชว์ปุ่มที่กดไปก็โดนปฏิเสธ (ของคนอื่นจะไม่มีปุ่มพวกนี้เลย)
+                    bool mine = string.Equals(_world.ArtifactManager.OwnerOf(touch.EntityId),
+                                              EntityId, StringComparison.Ordinal);
+
                     switch (building.States.BuildingState)
                     {
                         case Shared.Building.BuildingState.Occupied:
@@ -1062,10 +1108,40 @@ public partial class Player
                                 list.Add(Shared.System.Interaction.CompleteArtifact);
                             }
                             break;
+                        case Shared.Building.BuildingState.Completed:
+                            // "포장" — เก็บใส่กระเป๋าแล้วเอาไปวางที่ใหม่ (Player.Building.cs)
+                            // ของถาวร (ท่าเรือ/รูวาร์ป) เก็บไม่ได้ตามข้อมูลเกมเอง
+                            if (mine && !blueprint.Permanent)
+                            {
+                                list.Add(Shared.System.Interaction.Capsulate);
+                            }
+                            break;
                     }
+
+                    // "제거" — รื้อทิ้ง
+                    //
+                    // ⚠️ [6 ก.ย. 2026] เดิมผูกกับ `flag` (Mode.Editable) ⇒ เซิร์ฟที่รันโหมด Online
+                    // ซึ่งเป็นค่าจริงใน data/config.json **ไม่มีปุ่มรื้อเลยสักหลัง** ผู้เล่นสร้างผิดที่
+                    // แล้วแก้ไม่ได้ ต้องเรียกแอดมินมาลบให้ (เจอตอนเทสด้วย bot — เมนูมีแค่ Rest)
+                    // ⇒ ผูกกับ "เป็นเจ้าของ" แทน ซึ่งตรงกับด่านจริงที่ HandleDestructMsg ใช้อยู่แล้ว
+                    if (mine || flag) list.Add(Shared.System.Interaction.DestructArtifact);
                 }
                 if (blueprint.Components.Contains("Washable")) list.Add(Shared.System.Interaction.Wash);
                 if (blueprint.Components.Contains("Shelter")) list.Add(Shared.System.Interaction.Rest);
+
+                // [6 ก.ย. 2026] "ตั้งเป็นจุดกลับ" — ข้อมูลจริงมี 12 แบบแปลนที่มี component Home
+                // (bed_01..bed_04 · tent · temptent ฯลฯ) ทั้งหมดเป็นที่นอน
+                //
+                // ⚠️ ไม่ใส่บรรทัดนี้ = **ผู้เล่นตั้งบ้านไม่ได้เลย** แล้วปุ่มบ้านบนแผนที่
+                // ก็พาไปจุดเข้าเกาะตลอดกาล — ระบบวาร์ปทั้งระบบ (Player.Warp.cs) ไร้ประโยชน์
+                // ฝั่งเกมไม่ได้ตัดสินใจเอง มันเชื่อรายการที่เซิร์ฟส่งมาล้วน ๆ
+                //
+                // ไม่ผูกกับ flag (Mode.Editable) ด้วยเหตุผลเดียวกับเมนูก่อสร้างข้างล่าง:
+                // การตั้งจุดกลับเป็นเรื่องปกติของทุกเกาะ ไม่ใช่ของโหมดสร้างสรรค์
+                if (blueprint.Components.Contains("Home"))
+                {
+                    list.Add(Shared.System.Interaction.SetAsHome);
+                }
                 // [5 ก.ย. 2026] ท่าเรือ — เมนู "เส้นทางเดินเรือ" ของเกมผูกกับ interaction นี้
                 // (client/Durango.UI/ExploreGroup.cs:259 AddInteractionHandler(Interaction.SailingRoutes)
                 //  → Open(entityId, tile, RouteType.Normal) → ยิง GetRoutes มาที่เซิร์ฟ)
@@ -1347,9 +1423,20 @@ public partial class Player
         if (_onNaturalDestroyed != null) _world.NaturalDestroyed -= _onNaturalDestroyed;
     }
 
+    /// <summary>
+    /// รื้อสิ่งปลูกสร้าง — ปฏิเสธถ้ายังมีของในตู้ (ของจะหายถาวร ดู Player.Inventory.HasStoredItems)
+    /// </summary>
     private void HandleDestructMsg(DestructArtifact msg)
     {
         if (!MayTouchArtifact(msg.EntityId, "รื้อ")) return;
+        // ⚠️ [6 ก.ย. 2026] ของในตู้ไม่ได้ถูกลบไปกับหลัง แต่จะหายจากไฟล์ในรอบเซฟถัดไป
+        // แล้วดึงคืนไม่ได้ (เหตุผลเต็มที่ Player.Inventory.HasStoredItems)
+        if (HasStoredItems(msg.EntityId))
+        {
+            Console.WriteLine($"[รื้อ] ปฏิเสธ {Short(EntityId)}: {msg.EntityId} ยังมีของในตู้");
+            Send(new Abort { Text = "ต้องเอาของออกจากตู้ก่อนรื้อ" });
+            return;
+        }
         _world.DestructArtifact(msg.EntityId);
     }
 

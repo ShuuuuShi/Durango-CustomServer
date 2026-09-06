@@ -63,6 +63,13 @@ public class MergedBlueprint
 
     /// <summary>ของถาวร รื้อไม่ได้ (permanent)</summary>
     public bool Permanent;
+
+    /// <summary>
+    /// เก็บใส่กระเป๋าได้ไหม (entity_types/artifact.json → capsulizable)
+    /// ข้อมูลจริง: false 101 จาก 560 ชนิด (สระว่ายน้ำ · ห้องเรียนโมดูลาร์ · แล็บแคลน ฯลฯ)
+    /// ⚠️ ไม่เช็ค = เก็บของที่ NEXON บอกว่าเก็บไม่ได้ ได้
+    /// </summary>
+    public bool Capsulizable = true;
 }
 
 public static class BlueprintStore
@@ -118,7 +125,8 @@ public static class BlueprintStore
                 Height = proto.height,
                 IsSizeVariable = proto.is_size_variable,
                 RotatableDirections = proto.rotatable_directions,
-                Permanent = proto.permanent
+                Permanent = proto.permanent,
+                Capsulizable = proto.capsulizable
             };
             // ชื่อ: blueprint มี name (Gettext) ก่อน ถ้าไม่มีใช้ prototype ไม่มี fallback ชื่อจาก __name__
             merged.Name = bp?.name ?? new Gettext(proto.__name__);

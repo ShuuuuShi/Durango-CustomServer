@@ -27,6 +27,13 @@
 
   <!-- terrain zips (ฟอร์แมตเดียวกับตัวแท้: whole.biomes/ocean/rivers/landmarks + info.yml) -->
   <ItemGroup>
+    <!-- คำแปลไทย 33,262 ข้อความ (เกาหลี → ไทย) — เซิร์ฟต้องแปลเอง เพราะชื่อไอเทม/สิ่งปลูกสร้าง
+         ถูกส่งเป็น "ข้อความสำเร็จรูป" ไปให้เกม ไม่ได้ส่ง msgid ให้เกมแปลผ่าน catalog ของตัวเอง
+         (client/Durango.Logic.Item/ItemData.cs:132 `Name = itemInfo.Name` รับมาแล้วโชว์ตรง ๆ) -->
+    <None Include="data\locales\**\*.mo">
+      <Link>data\locales\%(RecursiveDir)%(FileName)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="data\terrains\*.zip">
       <Link>data\terrains\%(FileName)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
