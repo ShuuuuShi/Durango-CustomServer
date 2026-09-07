@@ -834,7 +834,12 @@ public partial class Player
             if (after > before)
             {
                 NotifyCharacterLevelUp(after);
-                if (ClearStatusEffectsOnLevelUp()) SendStatusEffects();
+                if (ClearStatusEffectsOnLevelUp())
+                {
+                    // wet มีแท็ก clear_on_levelup — ถ้ายังฝนตก/ยังยืนในน้ำ ใส่คืนในชุดเดียวกัน
+                    SyncWorldDrivenStatusEffects();
+                    SendStatusEffects();
+                }
             }
         }
         else
@@ -1700,7 +1705,11 @@ public partial class Player
                 if (level > before)
                 {
                     NotifyCharacterLevelUp(level);
-                    if (ClearStatusEffectsOnLevelUp()) SendStatusEffects();
+                    if (ClearStatusEffectsOnLevelUp())
+                    {
+                        SyncWorldDrivenStatusEffects();
+                        SendStatusEffects();
+                    }
                 }
                 SaveSkillState();
                 Console.WriteLine($"[skill] {ShortId()} cheat ตั้งเลเวล {level} (exp {_skills.Exp})");

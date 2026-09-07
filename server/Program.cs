@@ -115,6 +115,21 @@ internal static class Program
                     }
                     return LevelUpFxCheck.Run(checkData);
                 }
+                case "--se-check":
+                {
+                    string checkData = Path.Combine(AppContext.BaseDirectory, "data");
+                    while (i + 1 < args.Length)
+                    {
+                        if (args[i + 1] == "--data")
+                        {
+                            checkData = args[i + 2];
+                            i += 2;
+                            continue;
+                        }
+                        i++;
+                    }
+                    return StatusEffectWorldCheck.Run(checkData);
+                }
                 case "--selftest":
                 {
                     int stGateway = 18290, stGame = 18291;
@@ -191,6 +206,7 @@ internal static class Program
                     Console.WriteLine("DurangoServerNx — เซิร์ฟแท้พอร์ตตรง · มือถือก่อน");
                     Console.WriteLine("  --quest-check [--data <dir>]  ตรวจแคตตาล็อก Daily เฟส 1 (ไม่ต้องเปิดเซิร์ฟ)");
                     Console.WriteLine("  --fx-check [--data <dir>]     ตรวจแพ็กเก็ต Rewarded ของเลเวลขึ้น / หมวดขึ้น");
+                    Console.WriteLine("  --se-check [--data <dir>]     ตรวจกติกาบัพโลก (ฝน/น้ำ → wet)");
                     Console.WriteLine("  --name, --gateway-port, --game-port, --data, --terrains, --terrain,");
                     Console.WriteLine("  --assetbundles-android, --public-host, --url-prefix, --max-players, --tps, --cluster-mode,");
                     Console.WriteLine("  --admin-token <t>   token ของ /health (หรือ env DURANGO_ADMIN_TOKEN) — ไม่ตั้ง = เรียกได้เฉพาะเครื่องตัวเอง");
