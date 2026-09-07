@@ -51,6 +51,24 @@ public static class AnimalMotions
 
         /// <summary>ท่าโจมตีหนัก (บางชนิดไม่มี)</summary>
         public string AttackStrong;
+
+        /// <summary>
+        /// [7 ก.ย. 2026] ท่าโจมตีทั้งหมดของชนิดนี้
+        ///
+        /// ข้อมูลจริงมีหลายท่าต่อชนิด (TRex 10 ท่า · Stego 7 ท่า) — เดิมเก็บท่าเดียว
+        /// ทำให้ตีซ้ำท่าเดิมตลอด ดูเป็นหุ่นยนต์
+        /// </summary>
+        public string[] Attacks = System.Array.Empty<string>();
+
+        /// <summary>สุ่มท่าโจมตีหนึ่งท่า — คืน null ถ้าชนิดนี้ไม่มีท่าโจมตีเลย</summary>
+        public string PickAttack(System.Random rng)
+        {
+            if (Attacks != null && Attacks.Length > 0)
+            {
+                return Attacks[rng == null ? 0 : rng.Next(Attacks.Length)];
+            }
+            return AttackNormal;
+        }
     }
 
     private static Dictionary<ushort, Motions> _byType;
@@ -91,6 +109,23 @@ public static class AnimalMotions
             foreach (JProperty prop in root.Properties())
             {
                 if (!ushort.TryParse(prop.Name, out ushort type) || prop.Value is not JObject o) continue;
+
+                // ท่าโจมตีทั้งหมด — ไฟล์เก็บได้ทั้งแบบ array ("attacks") และแบบเดี่ยว
+                var attacks = new List<string>();
+                if (o["attacks"] is JArray arr)
+                {
+                    foreach (var item in arr)
+                    {
+                        string clip = (string)item;
+                        if (!string.IsNullOrEmpty(clip) && !attacks.Contains(clip)) attacks.Add(clip);
+                    }
+                }
+                foreach (string key in new[] { "attack_normal", "attack_strong" })
+                {
+                    string clip = (string)o[key];
+                    if (!string.IsNullOrEmpty(clip) && !attacks.Contains(clip)) attacks.Add(clip);
+                }
+
                 _byType[type] = new Motions
                 {
                     Stand = (string)o["stand"],
@@ -103,10 +138,16 @@ public static class AnimalMotions
                     Groggy = (string)o["groggy"],
                     Blow = (string)o["blow"],
                     AttackNormal = (string)o["attack_normal"],
-                    AttackStrong = (string)o["attack_strong"]
+                    AttackStrong = (string)o["attack_strong"],
+                    Attacks = attacks.ToArray()
                 };
             }
-            Console.WriteLine($"[สัตว์] โหลดชื่อท่าทางของสัตว์ {_byType.Count} ชนิด");
+            int withAttack = 0;
+            foreach (Motions m in _byType.Values)
+            {
+                if (m.Attacks is { Length: > 0 }) withAttack++;
+            }
+            Console.WriteLine($"[สัตว์] โหลดชื่อท่าทางของสัตว์ {_byType.Count} ชนิด (มีท่าโจมตี {withAttack})");
         }
         catch (Exception e)
         {

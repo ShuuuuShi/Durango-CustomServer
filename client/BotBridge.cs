@@ -838,6 +838,7 @@ public static class BotBridge
         // (Dash/Jump ทำให้ตัวเคลื่อนที่ · Counter เป็นท่าตอบโต้ ไม่ใช่ท่าเข้าตีเอง)
         if (fw.combat_attacks != null)
         {
+            var all = new List<string>();
             string best = null;
             int bestScore = -1;
             foreach (AnimationElemAttack atk in fw.combat_attacks)
@@ -849,6 +850,7 @@ public static class BotBridge
                     clip = atk.meta.Clip.name;
                 }
                 if (string.IsNullOrEmpty(clip)) continue;
+                if (!all.Contains(clip)) all.Add(clip);
 
                 int score = 3;
                 if (clip.IndexOf("Counter", StringComparison.OrdinalIgnoreCase) >= 0) score = 0;
@@ -865,6 +867,20 @@ public static class BotBridge
                 JStr(sb, "attack_normal");
                 sb.Append(':');
                 JStr(sb, best);
+            }
+            // เก็บทุกท่าไว้ให้เซิร์ฟสุ่ม — เดิมเก็บท่าเดียวเลยตีซ้ำท่าเดิมตลอด
+            if (all.Count > 0)
+            {
+                if (!first) sb.Append(',');
+                first = false;
+                JStr(sb, "attacks");
+                sb.Append(":[");
+                for (int i = 0; i < all.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    JStr(sb, all[i]);
+                }
+                sb.Append(']');
             }
         }
 
@@ -1282,6 +1298,9 @@ public static class BotBridge
                 sb.Append(world.z.ToString("F1", CultureInfo.InvariantCulture)).Append(']');
                 sb.Append(",\"alive\":").Append(a.IsAlive ? "true" : "false");
                 sb.Append(",\"lootable\":").Append(a.IsLootable ? "true" : "false");
+                // มุมหันหน้าจริงบนจอ (องศา 0-360) — ตรวจว่าเซิร์ฟส่ง Yaw มาถูกไหม
+                // ต้องดูคู่กับทิศที่มันกำลังเดินจริง ไม่งั้นแยกไม่ออกว่า "หันผิด" หรือ "เดินถอยหลัง"
+                sb.Append(",\"yaw\":").Append(a.transform.eulerAngles.y.ToString("F1", CultureInfo.InvariantCulture));
                 // สถานะอนิเมชั่นจริงในตัวเกม — ใช้ตรวจว่าเซิร์ฟส่งชื่อ clip มาถูกไหม
                 // แม่นกว่าดูจากรูป เพราะไม่ขึ้นกับแสง/มุมกล้อง/หน้าต่างที่มาบัง
                 sb.Append(",\"animPlaying\":").Append(a.IsAnimPlaying ? "true" : "false");

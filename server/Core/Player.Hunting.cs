@@ -139,6 +139,7 @@ public partial class Player
                 animal.AggroSeenAt = 0.0;
                 _world.BroadCast(animal.ToMotionMessage());                      // กลับท่ายืนปกติ
                 _world.BroadCast(CombatStatus(animal, AnimalStatus.Peace, lookAt: false));
+                LeaveBattleWith(animal.EntityId);   // มันเลิกไล่แล้ว — ผู้เล่นออกจากโหมดสู้ด้วย
             }
             return;
         }
@@ -152,6 +153,15 @@ public partial class Player
             _world.BroadCast(CombatStatus(animal, AnimalStatus.Battle, lookAt: true));
         }
         animal.AggroTargetId = EntityId;
+
+        // [7 ก.ย. 2026] **ตัวละครต้องเข้าโหมดต่อสู้ด้วย**
+        //
+        // ⚠️ เดิมสัตว์ไล่กัดยังไงผู้เล่นก็ไม่เข้าโหมดสู้เลย เพราะ SetBattleMode ถูกเรียก
+        // แค่ตอน "ผู้เล่นกดโจมตีเอง" (UseBattleAction) กับ "โดนผู้เล่นอื่นตี" (ReceiveAttack)
+        // — สัตว์ป่าไม่เคยผ่านสองทางนั้น
+        // ⇒ ฝั่งเกมไม่เคยได้ BattleBegun ที่ EntityId เป็นของตัวเอง (client/CombatSystem.cs:510-522)
+        //   ผลคือไม่ชักอาวุธ · ไม่มีปุ่มท่าต่อสู้ · ความเร็วเดินยังเป็นโหมดปกติ
+        EnterBattleWith(animal.EntityId);
 
         // [7 ก.ย. 2026] เห็นเหยื่อแล้วต้อง "เดินเข้าไปหา" ก่อนกัด
         //
@@ -180,10 +190,15 @@ public partial class Player
         animal.NextAttackAt = now + Math.Max(0.5f, info.AttackCooltime);
 
         // [7 ก.ย. 2026] ส่งท่าโจมตีให้เห็นบนจอ — เดิมส่งแต่ Damaged ⇒ สัตว์ยืนนิ่งแต่เลือดลด
-        Move attackMotion = animal.ToAttackMotionMessage();
-        if (!string.IsNullOrEmpty(attackMotion.Movements?[0].MotionName))
+        //
+        // ⚠️ ต้องหันหน้าเข้าหาเหยื่อด้วย ไม่งั้นตัวค้างหันไปทางที่เดินมาล่าสุด = ดูเหมือนกัดลม
+        // และต้องนัดกลับท่ายืน เพราะคลิปโจมตีลาก root bone ไปข้างหน้า ถ้าไม่ดึงกลับ
+        // ตัวจะค้างหน้าตำแหน่งจริงแล้ว packet ถัดไปกระชากกลับ = เห็นเป็นวาร์ป
+        Move attackMotion = animal.ToAttackMotionMessage(PlayerWorldPosition(), now, AttackMotionRng);
+        if (attackMotion.Movements != null)
         {
             _world.BroadCast(attackMotion);
+            animal.StandAt = now + AnimalManager.Animal.AttackClipSeconds;
         }
 
         // วงแหวนเตือน "กำลังจะฟาด" ก่อนดาเมจเข้า
@@ -248,6 +263,9 @@ public partial class Player
 
     /// <summary>**ค่าของเรา** — สัตว์หยุดห่างจากผู้เล่นกี่หน่วยตอนวิ่งเข้าหา (ไม่ให้เดินทับตัว)</summary>
     private const float AttackStopDistance = 150f;
+
+    /// <summary>ตัวสุ่มท่าโจมตี — main loop เส้นเดียว ไม่ต้องล็อก</summary>
+    private static readonly Random AttackMotionRng = new();
 
     /// <summary>ตำแหน่งผู้เล่นในพิกัดโลก — ใช้เป็นปลายทางตอนสัตว์วิ่งเข้าหา</summary>
     private WorldPosition PlayerWorldPosition()
@@ -456,6 +474,8 @@ public partial class Player
                 _battleTargetId = null;
                 SetBattleMode(false);
             }
+            // ตัวที่ไล่กัดเราตายแล้วด้วย — เคลียร์สถานะ "โดนสัตว์ไล่" ไม่งั้นค้างโหมดสู้ต่อ
+            LeaveBattleWith(animal.EntityId);
 
             Console.WriteLine($"[ล่าสัตว์] {EntityId[..Math.Min(8, EntityId.Length)]} ล้ม " +
                               $"{hit?.Name ?? animal.EntityType.ToString()} lv{animal.CombatLevel} " +

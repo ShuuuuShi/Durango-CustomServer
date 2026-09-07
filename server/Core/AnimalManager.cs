@@ -58,11 +58,17 @@ public class AnimalManager
     private const float TileSize = 200f;
 
     /// <summary>
-    /// ความเร็วหมุนตัวของสัตว์ — ค่าเดียวกับที่ตัวเกมใช้กับสัตว์ที่มันขยับเอง
-    /// (client/ClientAnimalActor.cs:31 <c>_rotateSpeed = 100f</c>)
-    /// ส่ง 0 ไปฝั่งเกมจะ fallback เป็น 300 (AnimalBehavior.SetRotateSpeed) ซึ่งหมุนเร็วผิดปกติ
+    /// ความเร็วหมุนตัวของสัตว์ (องศา/วินาที) — ส่ง 0 ฝั่งเกม fallback เป็น 300
+    /// (client/AnimalBehavior.cs:997 SetRotateSpeed)
+    ///
+    /// ⚠️ **ค่าของเรา** 540 — ไม่ใช่ 100 ของ client/ClientAnimalActor.cs:31
+    /// ตัวนั้นเป็นสัตว์ที่ client เดินเองซึ่ง **แตกเส้นทางเป็นหลายจุดให้ค่อย ๆ เลี้ยว**
+    /// (GeneratePath วน MoveTowardsAngle ทีละ 0.5 วิ) แต่เราส่ง path 2 จุด
+    /// ⇒ ต้องหมุนให้ทันภายในช่วงเดียว 100 องศา/วิ = กลับหลังหันใช้ 1.8 วิ
+    ///   ซึ่งนานกว่าเวลาเดินส่วนใหญ่ ⇒ เห็นเป็นเดินหันข้าง/หันผิดทางทั้งเส้น
+    /// (โปรเจกต์ Opencode ที่ไม่มีอาการนี้ใช้ 540 — ServerAnimal.cs:270)
     /// </summary>
-    private const float DefaultRotateSpeed = 100f;
+    private const float DefaultRotateSpeed = 540f;
 
     /// <summary>สัตว์ป่าหนึ่งตัวบนเกาะ</summary>
     public class Animal
@@ -70,7 +76,6 @@ public class AnimalManager
         public string EntityId;
         public ushort EntityType;
         public int CombatLevel;
-        public Point2 Tile;
         public float LifeMax;
         public float Life;
         public float Attack;
@@ -114,7 +119,66 @@ public class AnimalManager
         /// <summary>ถึงเวลาหยุดเดินแล้วกลับไปยืน (0 = ไม่ได้เดินอยู่)</summary>
         public double StopWalkingAt;
 
-        public WorldPosition Position => new(Tile.x * TileSize, Tile.y * TileSize);
+        /// <summary>
+        /// [7 ก.ย. 2026] ถึงเวลาสั่งกลับไปท่ายืน (0 = ไม่ต้องสั่ง)
+        ///
+        /// ⚠️ ไม่มีตัวนี้ = คลิปโจมตีเล่นจบแล้วไม่มีอะไรพากลับท่ายืน
+        /// คลิปโจมตีของเกมนี้ขยับ root bone ไปข้างหน้า ⇒ ตัวค้างอยู่หน้าตำแหน่งจริง
+        /// แล้ว packet ถัดไปกระชากกลับ = ผู้เล่นเห็นเป็นวาร์ป
+        /// (เทียบจากโปรเจกต์ Opencode ที่ไม่มีอาการนี้ — AnimalSpawner.StandAt)
+        /// </summary>
+        public double StandAt;
+
+        /// <summary>
+        /// [7 ก.ย. 2026] มุมหันหน้าปัจจุบัน (องศา 0-360)
+        ///
+        /// ⚠️ ไม่ส่งมุมไปกับ Movement = ตัวค้างหันไปทางที่เดินมาล่าสุด ⇒ กัดลม
+        /// </summary>
+        public float Yaw;
+
+        /// <summary>จุดเริ่มเดิน/เวลาที่จะถึงปลายทาง — ใช้คำนวณตำแหน่งจริงระหว่างเดิน</summary>
+        public WorldPosition WalkFrom;
+        public WorldPosition WalkTo;
+        public double WalkStartAt;
+        public double WalkEndAt;
+
+        /// <summary>
+        /// [7 ก.ย. 2026] ตำแหน่งจริงเป็นพิกัดโลกต่อเนื่อง ไม่ใช่ช่อง
+        ///
+        /// ⚠️ เดิมเก็บเป็น <c>Point2 Tile</c> แล้วคูณ 200 กลับเป็นพิกัด ⇒ ทุกคำสั่งถูกปัด
+        /// เข้ากลางช่อง คลาดได้ถึง ~141 หน่วย ซึ่ง **ใหญ่พอ ๆ กับระยะกัด (200)**
+        /// ⇒ มุมที่คำนวณจากจุดที่ปัดแล้วเพี้ยนได้เป็นสิบ ๆ องศา = อาการหันหน้าไม่ถูก
+        /// (โปรเจกต์ Opencode ที่ไม่มีอาการนี้เก็บเป็น WorldPosition ตลอด — ServerAnimal.cs:32)
+        /// </summary>
+        public WorldPosition Position;
+
+        /// <summary>ช่องที่มันอยู่ — คิดจาก <see cref="Position"/> ใช้เฉพาะตอนวัดระยะ/วาง Collectible</summary>
+        public Point2 Tile => new((int)Math.Round(Position.x / TileSize),
+                                  (int)Math.Round(Position.y / TileSize));
+
+        /// <summary>
+        /// [7 ก.ย. 2026] ตำแหน่ง "จริง" ณ วินาทีนี้ — ถ้ากำลังเดินอยู่จะคิดจากเส้นทาง
+        ///
+        /// ⚠️ ใช้ <see cref="Position"/> เป็นจุดเริ่ม path ไม่ได้ เพราะมันคือ "ปลายทาง
+        /// ของคำสั่งเดินก่อนหน้า" ⇒ ฝั่งเกมได้ packet แล้วกระโดดไปข้างหน้าทันที
+        /// </summary>
+        public WorldPosition PositionAt(double now)
+        {
+            if (WalkEndAt <= WalkStartAt || now >= WalkEndAt) return Position;
+            if (now <= WalkStartAt) return WalkFrom;
+            float t = (float)((now - WalkStartAt) / (WalkEndAt - WalkStartAt));
+            return new WorldPosition(WalkFrom.x + (WalkTo.x - WalkFrom.x) * t,
+                                     WalkFrom.y + (WalkTo.y - WalkFrom.y) * t);
+        }
+
+        /// <summary>มุมหันจากจุดหนึ่งไปอีกจุด (องศา 0-360 — สูตรเดียวกับฝั่งเกม atan2(dx, dz))</summary>
+        public static float YawTo(WorldPosition from, WorldPosition to)
+        {
+            float dx = to.x - from.x;
+            float dy = to.y - from.y;          // world y = client z
+            float yaw = (float)(Math.Atan2(dx, dy) * (180.0 / Math.PI));
+            return yaw < 0f ? yaw + 360f : yaw;
+        }
 
         /// <summary>
         /// ท่าที่ควรเล่นตามสถานะตอนนี้ — ชื่อ clip จริงจาก asset (ดู Support/AnimalMotions.cs)
@@ -141,37 +205,28 @@ public class AnimalManager
         public MotionOption CurrentMotionOption =>
             IsAlive ? MotionOption.LOOPING : MotionOption.NORMAL;
 
-        /// <summary>ข้อความบอกฝั่งเกมให้เปลี่ยนท่า — ใช้ตอนสถานะเปลี่ยน (ตาย/เข้าสู้)</summary>
-        public Move ToMotionMessage() => new()
-        {
-            EntityId = EntityId,
-            Movements = new[]
-            {
-                new Movement
-                {
-                    MotionName = CurrentMotion,
-                    MotionOption = (byte)CurrentMotionOption,
-                    PlaybackRate = 1f,
-                    RotSpeed = DefaultRotateSpeed,
-                    Path = new[] { new Location { Position = Position, Time = Gauge.CurrentTime } }
-                }
-            }
-        };
-
         /// <summary>
-        /// [7 ก.ย. 2026] ท่าโจมตีตอนสัตว์กัดจริง — เล่นครั้งเดียวแล้วกลับท่ายืนเอง
+        /// [7 ก.ย. 2026] packet "ยืนอยู่กับที่แล้วเล่นคลิปหนึ่ง" พร้อมหันหน้าไปทางที่กำหนด
         ///
-        /// ⚠️ ไม่มีตัวนี้ = สัตว์ยืนนิ่งทั้งที่เลือดผู้เล่นลด (อาการที่ผู้เล่นแจ้ง)
-        /// เพราะฝั่งเกมขับอนิเมชั่นสัตว์จาก <c>Move.MotionName</c> อย่างเดียว
-        /// (client/AnimalBehavior.cs:1007-1011) — <c>Update()</c> ไม่เลือกท่าเอง
+        /// ฝั่งเกมเล่นอนิเมชั่นสัตว์จาก <c>Movement.MotionName</c> ของ packet Move เท่านั้น
+        /// (client/AnimalBehavior.cs HandleMoveMsg → PlayAnimationMovement)
+        /// ⇒ path 2 จุดที่ตำแหน่งเดียวกัน = "อยู่กับที่" แต่ยังสั่งท่ากับมุมหันได้
         ///
-        /// คืนค่าเปล่าถ้าชนิดนี้ไม่มีท่าโจมตีในตาราง ⇒ ผู้เรียกเช็ค MotionName ก่อนส่ง
+        /// MotionOption เป็น flag (Durango.Network/MotionOption):
+        ///   1 LOOPING · 4 SNAP_ANGLE_BEGIN (หันทันทีตอนเริ่ม) · 8 IN_PLACE_MOTION (กัน root motion ลากตัว)
+        /// ⚠️ ท่าโจมตีต้องมี 8 ไม่งั้นคลิปลากตัวไปข้างหน้าแล้วค้างผิดตำแหน่ง
+        /// ⚠️ ต้องมี 4 ทั้งคู่ ไม่งั้นตัวค่อย ๆ หมุนตามทีหลัง = เห็นเป็นกัดลม
         /// </summary>
-        public Move ToAttackMotionMessage()
+        public Move MakeMotion(string motionName, float yaw, double now,
+                               double seconds = 0.6, bool loop = false)
         {
-            AnimalMotions.Motions m = AnimalMotions.Of(EntityType);
-            string clip = m?.AttackNormal;
-            if (string.IsNullOrEmpty(clip)) return default;
+            // ท่าอยู่กับที่ = หยุดตรงจุดที่อยู่จริงตอนนี้ ไม่ใช่ปลายทางของคำสั่งเดินก่อนหน้า
+            WorldPosition here = PositionAt(now);
+            Position = here;
+            WalkStartAt = WalkEndAt = 0;         // ไม่ได้เดินแล้ว
+            Yaw = yaw;
+
+            byte option = (byte)(loop ? 1 | 4 : 8 | 4);
             return new Move
             {
                 EntityId = EntityId,
@@ -179,15 +234,50 @@ public class AnimalManager
                 {
                     new Movement
                     {
-                        MotionName = clip,
-                        MotionOption = (byte)MotionOption.NORMAL,   // เล่นจบแล้วกลับท่ายืน
+                        MotionName = motionName,
+                        MotionOption = option,
                         PlaybackRate = 1f,
                         RotSpeed = DefaultRotateSpeed,
-                        Path = new[] { new Location { Position = Position, Time = Gauge.CurrentTime } }
+                        Path = new[]
+                        {
+                            new Location { Position = here, Yaw = yaw, Time = now },
+                            new Location { Position = here, Yaw = yaw, Time = now + seconds }
+                        }
                     }
                 }
             };
         }
+
+        /// <summary>ข้อความบอกฝั่งเกมให้เปลี่ยนท่า — ใช้ตอนสถานะเปลี่ยน (ตาย/เข้าสู้)</summary>
+        public Move ToMotionMessage()
+        {
+            double now = Gauge.CurrentTime;
+            // ท่าตายเล่นรอบเดียว ท่ายืนวนลูป
+            return MakeMotion(CurrentMotion, Yaw, now, IsAlive ? 2.0 : 30.0, loop: IsAlive);
+        }
+
+        /// <summary>
+        /// ท่าโจมตี — สุ่มจากท่าที่ชนิดนี้มี แล้วหันหน้าเข้าหาเป้า
+        ///
+        /// ⚠️ ต้องหันหน้าหาเป้า ไม่งั้นตัวค้างหันไปทางที่เดินมาล่าสุด ⇒ ดูเหมือนกัดลม
+        /// คืนค่าเปล่าถ้าชนิดนี้ไม่มีท่าโจมตี ⇒ ผู้เรียกเช็ค Movements ก่อนส่ง
+        /// </summary>
+        public Move ToAttackMotionMessage(WorldPosition targetPos, double now, Random rng)
+        {
+            AnimalMotions.Motions m = AnimalMotions.Of(EntityType);
+            string clip = m?.PickAttack(rng);
+            if (string.IsNullOrEmpty(clip)) return default;
+            float yaw = YawTo(PositionAt(now), targetPos);
+            return MakeMotion(clip, yaw, now, AttackClipSeconds);
+        }
+
+        /// <summary>
+        /// **ค่าของเรา** — ความยาวโดยประมาณของคลิปโจมตี ครบแล้วสั่งกลับท่ายืน
+        ///
+        /// ⚠️ ต้องสั้นกว่า <c>attack_cooltime</c> ที่สั้นที่สุดในข้อมูล (1.3 วิ ของแรปเตอร์)
+        /// ไม่งั้นสัตว์สั่งตีรอบใหม่ก่อนที่รอบเก่าจะได้กลับท่ายืน ⇒ ค้างท่าตีค้างตลอด
+        /// </summary>
+        public const double AttackClipSeconds = 0.8;
 
         /// <summary>
         /// แปลงเป็นข้อความที่เกมรอรับ
@@ -218,7 +308,9 @@ public class AnimalManager
                         MotionOption = (byte)CurrentMotionOption,   // ท่ายืนต้องวนซ้ำ ไม่งั้นเล่นจบแล้วค้าง
                         PlaybackRate = 1f,                          // 0 = หยุดนิ่ง (ค่าปริยายของ struct)
                         RotSpeed = DefaultRotateSpeed,
-                        Path = new[] { new Location { Position = Position, Time = Gauge.CurrentTime } }
+                        // ⚠️ ต้องใส่ Yaw ไม่งั้นสัตว์ที่โผล่มาหันไปทางเหนือหมดทุกตัว
+                        // (client/PathMovable.cs:154 TurnToYaw(value.Yaw, bSnap: true) — 0 = หันเหนือ)
+                        Path = new[] { new Location { Position = Position, Yaw = Yaw, Time = Gauge.CurrentTime } }
                     }
                 }
             },
@@ -282,6 +374,18 @@ public class AnimalManager
         {
             if (!animal.IsAlive) continue;
 
+            // [7 ก.ย. 2026] ตีจบแล้ว — ดึงกลับท่ายืนที่ตำแหน่งจริง
+            //
+            // ⚠️ ไม่มีตรงนี้ = คลิปโจมตีเล่นจบแล้วไม่มีอะไรพากลับ ตัวค้างท่าตีค้างผิดตำแหน่ง
+            // (คลิปโจมตีลาก root bone ไปข้างหน้า) แล้ว packet ถัดไปกระชากกลับ = เห็นเป็นวาร์ป
+            if (animal.StandAt > 0.0 && now >= animal.StandAt)
+            {
+                animal.StandAt = 0.0;
+                broadcast(animal.ToMotionMessage());
+                continue;
+            }
+            if (animal.StandAt > 0.0) continue;      // ท่าโจมตียังเล่นไม่จบ อย่าสั่งอะไรทับ
+
             // ถึงเวลาหยุดเดินแล้ว — กลับไปท่ายืน
             if (animal.StopWalkingAt > 0.0 && now >= animal.StopWalkingAt)
             {
@@ -325,17 +429,24 @@ public class AnimalManager
         var dest = new WorldPosition(home.x + (float)(Math.Cos(angle) * radius),
                                      home.y + (float)(Math.Sin(angle) * radius));
 
-        WorldPosition from = animal.Position;
+        // จุดเริ่มต้องเป็น "ที่ที่มันอยู่จริงตอนนี้" ไม่ใช่ปลายทางของคำสั่งก่อนหน้า
+        // ไม่งั้นฝั่งเกมกระโดดไปข้างหน้าทันทีที่ได้ packet
+        WorldPosition from = animal.PositionAt(now);
         float dx = dest.x - from.x, dy = dest.y - from.y;
         float distance = (float)Math.Sqrt(dx * dx + dy * dy);
         if (distance < 1f) return default;
 
         double travel = distance / MovingSpeed;
-        float yaw = (float)(Math.Atan2(dx, dy) * 180.0 / Math.PI);    // ฝั่งเกมนับ yaw จากแกน +Z
+        float yaw = Animal.YawTo(from, dest);   // ต้องเป็น 0-360 ไม่งั้นตัวหันผิดด้าน
 
         // ขยับตำแหน่งฝั่งเซิร์ฟตามไปด้วย ไม่งั้นระยะไล่กัด/ระยะจับจะอ้างจุดเก่า
-        animal.Tile = new Point2((int)Math.Round(dest.x / TileSize), (int)Math.Round(dest.y / TileSize));
+        animal.Position = dest;
         animal.StopWalkingAt = now + travel;
+        animal.Yaw = yaw;
+        animal.WalkFrom = from;
+        animal.WalkTo = dest;
+        animal.WalkStartAt = now;
+        animal.WalkEndAt = now + travel;
 
         return new Move
         {
@@ -350,6 +461,8 @@ public class AnimalManager
                     RotSpeed = DefaultRotateSpeed,
                     Path = new[]
                     {
+                        // ⚠️ จุดแรกต้องใช้ "ทิศปลายทาง" ด้วย — ฝั่งเกม lerp มุมจาก Path[0].Yaw
+                        // ไป Path[1].Yaw ตลอดช่วงเดิน ถ้าใส่ทิศเดิมไว้จุดแรกจะเดินหันข้างทั้งเส้น
                         new Location { Position = from, Yaw = yaw, Time = now },
                         new Location { Position = dest, Yaw = yaw, Time = now + travel }
                     }
@@ -372,7 +485,8 @@ public class AnimalManager
         string walk = motions?.Move;
         if (string.IsNullOrEmpty(walk)) return default;
 
-        WorldPosition from = animal.Position;
+        // จุดเริ่มต้องเป็นตำแหน่งจริงตอนนี้ ไม่ใช่ปลายทางของคำสั่งเดินก่อนหน้า
+        WorldPosition from = animal.PositionAt(now);
         float dx = target.x - from.x, dy = target.y - from.y;
         float distance = (float)Math.Sqrt(dx * dx + dy * dy);
         if (distance <= stopAtDistance) return default;      // ประชิดแล้ว ไม่ต้องเดิน
@@ -383,10 +497,15 @@ public class AnimalManager
 
         double travel = (distance - stopAtDistance) / MovingSpeed;
         if (travel <= 0.01) return default;
-        float yaw = (float)(Math.Atan2(dx, dy) * 180.0 / Math.PI);
+        float yaw = Animal.YawTo(from, dest);
 
-        animal.Tile = new Point2((int)Math.Round(dest.x / TileSize), (int)Math.Round(dest.y / TileSize));
+        animal.Position = dest;
         animal.StopWalkingAt = now + travel;
+        animal.Yaw = yaw;
+        animal.WalkFrom = from;
+        animal.WalkTo = dest;
+        animal.WalkStartAt = now;
+        animal.WalkEndAt = now + travel;
 
         return new Move
         {
@@ -411,6 +530,27 @@ public class AnimalManager
 
     public Animal Get(string entityId) =>
         entityId != null && _byId.TryGetValue(entityId, out Animal animal) ? animal : null;
+
+    /// <summary>
+    /// [7 ก.ย. 2026] เสกสัตว์หนึ่งตัวลงตรงจุดที่สั่ง — ใช้กับคำสั่ง cheat "animal" เท่านั้น
+    ///
+    /// มีไว้เพราะสัตว์ตามฝูงเกิดกระจายทั่วเกาะ กว่าจะเดินไปเจอตัวหนึ่งใช้เวลานาน
+    /// ทำให้ทดสอบเรื่องอนิเมชั่น/การไล่กัด/การตายซ้ำ ๆ ไม่ไหว
+    ///
+    /// id ใส่เลขไล่ไว้กันชนกับฝูงของเกาะ (ซึ่งใช้รูปแบบ herd_&lt;กลุ่ม&gt;_&lt;ลำดับ&gt;)
+    /// คืน null ถ้าชนิดนั้นไม่มีในข้อมูล ⇒ ผู้เรียกต้องเช็คก่อนส่งเข้าเกม
+    /// </summary>
+    public Animal SpawnAt(ushort entityType, int combatLevel, Point2 tile)
+    {
+        var spawn = new RegionCatalog.HerdSpawn(entityType, combatLevel);
+        Animal animal = Create($"cheat_{entityType}_{++_cheatSpawnCount}", spawn, tile);
+        if (animal == null) return null;
+        _animals.Add(animal);
+        _byId[animal.EntityId] = animal;
+        return animal;
+    }
+
+    private int _cheatSpawnCount;
 
     /// <summary>
     /// สร้างสัตว์ตามฝูงที่แม่แบบสั่ง
@@ -462,6 +602,9 @@ public class AnimalManager
         }
     }
 
+    /// <summary>สุ่มทิศตอนเกิด — แยกจาก _rng เพราะ Create เป็น static</summary>
+    private static readonly Random SpawnYawRng = new();
+
     private static Animal Create(string entityId, RegionCatalog.HerdSpawn spawn, Point2 tile)
     {
         AnimalTypes.Info info = AnimalTypes.Get(spawn.EntityType);
@@ -488,8 +631,10 @@ public class AnimalManager
             EntityId = entityId,
             EntityType = spawn.EntityType,
             CombatLevel = level,
-            Tile = tile,
+            Position = new WorldPosition(tile.x * TileSize, tile.y * TileSize),
             HomeTile = tile,
+            // **ค่าของเรา** — สุ่มทิศตอนเกิด ไม่งั้นทั้งฝูงหันหน้าไปทางเหนือเรียงกันหมด
+            Yaw = (float)(SpawnYawRng.NextDouble() * 360.0),
             LifeMax = lifeMax,
             Life = lifeMax,
             Attack = (float)Math.Max(0.0, StatFormula.EvalOr(info.Attack, vars, 0.0)),

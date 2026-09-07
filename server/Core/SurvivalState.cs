@@ -156,6 +156,18 @@ public sealed class SurvivalState
         Rebuild(now);
     }
 
+    /// <summary>
+    /// [7 ก.ย. 2026] ปลุกหลอดให้เดินต่อ — เรียกตอนชุบชีวิต
+    ///
+    /// คู่กับ <see cref="Freeze"/> ที่ตอนนี้ถูกใช้ตอนตายด้วย
+    /// ไม่มีตัวนี้ = ชุบชีวิตแล้วหลอดค้างนิ่งทั้งชีวิต (เลือด/ความอึดไม่ฟื้นอีกเลย)
+    /// </summary>
+    public void Unfreeze(double now)
+    {
+        _live = true;
+        Rebuild(now);
+    }
+
     // ── การเปลี่ยนความชัน (velocity) ────────────────────────────────────────────────
 
     /// <summary>เดินอยู่ไหม — เดินแล้ว energy ลดตาม constants.json → energy.speeds.moving</summary>

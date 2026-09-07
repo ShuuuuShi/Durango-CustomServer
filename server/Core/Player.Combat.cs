@@ -684,6 +684,30 @@ public partial class Player
         }
     }
 
+    /// <summary>
+    /// [7 ก.ย. 2026] เข้าโหมดต่อสู้เพราะ "ถูกสัตว์ป่าเล่นงาน"
+    ///
+    /// แยกจาก <see cref="SetBattleMode"/> เพราะระบบล่าสัตว์อยู่คนละไฟล์และต้องจำตัวที่ไล่ไว้
+    /// เพื่อให้รู้ว่าเมื่อไรควรออกจากโหมดสู้ (สัตว์ตาย/เลิกไล่/เดินหนีพ้นระยะ)
+    /// </summary>
+    private void EnterBattleWith(string animalId)
+    {
+        _battleAnimalId = animalId;
+        SetBattleMode(true, animalId);
+    }
+
+    /// <summary>ออกจากโหมดสู้ถ้าตัวที่ไล่เราอยู่คือตัวนี้</summary>
+    private void LeaveBattleWith(string animalId)
+    {
+        if (string.IsNullOrEmpty(_battleAnimalId)) return;
+        if (!string.Equals(_battleAnimalId, animalId, StringComparison.Ordinal)) return;
+        _battleAnimalId = null;
+        SetBattleMode(false);
+    }
+
+    /// <summary>สัตว์ป่าตัวที่ทำให้เราอยู่ในโหมดสู้ตอนนี้ (null = ไม่ได้โดนสัตว์ไล่)</summary>
+    private string _battleAnimalId;
+
     // ── ตาย / เกิดใหม่ ──────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -711,8 +735,16 @@ public partial class Player
             float fatigue = _survival.ValueAt(SurvivalState.KeyFatigue, Gauge.CurrentTime);
             _survival.Set(SurvivalState.KeyFatigue, fatigue * (1f - fatigueRatios[row]));
         }
+        // [7 ก.ย. 2026] **ต้องแช่หลอดไว้ ไม่งั้นเลือดไต่กลับขึ้นเองทันทีที่ตาย**
+        //
+        // ⚠️ หลอดเลือดของผู้เล่นมีความชันบวก (ฟื้นเอง) ⇒ Set(life, 0) แค่ตั้งค่า ณ วินาทีนั้น
+        // แต่เส้นยังเดินต่อ ⇒ เสี้ยววินาทีถัดมาเลือดขึ้นเป็น 4, 7, 11 ...
+        // ผลคือฝั่งเกมเห็นว่ายังมีเลือด เลยไม่ยอมให้กดเกิดใหม่ = ค้างตายถาวร
+        // (เจอของจริงตอนเทส: life ไต่จาก 0 ขึ้นเรื่อย ๆ ทั้งที่ IsAlive = false แล้ว)
+        _survival.Freeze(Gauge.CurrentTime);
         FlushSurvival();
         SetBattleMode(false);
+        _battleAnimalId = null;
         _world.BroadCast(new EntityDied { EntityId = EntityId, At = Times.UnixTimeNow() });
         Console.WriteLine($"[combat] {EntityId[..Math.Min(8, EntityId.Length)]} ตาย (ครั้งที่ {_deathCount})");
         OnContextChanged();
@@ -735,6 +767,10 @@ public partial class Player
     private void HandleReviveMsg(bool normal)
     {
         if (_context.AppearPlayer.IsAlive) return;
+
+        // [7 ก.ย. 2026] ปลุกหลอดกลับก่อนเติมค่า — ตอนตายเราแช่ไว้ (ดู Die)
+        // ไม่ปลุก = ฟื้นมาแล้วหลอดค้างนิ่งตลอด เลือด/ความอึดไม่ฟื้นอีกเลย
+        _survival.Unfreeze(Gauge.CurrentTime);
 
         Dictionary<string, float> ratios = normal ? DeathPenaltyRatios() : BattleDataStore.ReviveImmediately?.gauge_ratio;
         if (ratios == null || ratios.Count == 0)

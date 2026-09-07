@@ -1029,6 +1029,34 @@ public partial class Player
                 }
                 break;
             }
+            // [7 ก.ย. 2026] "animal <ชนิด> [เลเวล]" — เสกสัตว์ลงข้าง ๆ ตัวเรา
+            // มีไว้ทดสอบอนิเมชั่น/การไล่กัด/การตาย โดยไม่ต้องเดินหาสัตว์ทั่วเกาะ
+            // เช่น  animal 2013 20   (ดูเลขชนิดที่ data/assets/entity_types/animal.json)
+            case "animal":
+            {
+                AnimalManager manager = _world.AnimalManager;
+                if (manager == null || array.Length < 2 || !ushort.TryParse(array[1], out ushort animalType))
+                {
+                    Send(new Info { Text = "ใช้: animal <ชนิด> [เลเวล]" }, seq);
+                    break;
+                }
+                int animalLevel = array.Length >= 3 && int.TryParse(array[2], out int lv) ? lv : 1;
+
+                // วางห่างไป 2 ช่องทางขวา ไม่ให้เกิดทับตัวผู้เล่นจนกล้องมองไม่เห็น
+                WorldPosition me = PlayerWorldPosition();
+                var spot = new Point2((int)Math.Round(me.x / 200f) + 2, (int)Math.Round(me.y / 200f));
+
+                AnimalManager.Animal spawned = manager.SpawnAt(animalType, animalLevel, spot);
+                if (spawned == null)
+                {
+                    Send(new Info { Text = $"ไม่มีสัตว์ชนิด {animalType} ในข้อมูล" }, seq);
+                    break;
+                }
+                Send(new Info { Text = $"เสก {animalType} lv{spawned.CombatLevel} ที่ [{spot.x},{spot.y}]" }, seq);
+                Console.WriteLine($"[โกง] {Short(EntityId)} เสกสัตว์ {animalType} lv{spawned.CombatLevel} " +
+                                  $"ที่ [{spot.x},{spot.y}] (id {spawned.EntityId})");
+                break;
+            }
             case "weather":
             {
                 string[] array2 = { "sunny", "cloudy", "rainy", "heavy_rainy", "snowy", "heavy_snowy" };
