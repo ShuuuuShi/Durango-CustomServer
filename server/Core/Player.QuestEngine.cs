@@ -79,6 +79,17 @@ public partial class Player
 
     void FlushQuestSave()
     {
+        // ห้ามประทับ CurrentResetDay() ที่นี่ — ContextChanged ยิงจากกระเป๋า/สกิล/วาร์ป ฯลฯ
+        // ถ้าข้ามเที่ยงคืน KST แล้วยังไม่ผ่าน EnsureDailyReset การประทับ "วันนี้" จะทำให้
+        // ShouldResetDaily เป็นเท็จทั้งเซสชันและไฟล์ .player ⇒ Daily ไม่รีเซ็ตเลย
+        if (QuestCatalog.ShouldResetDaily(_context.QuestDailyResetDay))
+        {
+            string today = QuestCatalog.CurrentResetDay();
+            ResetDailyQuests();
+            _context.QuestDailyResetDay = today;
+            Console.WriteLine($"[เควส] {Short(EntityId)} รีเซ็ต Daily ตอนเซฟ → {today}");
+        }
+
         Dictionary<string, QuestStore.Entry> snap = QuestStore.Snapshot(EntityId);
         var save = new Dictionary<string, QuestSaveData>(snap.Count, StringComparer.Ordinal);
         foreach (KeyValuePair<string, QuestStore.Entry> kv in snap)
@@ -91,7 +102,6 @@ public partial class Player
             };
         }
         _context.Quests = save;
-        _context.QuestDailyResetDay = QuestCatalog.CurrentResetDay();
     }
 
     /// <summary>โฆษณาแท็บ Daily หลัง QuestCategories ถึงฝั่งเกมแล้ว</summary>
@@ -174,6 +184,8 @@ public partial class Player
     /// </summary>
     bool TryClaimPlayableQuestReward(string questId, uint seq)
     {
+        EnsureDailyReset();
+
         QuestDef def = QuestCatalog.Find(questId);
         if (def == null || !QuestCatalog.IsTracked(questId)) return false;
 
