@@ -1948,7 +1948,10 @@ public partial class Player
     public void Process()
     {
         _connection.Process();
-        if (ExpireTimedStatusEffects())
+        // หมดอายุก่อน แล้วค่อยใส่คืนจากฝน/น้ำที่ยังอยู่ — ส่งชุดเดียว จะได้ไม่กระพริบไอคอน
+        bool statusChanged = ExpireTimedStatusEffects();
+        statusChanged |= SyncWorldDrivenStatusEffects();
+        if (statusChanged)
         {
             SendStatusEffects();
         }
