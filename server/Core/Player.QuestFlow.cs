@@ -66,7 +66,8 @@ public partial class Player
         // การ์ดจะถูกวาดใหม่ ซึ่ง Set() รีเซ็ตธงให้เอง (QuestNodeWidget.cs:96-98)
         _connection.Recv(delegate(RequestQuestReward msg, PacketHeader header)
         {
-            Console.WriteLine($"[เควส] {Short(EntityId)} ขอรับรางวัลเควส '{msg.QuestId}' — เซิร์ฟยังไม่มีเอนจินเควส");
+            if (TryClaimPlayableQuestReward(msg.QuestId, header.Seq)) return;
+            Console.WriteLine($"[เควส] {Short(EntityId)} ขอรับรางวัลเควส '{msg.QuestId}' — นอกเส้น Daily/Once เฟส 1");
             Send(new Abort { Text = "ยังไม่เปิดใช้งานการรับรางวัลเควส" }, header.Seq);
         });
 

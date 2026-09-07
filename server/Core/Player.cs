@@ -555,6 +555,7 @@ public partial class Player
         SendEquipments();
         SendDefoggedChunks();
         SendQuestCategories();
+        AnnouncePlayableQuests();
         Send(_context.AppearPlayer);
     }
 
@@ -906,13 +907,21 @@ public partial class Player
         Send(_world.CreateDefoggedChunks());
     }
 
-    private void SendQuestCategories()
+    private void SendQuestCategories(uint seq = 0u)
     {
-        QuestCategory value = new()
+        Send(new QuestCategories
         {
-            Category = EpicCategory
-        };
-        Send(new QuestCategories { Epic = value });
+            Categories = new[]
+            {
+                new QuestCategory
+                {
+                    Category = QuestCatalog.DailyCategory,
+                    Name = "รายวัน",
+                    UnreceivedCount = CountClaimableDaily()
+                }
+            },
+            Epic = new QuestCategory { Category = EpicCategory }
+        }, seq);
     }
 
     private void HandleCheatMsg(string cheat, uint seq)
@@ -1634,6 +1643,7 @@ public partial class Player
             // [7 ก.ย. 2026] exp หมวดเกษตร — ⚠️ ก่อนหน้านี้ไม่มีจุดไหนให้ exp หมวดนี้เลย
             // ⇒ ปลูกทั้งวันหมวด Farming ค้างที่เลเวล 1 ตลอดกาล และไม่ได้ exp ตัวละครด้วย
             AddExpForAction(SkillTuning.GatherWeight, Shared.Skill.Category.Farming, "ปลูกพืช");
+            NoteQuestEvent(Shared.Quest.QuestEventType.Farmed);
             break;
         }
     }

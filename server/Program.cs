@@ -85,6 +85,21 @@ internal static class Program
         {
             switch (args[i])
             {
+                case "--quest-check":
+                {
+                    string checkData = Path.Combine(AppContext.BaseDirectory, "data");
+                    while (i + 1 < args.Length)
+                    {
+                        if (args[i + 1] == "--data")
+                        {
+                            checkData = args[i + 2];
+                            i += 2;
+                            continue;
+                        }
+                        i++;
+                    }
+                    return QuestCatalogCheck.Run(checkData);
+                }
                 case "--selftest":
                 {
                     int stGateway = 18290, stGame = 18291;
@@ -147,6 +162,7 @@ internal static class Program
                 case "--help":
                 case "-h":
                     Console.WriteLine("DurangoServerNx — เซิร์ฟแท้พอร์ตตรง · มือถือก่อน");
+                    Console.WriteLine("  --quest-check [--data <dir>]  ตรวจแคตตาล็อก Daily เฟส 1 (ไม่ต้องเปิดเซิร์ฟ)");
                     Console.WriteLine("  --name, --gateway-port, --game-port, --data, --terrains, --terrain,");
                     Console.WriteLine("  --assetbundles-android, --public-host, --url-prefix, --max-players, --tps, --cluster-mode,");
                     Console.WriteLine("  --admin-token <t>   token ของ /health (หรือ env DURANGO_ADMIN_TOKEN) — ไม่ตั้ง = เรียกได้เฉพาะเครื่องตัวเอง");

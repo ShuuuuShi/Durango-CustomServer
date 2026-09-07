@@ -47,6 +47,9 @@ public static class DataStore
         var stories = Json.ReadFromFile<Dictionary<string, Chapters>>("quests/epics_for_client");
         new StoryYaml().Initialize(stories);
 
+        // Daily/Once display rows — objectives are inferred (ดู Support/QuestCatalog.cs)
+        QuestCatalog.Load();
+
         var recipes = Json.ReadFromFile<Dictionary<string, Recipe>>("item/recipes");
         new RecipeDict().Initialize(recipes);
 

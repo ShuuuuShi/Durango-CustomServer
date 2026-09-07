@@ -436,6 +436,7 @@ public partial class Player
         // (inventory เปลี่ยนตั้งแต่ตรงนี้แล้ว ถ้าให้ตอนส่ง Crafted จะซ้ำ/ช้าโดยใช่เหตุ)
         AddExpForAction(SkillTuning.CraftWeight, MapRecipeSkillCategory(recipe.category),
                         $"คราฟต์ {msg.RecipeId}");
+        NoteQuestEvent(Shared.Quest.QuestEventType.Crafted, recipe.category);
 
         SpendCraftEnergy(recipe);
 
