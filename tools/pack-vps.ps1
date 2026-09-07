@@ -28,6 +28,10 @@ param(
     [string]$StartIsland  = 'ri18tp01',
     [string]$Rid          = 'linux-x64',
     [string]$Out          = "$PSScriptRoot\..\dist",
+    # ลิงก์ให้ผู้เล่นโหลดตัวเกม — เซิร์ฟส่งค่านี้กลับใน /knock (Core/Gateway.cs:127 download_url)
+    [string]$DownloadUrl  = '',
+    # โทเคนหน้าแอดมิน — ไม่ใส่ = /admin เรียกได้จากบนเครื่องเซิร์ฟเองเท่านั้น
+    [string]$AdminToken   = '',
     [switch]$SkipGame
 )
 
@@ -36,6 +40,7 @@ $Root     = Split-Path -Parent $PSScriptRoot
 $VpsOut   = Join-Path $Out 'vps'
 $GameOut  = Join-Path $Out 'pc\DurangoLastHuman-test'
 $Address  = "http://${VpsHost}:${GatewayPort}"
+if (-not $DownloadUrl) { $DownloadUrl = "http://${VpsHost}:8892/download/DurangoLastHuman-test.zip" }
 
 function Say([string]$t, [string]$c = 'Gray') { Write-Host $t -ForegroundColor $c }
 
@@ -68,6 +73,11 @@ foreach ($junk in 'AppData-nx', 'logs') {
 
 # ── 3. สคริปต์รัน + systemd ─────────────────────────────────────────────────────
 Say "`n3) เขียนสคริปต์รัน" Cyan
+# flag ที่ run.sh เดิม **ไม่เคยมี** — เจอตอนตรวจก่อนอัพ 7 ก.ย. 2026
+#   --download-url : เซิร์ฟตอบใน /knock ให้ตัวเกมรู้ว่าจะไปโหลดชุดใหม่ที่ไหน
+#   --admin-token  : เปิดให้เรียก /admin จากเครื่องอื่น (ไม่ใส่ = เฉพาะบนเครื่องเซิร์ฟ)
+$extraFlags = " \`n  --download-url $DownloadUrl"
+if ($AdminToken) { $extraFlags += " \`n  --admin-token $AdminToken" }
 $runSh = @"
 #!/bin/sh
 # เปิดเซิร์ฟ Durango LastHuman
@@ -82,7 +92,7 @@ exec ./DurangoServer \
   --terrain $StartIsland \
   --public-host $VpsHost \
   --cluster-mode Online \
-  --max-players 50
+  --max-players 50$extraFlags
 "@ + "`n"
 [System.IO.File]::WriteAllText((Join-Path $VpsOut 'run.sh'), ($runSh -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding $false))
 
