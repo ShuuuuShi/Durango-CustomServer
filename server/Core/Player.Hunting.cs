@@ -485,6 +485,7 @@ public partial class Player
                     ? Shared.Skill.Category.RangedCombat
                     : Shared.Skill.Category.MeleeCombat;
             AddExpForAction(SkillTuning.KillWeight, combatCat, "ล่าสัตว์");
+            NoteQuestEvent(Shared.Quest.QuestEventType.Hunted);
 
             // [7 ก.ย. 2026] เป้าตายแล้วต้องออกจากโหมดต่อสู้ — เดิมไม่เคยส่ง BattleEnded
             // ⇒ ตัวละครค้างท่าถืออาวุธ และ client/InteractionSystem กรองเมนูเหลือแต่ของโหมดสู้

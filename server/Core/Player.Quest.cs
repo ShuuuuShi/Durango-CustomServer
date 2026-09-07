@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Durango.Network;
 using Messages;
+using Shared.Quest;
 using Yaml;
 using Yaml.Util;
 
@@ -72,35 +73,54 @@ public partial class Player
         {
             HandleGetQuestStateMsg(msg, header.Seq);
         });
+
+        // เกมต้นฉบับยิงตอนบูตบางเส้น — ตอบชุดเดียวกับที่ push ตอนเข้าเกม
+        _connection.Recv(delegate(GetQuestCategories msg, PacketHeader header)
+        {
+            SendQuestCategories(header.Seq);
+        });
+
+        HydrateQuests();
     }
 
     private void HandleGetQuestsMsg(GetQuests msg, uint seq)
     {
         // หมวดที่ขอมาเป็นความจริงของคำขอ — เดิมทับด้วย "sunset" เสมอ (Player.cs:483)
         // ว่าง = โปรโตคอลไม่ได้กำหนดมา ⇒ ใช้หมวดเรื่องหลักเป็นค่าตั้งต้น
+        EnsureDailyReset();
         string category = string.IsNullOrEmpty(msg.Category) ? EpicCategory : msg.Category;
 
         var todos = new List<QuestToDo>();
-        // แหล่งข้อมูลเดียวกับ handler เดิม (data/assets/quests/epics_for_client.json → StoryYaml,
-        // โหลดที่ Support/DataStore.cs:47-48) — ไม่เดารายชื่อเควสเอง
-        Chapters chapters = SingletonDict<string, Chapters>.Get(category);
-        if (chapters?.ChapterList != null)
+        if (QuestCatalog.IsPlayableCategory(category))
         {
-            foreach (Chapter chapter in chapters.ChapterList)
+            // Daily (และ Once ที่ pipeline เดียวกันในอนาคต) — รายชื่อจาก assets ไม่ใช่ epics
+            foreach (QuestDef def in QuestCatalog.InCategory(category))
             {
-                if (chapter?.Quests == null) continue;
-                foreach (string questId in chapter.Quests)
-                {
-                    if (string.IsNullOrEmpty(questId)) continue;
-                    todos.Add(QuestStore.ToQuestToDo(EntityId, questId));
-                }
+                QuestStore.Ensure(EntityId, def);
+                todos.Add(QuestStore.ToQuestToDo(EntityId, def.Id));
             }
         }
         else
         {
-            // ⚠️ ไม่มีข้อมูลหมวดนี้ = ตอบ "ไม่มีเควส" ไม่ใช่ "เงียบ" — เดิมเงียบทำให้หน้าเควสค้างโหลด
-            // (Category._isLoadingQuests ติด true ถาวร — client/Durango.Logic.Quest/Category.cs:67-71)
-            Console.WriteLine($"[เควส] ไม่มีข้อมูลหมวด '{category}' — ตอบรายการว่างให้ {Short(EntityId)}");
+            // แหล่งข้อมูลเรื่องหลัก (data/assets/quests/epics_for_client.json → StoryYaml)
+            Chapters chapters = SingletonDict<string, Chapters>.Get(category);
+            if (chapters?.ChapterList != null)
+            {
+                foreach (Chapter chapter in chapters.ChapterList)
+                {
+                    if (chapter?.Quests == null) continue;
+                    foreach (string questId in chapter.Quests)
+                    {
+                        if (string.IsNullOrEmpty(questId)) continue;
+                        todos.Add(QuestStore.ToQuestToDo(EntityId, questId));
+                    }
+                }
+            }
+            else
+            {
+                // ⚠️ ไม่มีข้อมูลหมวดนี้ = ตอบ "ไม่มีเควส" ไม่ใช่ "เงียบ" — เดิมเงียบทำให้หน้าเควสค้างโหลด
+                Console.WriteLine($"[เควส] ไม่มีข้อมูลหมวด '{category}' — ตอบรายการว่างให้ {Short(EntityId)}");
+            }
         }
 
         Send(new Quests
@@ -115,6 +135,7 @@ public partial class Player
 
     private void HandleGetQuestStateMsg(GetQuestState msg, uint seq)
     {
+        EnsureDailyReset();
         var states = new Dictionary<string, Shared.Quest.QuestState>();
         // client ส่งมาครั้งละ 1 id (QuestSystem.cs:207-209) แต่โปรโตคอลรองรับหลาย id ⇒ ทำครบ
         // ⚠️ key ว่างห้ามใส่ — Dictionary<string,_> โยน ArgumentNullException กับ null key
@@ -139,7 +160,7 @@ public partial class Player
         }
         // ตัวที่ถามแต่ไม่อยู่ใน States จะได้ Invalid ฝั่ง client (QuestSystem.cs:212)
         // ⇒ ไม่ปลด QuestRewardToDo (:20 เช็คเฉพาะ Finished/NotActivated) ⇒ ใส่ครบทุก id ที่ถามดีกว่า
-        Send(new QuestState
+        Send(new Messages.QuestState
         {
             States = states
         }, seq);
@@ -180,21 +201,37 @@ public partial class Player
         }
 
         private static readonly Dictionary<string, Dictionary<string, Entry>> PerPlayer = new();
+        private static readonly object Gate = new();
 
         /// <summary>เควสทั้งหมดของผู้เล่นคนนี้ที่เซิร์ฟจดไว้ (คืน dict จริง — แก้ได้เลย)</summary>
         public static Dictionary<string, Entry> Of(string ownerEntityId)
+        {
+            if (string.IsNullOrEmpty(ownerEntityId)) return new Dictionary<string, Entry>();
+            lock (Gate)
+            {
+                if (PerPlayer.TryGetValue(ownerEntityId, out Dictionary<string, Entry> dict)) return dict;
+                dict = new Dictionary<string, Entry>();
+                PerPlayer[ownerEntityId] = dict;
+                return dict;
+            }
+        }
+
+        public static Entry Find(string ownerEntityId, string questId)
+        {
+            if (string.IsNullOrEmpty(questId)) return null;
+            lock (Gate)
+            {
+                return OfUnlocked(ownerEntityId).GetValueOrDefault(questId);
+            }
+        }
+
+        static Dictionary<string, Entry> OfUnlocked(string ownerEntityId)
         {
             if (string.IsNullOrEmpty(ownerEntityId)) return new Dictionary<string, Entry>();
             if (PerPlayer.TryGetValue(ownerEntityId, out Dictionary<string, Entry> dict)) return dict;
             dict = new Dictionary<string, Entry>();
             PerPlayer[ownerEntityId] = dict;
             return dict;
-        }
-
-        public static Entry Find(string ownerEntityId, string questId)
-        {
-            if (string.IsNullOrEmpty(questId)) return null;
-            return Of(ownerEntityId).GetValueOrDefault(questId);
         }
 
         /// <summary>
@@ -205,13 +242,66 @@ public partial class Player
                                int progress = 0, int goalCount = 1)
         {
             if (string.IsNullOrEmpty(questId)) return;
-            Of(ownerEntityId)[questId] = new Entry
+            lock (Gate)
             {
-                State = state,
-                Progress = progress,
-                // กันป้ายรางวัลลวงตามคอมเมนต์ GoalCount — จบแล้วเท่านั้นที่ปล่อย 0 ได้
-                GoalCount = state == Shared.Quest.QuestState.Finished ? Math.Max(goalCount, progress) : Math.Max(goalCount, 1)
-            };
+                OfUnlocked(ownerEntityId)[questId] = new Entry
+                {
+                    State = state,
+                    Progress = progress,
+                    // กันป้ายรางวัลลวงตามคอมเมนต์ GoalCount — จบแล้วเท่านั้นที่ปล่อย 0 ได้
+                    GoalCount = state == Shared.Quest.QuestState.Finished ? Math.Max(goalCount, progress) : Math.Max(goalCount, 1)
+                };
+            }
+        }
+
+        /// <summary>สร้างแถว WIP จากแคตตาล็อกถ้ายังไม่มี — Daily ต้องมี GoalCount &gt; 0 ก่อนเปิด UI</summary>
+        public static Entry Ensure(string ownerEntityId, QuestDef def)
+        {
+            if (def == null || string.IsNullOrEmpty(def.Id)) return null;
+            lock (Gate)
+            {
+                Dictionary<string, Entry> dict = OfUnlocked(ownerEntityId);
+                if (dict.TryGetValue(def.Id, out Entry existing))
+                {
+                    if (existing.GoalCount < 1) existing.GoalCount = Math.Max(1, def.GoalCount);
+                    return existing;
+                }
+                var created = new Entry
+                {
+                    State = Shared.Quest.QuestState.WorkInProgress,
+                    Progress = 0,
+                    GoalCount = Math.Max(1, def.GoalCount)
+                };
+                dict[def.Id] = created;
+                return created;
+            }
+        }
+
+        public static void ReplaceAll(string ownerEntityId, Dictionary<string, Entry> rows)
+        {
+            lock (Gate)
+            {
+                PerPlayer[ownerEntityId] = rows ?? new Dictionary<string, Entry>();
+            }
+        }
+
+        public static Dictionary<string, Entry> Snapshot(string ownerEntityId)
+        {
+            lock (Gate)
+            {
+                Dictionary<string, Entry> src = OfUnlocked(ownerEntityId);
+                var copy = new Dictionary<string, Entry>(src.Count, StringComparer.Ordinal);
+                foreach (KeyValuePair<string, Entry> kv in src)
+                {
+                    copy[kv.Key] = new Entry
+                    {
+                        State = kv.Value.State,
+                        Progress = kv.Value.Progress,
+                        GoalCount = kv.Value.GoalCount
+                    };
+                }
+                return copy;
+            }
         }
 
         /// <summary>
@@ -219,16 +309,16 @@ public partial class Player
         ///
         /// ลำดับการตัดสิน:
         ///   1. จดไว้ใน store = สถานะจริงจากระบบเควส
-        ///   2. เป็นเควสเรื่องหลัก ("sunset" จาก epics_for_client) = Finished — สถานะที่เซิร์ฟแท้
+        ///   2. เป็น Daily/Once ที่เฟส 1 ติดตาม = WorkInProgress (ห้ามตอบ Finished แบบ sunset)
+        ///   3. เป็นเควสเรื่องหลัก ("sunset" จาก epics_for_client) = Finished — สถานะที่เซิร์ฟแท้
         ///      ประกาศไว้เองและหน้าจอที่ผู้เล่นเห็นมาตลอด (client/Durango.Online/Player.cs:304-308)
-        ///   3. ไม่รู้จัก = NotActivated — "ยังไม่มีเควสนี้" ตาม enum ของโปรโตคอล
-        ///      (GameCode/Shared.Quest/QuestState.cs — client ใช้ค่านี้ปิด todo ของไกด์:
-        ///      client/Durango.Logic.PlayGuide/QuestRewardToDo.cs:20)
+        ///   4. ไม่รู้จัก = NotActivated — "ยังไม่มีเควสนี้" ตาม enum ของโปรโตคอล
         /// </summary>
         public static Shared.Quest.QuestState StateOf(string ownerEntityId, string questId)
         {
             Entry entry = Find(ownerEntityId, questId);
             if (entry != null) return entry.State;
+            if (QuestCatalog.IsTracked(questId)) return Shared.Quest.QuestState.WorkInProgress;
             return IsStoryQuest(questId)
                 ? Shared.Quest.QuestState.Finished
                 : Shared.Quest.QuestState.NotActivated;
@@ -238,16 +328,27 @@ public partial class Player
         public static QuestToDo ToQuestToDo(string ownerEntityId, string questId)
         {
             Entry entry = Find(ownerEntityId, questId);
+            QuestDef def = QuestCatalog.Find(questId);
             bool finished = StateOf(ownerEntityId, questId) == Shared.Quest.QuestState.Finished;
+            int goal = entry?.GoalCount ?? def?.GoalCount ?? 0;
+            if (!finished && goal < 1 && QuestCatalog.IsTracked(questId)) goal = 1;
             return new QuestToDo
             {
                 Id = questId,
-                // ค่า Progress/GoalCount/EndAt/Reward เหมือน handler เดิมทุกอย่างเมื่อไม่มีข้อมูลจริง
                 Progress = entry?.Progress ?? 0,
-                GoalCount = entry?.GoalCount ?? 0,
+                GoalCount = goal,
                 Finished = finished,
-                EndAt = 0.0,
-                Reward = null
+                EndAt = def != null && def.Type == QuestType.Daily ? QuestCatalog.NextResetUnix() : 0.0,
+                // ปุ่มรับรางวัลโผล่จาก Reward.HasValue (QuestNodeWidget.UpdateQuestRewards)
+                Reward = QuestCatalog.IsTracked(questId) ? DisplayReward() : null
+            };
+        }
+
+        public static RewardInfo DisplayReward()
+        {
+            return new RewardInfo
+            {
+                QuestScore = 10
             };
         }
 

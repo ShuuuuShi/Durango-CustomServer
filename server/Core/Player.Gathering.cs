@@ -9,6 +9,7 @@ using Messages;
 using Shared.Item;
 using UnityEngine;
 using Yaml;
+using Yaml.Util;
 
 namespace Durango.Online;
 
@@ -448,10 +449,12 @@ public partial class Player
         if (isCarcass)
         {
             AddExpForAction(SkillTuning.ButcherWeight, Shared.Skill.Category.Butchery, "ชำแหละ");
+            NoteQuestEvent(Shared.Quest.QuestEventType.Collected, QuestCatalog.Filters.Carcass);
         }
         else
         {
             AddExpForAction(SkillTuning.GatherWeight, Shared.Skill.Category.Gathering, "เก็บของ");
+            NoteQuestEvent(Shared.Quest.QuestEventType.Collected, QuestCatalog.Filters.Gather);
         }
 
         if (ranOut && !isCarcass)

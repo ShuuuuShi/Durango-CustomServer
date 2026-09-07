@@ -71,6 +71,9 @@ public static class SkillTuning
     /// <summary>**ค่าของเรา** — ชำแหละซาก 1 ครั้ง</summary>
     public const int ButcherWeight = 2;
 
+    /// <summary>**ค่าของเรา** — น้ำหนัก exp ตอนกดรับรางวัลเควส Daily (ไม่มีตารางรางวัลใน assets)</summary>
+    public const int QuestClaimWeight = 8;
+
     /// <summary>
     /// **ค่าของเรา** — จำนวน "ครั้ง" โดยประมาณที่ต้องทำเพื่อขึ้น 1 เลเวล
     ///
@@ -852,6 +855,13 @@ public partial class Player
         // ทั้งไฟล์ทุกครั้ง (Core/GameServer.cs:186-194) ⇒ อย่าเขียนสองรอบต่อการกระทำหนึ่งครั้ง
         if (category.HasValue) AddCategoryExp(category.Value, SkillTuning.CategoryExpPerAction, save: false);
         AddExp(ExpPerAction(_skillLevel) * weight, reason);
+    }
+
+    /// <summary>จำนวน exp ดิบที่จะได้จากน้ำหนักนี้ที่เลเวลปัจจุบัน — ใช้โชว์บนใบเสร็จเควส</summary>
+    public int PreviewActionExp(int weight)
+    {
+        if (weight <= 0 || _skills == null) return 0;
+        return ExpPerAction(_skillLevel) * weight;
     }
 
     /// <summary>เพดาน exp — ค้างที่เลเวลสูงสุดแต่ยังให้แถบเดินจนเต็มช่องสุดท้าย</summary>
