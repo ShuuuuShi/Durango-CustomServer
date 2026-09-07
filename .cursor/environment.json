@@ -1,0 +1,15 @@
+{
+  "name": "Durango LastHuman",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "server",
+      "command": "dotnet server/bin/Release/net9.0/DurangoServer.dll --name nx --gateway-port 8190 --game-port 8191",
+      "description": "Durango .NET 9 game server. HTTP gateway on :8190 (/knock, /sessions, /entry, /players, /terrains, /admin, /health) and TCP game protocol on :8191."
+    }
+  ],
+  "ports": [
+    { "name": "gateway", "port": 8190 },
+    { "name": "game", "port": 8191 }
+  ]
+}
