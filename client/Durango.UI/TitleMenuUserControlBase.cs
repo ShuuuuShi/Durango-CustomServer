@@ -185,9 +185,17 @@ Account selectedAccount = GetSelectedAccount();
 				{
 					Pair<string, int> recommendedPlayer = selectedAccount.GetRecommendedPlayer();
 					// สล็อตว่าง (สร้างตัวใหม่) = PlayerId ว่าง → เข้าฉาก Prologue
+					//
+					// ⚠️ [7 ก.ย. 2026] ต้องเป็น string.Empty **ห้ามเป็น null**
+					// เพราะผู้เรียกเช็คต่อทันทีว่า `GameManager.PlayerId == null` แล้วเด้งเป็น
+					// State.Error (Durango.UI/TitleMenuGroup.cs:210) ⇒ บัญชีที่ยังไม่มีตัวละคร
+					// จะขึ้น "ไม่สามารถเชื่อมต่อกับเกม (SelectCluster)" ทั้งที่เน็ตปกติดี
+					// เข้าเซิร์ฟใหม่ไม่ได้เลยสักคน
+					// ค่า string.Empty คือค่าที่ระบบใช้อยู่แล้วสำหรับ "ตัวใหม่"
+					// (PlayerSelectionSystem.CreateNewPlayer:96)
 					if (string.IsNullOrEmpty(recommendedPlayer.Item1))
 					{
-						GameManager.PlayerId = null;
+						GameManager.PlayerId = string.Empty;
 						GameManager.PlayerSlotIndex = recommendedPlayer.Item2;
 						PrologueManager.ToBeSkipped = false;
 						DeveloperSettings.SkipPrologue = false;
