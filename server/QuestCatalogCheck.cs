@@ -170,6 +170,14 @@ internal static class QuestCatalogCheck
             "วันเก่าต้องรีเซ็ต");
         Expect(!QuestCatalog.ShouldResetDaily("2026-09-07", kstNoon.ToUniversalTime()),
             "วันเดียวกันไม่รีเซ็ต");
+        Expect(!QuestCatalog.ShouldResetDaily("", kstNoon.ToUniversalTime()),
+            "วันว่าง (ผู้เล่นใหม่) ไม่รีเซ็ต");
+        Expect(!QuestCatalog.ShouldResetDaily(null, kstNoon.ToUniversalTime()),
+            "วัน null ไม่รีเซ็ต");
+        // ถ้า FlushQuestSave ประทับวันนี้ก่อนรีเซ็ต แถวเก่าจะค้าง — ShouldResetDaily ต้องยังเห็นวันเก่า
+        Expect(QuestCatalog.ShouldResetDaily("2026-09-06", kstNoon.ToUniversalTime()) &&
+               QuestCatalog.CurrentResetDay(kstNoon.ToUniversalTime()) == "2026-09-07",
+            "วันเซฟกับวันปัจจุบันคนละค่าจนกว่าจะรีเซ็ตจริง");
     }
 
     static void CheckTrackedNotSunset()
