@@ -1050,12 +1050,16 @@ public partial class Player
         {
             state.Exp = 0;
         }
+        int levelBefore = state.Level;
         state.Level = Math.Min(state.Level + 1, SkillDataStore.MaxPlayerLevel);
         state.ResearchStart = 0.0;
         state.ResearchEnd = 0.0;
         state.ResearchSaved = 0f;
         Console.WriteLine($"[skill] {ShortId()} วิจัยหมวด {(SkillCat)cat} เสร็จ → หมวดเลเวล {state.Level}");
-        NotifyCategoryLevelUp((SkillCat)cat, state.Level);
+        if (state.Level > levelBefore)
+        {
+            NotifyCategoryLevelUp((SkillCat)cat, state.Level);
+        }
 
         // [7 ก.ย. 2026] หมวดขึ้นเลเวล = โหนดสกิลอัตโนมัติชุดใหม่ปลดได้ ⇒ สูตรชุดใหม่ตามมา
         // ⚠️ ไม่ push = เมนูคราฟต์ยังเป็นชุดเก่าจนกว่าจะออกเข้าเกมใหม่
