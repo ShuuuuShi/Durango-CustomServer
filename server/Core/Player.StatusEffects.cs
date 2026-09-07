@@ -131,6 +131,52 @@ public partial class Player
         FlushSurvival();
     }
 
+    /// <summary>แท็กใน status_effects.json ที่บอกให้เคลียร์สถานะตอนเลเวลตัวละครขึ้น</summary>
+    internal const string ClearOnLevelUpTag = "clear_on_levelup";
+
+    internal static bool HasClearOnLevelUpTag(StatusEffectCatalog.Template template)
+    {
+        if (template?.Tags == null) return false;
+        foreach (string tag in template.Tags)
+        {
+            if (string.Equals(tag, ClearOnLevelUpTag, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// เคลียร์บัพ/ดีบัพที่ติดแท็ก <c>clear_on_levelup</c> ตอนตัวละครขึ้นเลเวล
+    /// คืน true ถ้ามีสถานะหายจริง — ผู้เรียกต้อง <see cref="SendStatusEffects"/> ตาม
+    /// </summary>
+    private bool ClearStatusEffectsOnLevelUp()
+    {
+        bool changed = false;
+
+        if (_timedStatusEffects.Count > 0)
+        {
+            var timedIds = new List<string>(_timedStatusEffects.Keys);
+            foreach (string id in timedIds)
+            {
+                TimedStatusEffect entry = _timedStatusEffects[id];
+                if (!HasClearOnLevelUpTag(StatusEffectCatalog.Get(id, entry.Level))) continue;
+                changed |= ClearTimedStatusEffect(id);
+            }
+        }
+
+        if (_toggledStatusEffects.Count > 0)
+        {
+            var toggledIds = new List<string>(_toggledStatusEffects.Keys);
+            foreach (string id in toggledIds)
+            {
+                if (!HasClearOnLevelUpTag(StatusEffectCatalog.Get(id))) continue;
+                _toggledStatusEffects.Remove(id);
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
     /// <summary>ซิงก์ SE จากสภาพอากาศปัจจุบันของเกาะ</summary>
     public void SyncWeatherStatusEffects(string weather)
     {
