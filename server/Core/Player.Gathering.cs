@@ -120,14 +120,6 @@ public static class GatheringTuning
     /// สั้นกว่านี้ท่าเก็บของยังเล่นไม่ทันจบ ⇒ เห็นเป็นตัวกระตุก
     /// </summary>
     public const float MinCollectSeconds = 0.5f;
-
-    /// <summary>
-    /// **ค่าของเรา** — เลเวลขั้นต่ำของเครื่องมือที่ต้องมี
-    ///
-    /// ของจริงเป็นตัวเลขต่อ generator (ยิ่งของแข็ง ยิ่งต้องการเครื่องมือเลเวลสูง) ซึ่งไม่มีในข้อมูล
-    /// ⇒ ใช้ 1 = "มีเครื่องมือชนิดนั้นก็พอ" ทั้งหมด จะได้ไม่ล็อกผู้เล่นด้วยตัวเลขที่เราเดาเอง
-    /// </summary>
-    public const int ToolLevel = 1;
 }
 
 public partial class Player
@@ -578,8 +570,12 @@ public partial class Player
     /// <summary>
     /// มีเครื่องมือตรงตามที่ generator ต้องการไหม
     ///
-    /// เทียบแบบเดียวกับฝั่ง client (client/InteractionData/GatheringData.cs:117-129
-    /// CanGateringWithThisTool): ไอเทมต้องมีแท็กชื่อตรงกันและเลเวลแท็ก >= ที่ต้องการ
+    /// เทียบแบบเดียวกับฝั่ง client (client/InteractionData/GatheringData.cs:142-156
+    /// CanGateringWithThisTool): ไอเทมในกระเป๋าต้องมีแท็กชื่อตรงกับ
+    /// <see cref="CollectibleTable.GeneratorSpec.ToolRequirements"/> และ
+    /// <c>tag.Level &gt;= spec.Level</c> (เลเวลของ generator — ไม่ใช่ค่าคงที่)
+    ///
+    /// เลเวลแท็กของเครื่องมือ = เลเวลไอเทมตอนสร้าง (Core/Cheats.cs MakeItem)
     /// </summary>
     private bool HasRequiredTool(CollectibleTable.GeneratorSpec spec, string toolItemId)
     {
@@ -589,9 +585,10 @@ public partial class Player
         if (idx < 0) return false;
         Messages.Tag[] tags = _context.InventoryItems[idx].Tags;
         if (tags == null) return false;
+        int need = CollectibleTable.RequiredToolLevel(spec);
         foreach (Messages.Tag tag in tags)
         {
-            if (tag.Id != null && spec.ToolRequirements.TryGetValue(tag.Id, out int need) && tag.Level >= need)
+            if (tag.Id != null && spec.ToolRequirements.ContainsKey(tag.Id) && tag.Level >= need)
             {
                 return true;
             }
@@ -945,7 +942,9 @@ internal static class CollectibleTable
     {
         Prototype proto = PrototypeYaml.GetItemPrototype(prototypeId);
         if (proto == null) return null;
-        // เลเวลของ generator = min_level ของไอเทมที่จะได้ (ข้อมูลจริง — ทุกวัตถุดิบธรรมชาติเป็น 1)
+        // เลเวลของ generator = min_level ของไอเทมที่จะได้ (ข้อมูลจริงใน prototype_data.json)
+        // วัตถุดิบธรรมชาติชุดหลัก (wood_log / stone / meat / …) เป็น 1 — แต่ไม่ใช้ค่าคงที่ 1
+        // ตอนตรวจเครื่องมือ: เทียบ tag.Level ของไอเทมในกระเป๋ากับเลเวลนี้
         int level = Mathf.Max(1, proto.MinLevel);
         float effort = Effort(level);
         GeneratorClientData client = GeneratorNames().Get(prototypeId);
@@ -962,7 +961,7 @@ internal static class CollectibleTable
             Order = order,
             Effort = effort,
             Duration = Duration(effort),
-            ToolRequirements = ToolsFor(proto)
+            ToolRequirements = ToolsFor(proto, level)
         };
     }
 
@@ -1023,15 +1022,28 @@ internal static class CollectibleTable
     }
 
     /// <summary>
-    /// **ค่าของเรา** — เครื่องมือที่ต้องใช้ ตัดสินจาก tags จริงของไอเทมที่จะได้
+    /// เลเวลเครื่องมือขั้นต่ำของ generator = <see cref="GeneratorSpec.Level"/>
+    /// (min_level ของไอเทมที่จะได้ — ข้อมูลจริง)
     ///
-    /// หลักคิด: ของที่ต้องออกแรงทุบ/ฟันถึงจะได้ ต้องมีเครื่องมือ · ของที่เด็ดมือเปล่าได้ ให้ bare_hands
+    /// UNKNOWN: ตาราง "ยิ่งเป้าแข็ง ยิ่งต้องเครื่องมือเลเวลสูง" ของ Nexon ไม่มีใน client assets
+    /// ⇒ ไม่คูณ/ไม่บวกตัวเลขที่ไม่มีแหล่งที่มา เทียบตรง ๆ กับเลเวลที่มีอยู่แล้ว
+    /// </summary>
+    internal static int RequiredToolLevel(GeneratorSpec spec) =>
+        spec == null ? 1 : Mathf.Max(1, spec.Level);
+
+    /// <summary>
+    /// **ค่าของเรา** — ชนิดเครื่องมือที่ต้องใช้ ตัดสินจาก tags จริงของไอเทมที่จะได้
+    ///
+    /// ค่าใน dictionary = เลเวลขั้นต่ำของแท็กนั้น (= เลเวล generator) — ฝั่งเกมเอาไปเทียบใน
+    /// FindBestTool / CanGateringWithThisTool ชุดเดียวกับที่เซิร์ฟตรวจใน HasRequiredTool
+    ///
+    /// หลักคิดชนิดเครื่องมือ: ของที่ต้องออกแรงทุบ/ฟันถึงจะได้ ต้องมีเครื่องมือ · ของที่เด็ดมือเปล่าได้ ให้ bare_hands
     /// ⇒ ผู้เล่นเกิดใหม่มือเปล่าเก็บหญ้า/กิ่งไม้/หินก้อนเล็กได้ทันที เอาไปทำขวานกับพลั่วต่อ
     ///   ส่วนต้นไม้ใหญ่กับสายแร่ต้องมีเครื่องมือก่อน (= ทางที่ ToolNeeded ถูกใช้จริง)
     /// </summary>
-    private static Dictionary<string, int> ToolsFor(Prototype proto)
+    private static Dictionary<string, int> ToolsFor(Prototype proto, int generatorLevel)
     {
-        int lv = GatheringTuning.ToolLevel;
+        int lv = Mathf.Max(1, generatorLevel);
         bool Has(string tag) => proto.Tags != null && proto.Tags.ContainsKey(tag);
 
         // สายแร่/อัญมณี — ต้องมีพลั่วหรือค้อน
