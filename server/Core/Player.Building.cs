@@ -612,6 +612,7 @@ public partial class Player
         // [7 ก.ย. 2026] ให้ exp ตอนกด "สำเร็จ" จริง — ไม่ให้ตอนจองหลุม/ใส่วัสดุ
         AddExpForAction(SkillTuning.BuildWeight, Shared.Skill.Category.Constructing,
                         $"สร้าง {blueprint.Id}");
+        NoteQuestEvent(Shared.Quest.QuestEventType.Built);
 
         Console.WriteLine($"[สร้าง] {Short(EntityId)} ทำให้ {blueprint.Id} สมบูรณ์แล้ว");
 
@@ -643,16 +644,52 @@ public partial class Player
     ///
     /// ข้อมูลจริง <c>constants.json → build → capsulating → cost</c>:
     /// <code>{"inside": "0", "outside": "t_stone_reference * level"}</code>
-    /// อยู่ในอาคาร = ฟรี · นอกอาคาร = คิดตามเลเวลด้วยหน่วย t_stone
     ///
-    /// ⇒ **คิดค่าไม่ได้ตอนนี้** เพราะสองอย่าง: เซิร์ฟไม่มีระบบเงิน (ไม่มีกระเป๋า t_stone ให้หัก)
-    /// และไม่มีค่า <c>t_stone_reference</c> ในชุดข้อมูลที่สกัดมา
-    /// ⇒ ตอบ 0 = ฟรี ซึ่งเป็นค่าที่ไฟล์เองใช้สำหรับกรณี "อยู่ในอาคาร" อยู่แล้ว
-    /// ไม่ใช่ตัวเลขที่เดาขึ้นมา · เหตุผลเดียวกับที่ค่าเดินเรือให้ฟรีไปก่อน (Player.HandleGetRoutesMsg)
+    /// <c>inside</c>/<c>outside</c> = บนที่ดิน vs นอกที่ดิน ไม่ใช่ชั้นในอาคาร
+    /// ยืนยันจาก client/UITable.cs <c>WarningEstateOut</c>:
+    /// "부족 영토와 사유지 바깥에 배치된 건축물은 포장 시 비용이 발생합니다."
+    ///
+    /// บนที่ดินคิดสูตร <c>"0"</c> ได้จริง = ฟรี
+    /// นอกที่ดินต้องมี <c>t_stone_reference</c> ซึ่งไม่มีค่าตัวเลขในชุดที่สกัดมา
+    /// (ค้นทั้ง assets แล้ว — ดู <c>docs/t-stone-reference.md</c>)
+    /// ⇒ นอกที่ดินตอบ 0 แบบ <c>STUB</c> เพื่อไม่ให้ปุ่ม "포장" ค้าง
+    ///    (client รอ <c>Cost</c> ก่อนโชว์กล่องยืนยัน แล้วค่อยยิง CapsulateArtifact)
+    ///    ห้ามเดาเรทเอง
     /// </summary>
     private void HandleGetCapsulatingCostMsg(GetCapsulatingCost msg, uint seq)
     {
-        Send(new Cost { Currency = Shared.Economy.Currency.TStone, Amount = 0L }, seq);
+        if (!TryGetBuildTarget(msg.EntityId, "ถามค่าเก็บ", out AppearArtifact artifact,
+                               out MergedBlueprint _, out string error))
+        {
+            Send(new Abort { Text = error }, seq);
+            return;
+        }
+
+        Send(new Cost
+        {
+            Currency = Shared.Economy.Currency.TStone,
+            Amount = ResolveCapsulatingCostAmount(artifact)
+        }, seq);
+    }
+
+    /// <summary>
+    /// คิดค่าเก็บจากสูตร constants — คืน 0 เมื่ออยู่บนที่ดิน (สูตรจริง) หรือเมื่อสูตรนอกที่ดินคิดไม่ได้ (STUB)
+    /// </summary>
+    private long ResolveCapsulatingCostAmount(AppearArtifact artifact)
+    {
+        bool insideEstate = _world.IsFootprintOnEstate(artifact.Tile, artifact.Size);
+        int level = Math.Max(1, (int)artifact.States.Level);
+        if (BuildTuning.TryEvalCapsulatingCost(insideEstate, level, out long amount))
+        {
+            return amount;
+        }
+
+        // STUB: outside = "t_stone_reference * level" แต่ t_stone_reference ไม่มีค่าในชุดข้อมูล
+        // ตอบ 0 เพื่อไม่หักเงินด้วยเรทที่เดา และไม่ทำให้เส้น CapsulateArtifact พัง
+        Console.WriteLine($"[สร้าง] STUB ค่าเก็บนอกที่ดิน {Short(EntityId)} " +
+                          $"{artifact.EntityType} lv{level} → 0 " +
+                          $"(ไม่มี t_stone_reference ใน assets)");
+        return 0L;
     }
 
     private void HandleCapsulateArtifactMsg(CapsulateArtifact msg, uint seq)
@@ -722,7 +759,17 @@ public partial class Player
             return;
         }
 
-        // ลำดับสำคัญ: ประกอบของให้ครบ → เช็คกระเป๋า → ค่อยลบหลังจริง
+        // หักเงินก่อนลบหลัง — สูตรเดียวกับ GetCapsulatingCost
+        // บนที่ดิน = 0 จริง · นอกที่ดินที่คิดสูตรไม่ได้ = 0 (STUB) ⇒ ไม่หัก
+        // ถ้าวันหนึ่งมี t_stone_reference จริง เส้นนี้จะหักจำนวนเดียวกับที่โชว์ในกล่องยืนยัน
+        long cost = ResolveCapsulatingCostAmount(artifact);
+        if (cost > 0 && !TrySpendTStone(cost, "เก็บสิ่งปลูกสร้าง"))
+        {
+            Send(new Abort { Text = "T Stone ไม่พอ" }, seq);
+            return;
+        }
+
+        // ลำดับสำคัญ: ประกอบของให้ครบ → เช็คกระเป๋า → หักเงิน → ค่อยลบหลังจริง
         // ลบก่อนแล้วพลาดทีหลัง = บ้านหายโดยไม่ได้อะไรคืน
         _world.DestructArtifact(artifact.EntityId);
         _context.InventoryItems.Add(capsuleItem);

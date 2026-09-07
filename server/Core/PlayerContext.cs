@@ -146,6 +146,17 @@ public class PlayerContext
     public int DeathCount;
 
     /// <summary>
+    /// [7 ก.ย. 2026] ความคืบหน้าเควส Daily/Once ที่เซิร์ฟติดตาม — คีย์คือ quest id
+    /// ไฟล์เก่าไม่มีคีย์นี้ ⇒ null แล้ว hydrate สร้างแถว WIP จากแคตตาล็อก
+    /// </summary>
+    [JsonProperty("quests", NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, QuestSaveData> Quests;
+
+    /// <summary>วันรีเซ็ต Daily ล่าสุดในปฏิทิน KST (yyyy-MM-dd) — เปลี่ยนวันแล้วรีเซ็ตแถว Daily</summary>
+    [JsonProperty("quest_daily_reset_day", NullValueHandling = NullValueHandling.Ignore)]
+    public string QuestDailyResetDay;
+
+    /// <summary>
     /// [6 ก.ย. 2026] entity ของสิ่งปลูกสร้างที่ผู้เล่นตั้งเป็น "จุดกลับ" (귀환 지점)
     ///
     /// ตั้งผ่าน <c>SetAsHome</c>(2102) ที่เตียง — ข้อมูลจริงมี 12 แบบแปลนที่มี component
@@ -315,6 +326,18 @@ public class PlayerContext
     {
         return System.IO.Path.Combine(AppData.CombinePath(WorldContext.GetBasePath(clusterKey)), slot + ".player");
     }
+}
+
+/// <summary>แถวเควสหนึ่งชิ้นในไฟล์ .player — ตรงกับ <c>Player.QuestStore.Entry</c></summary>
+public class QuestSaveData
+{
+    [JsonProperty("v")] public int Version = 1;
+
+    [JsonProperty("state")] public Shared.Quest.QuestState State;
+
+    [JsonProperty("progress")] public int Progress;
+
+    [JsonProperty("goal")] public int GoalCount = 1;
 }
 
 /// <summary>

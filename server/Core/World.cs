@@ -828,6 +828,39 @@ public class World
 
     public static Point2 TileFromCell(Point2 cell) => new Point2(cell.x * EstateGridSize, cell.y * EstateGridSize);
 
+    /// <summary>ช่องที่ดิน 4×4 ที่ครอบคลุม tile นี้ — หารลงสู่ลบด้วย (ไม่ใช่ตัดเข้าหาศูนย์)</summary>
+    public static Point2 CellFromTile(Point2 tile) =>
+        new Point2(FloorDiv(tile.x, EstateGridSize), FloorDiv(tile.y, EstateGridSize));
+
+    private static int FloorDiv(int value, int divisor)
+    {
+        int q = value / divisor;
+        if (value < 0 && value % divisor != 0) q--;
+        return q;
+    }
+
+    /// <summary>
+    /// footprint ทั้งก้อนอยู่บนที่ดิน (ส่วนตัว / เมือง / แคลน / ระบบ) หรือไม่
+    ///
+    /// ค่าเก็บแคปซูลใน constants แยก <c>inside</c>/<c>outside</c> ตามที่ดิน
+    /// (client/UITable.cs WarningEstateOut: นอกที่ดิน/แคลนเก็บแล้วคิดเงิน)
+    /// ถ้าแม้ช่องเดียวอยู่นอกที่ดิน = นอก — ตรงกับที่เกมเตือนว่าคร่อมเขตแล้วไม่มีกรรมสิทธิ์
+    /// </summary>
+    public bool IsFootprintOnEstate(Point2 tile, Point2 size)
+    {
+        int width = Math.Max(1, size.x);
+        int height = Math.Max(1, size.y);
+        for (int dx = 0; dx < width; dx++)
+        {
+            for (int dy = 0; dy < height; dy++)
+            {
+                Point2 cell = CellFromTile(new Point2(tile.x + dx, tile.y + dy));
+                if (!TryGetEstateIdAtCell(cell, out _)) return false;
+            }
+        }
+        return true;
+    }
+
     public EstateRecord GetEstate(string estateId)
     {
         if (string.IsNullOrEmpty(estateId) || _context.Estates == null) return null;

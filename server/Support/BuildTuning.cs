@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Durango.Utils;
 using Newtonsoft.Json.Linq;
 
@@ -35,6 +36,9 @@ public static class BuildTuning
     private static float _cancelTime = 3f;
     private static float _capsulatingTime = 0.5f;
     private static float _placingTime = 0.5f;
+    private static string _capsulatingCostInside = "0";
+    private static string _capsulatingCostOutside = "t_stone_reference * level";
+    private static double? _tStoneReference;
 
     public static string SiteDuration { get { EnsureLoaded(); return _siteDuration; } }
     public static string SiteEnergy { get { EnsureLoaded(); return _siteEnergy; } }
@@ -48,11 +52,60 @@ public static class BuildTuning
     /// <summary>วินาทีที่ใช้ "วาง" ของที่แพ็กไว้ลงพื้น (capsulating.placing_time)</summary>
     public static float PlacingTime { get { EnsureLoaded(); return _placingTime; } }
 
+    /// <summary>สูตรค่าเก็บบนที่ดิน — <c>constants.json → build.capsulating.cost.inside</c> (= <c>"0"</c>)</summary>
+    public static string CapsulatingCostInside { get { EnsureLoaded(); return _capsulatingCostInside; } }
+
+    /// <summary>สูตรค่าเก็บนอกที่ดิน — <c>constants.json → build.capsulating.cost.outside</c></summary>
+    public static string CapsulatingCostOutside { get { EnsureLoaded(); return _capsulatingCostOutside; } }
+
+    /// <summary>
+    /// ค่าตัวเลขของ <c>t_stone_reference</c> ถ้ามีในชุดข้อมูล
+    ///
+    /// สูตรหลายตัวใน <c>constants.json</c> อ้างตัวแปรนี้ (ค่าเก็บนอกที่ดิน · ค่าวาร์ป · ค่าเดินเรือ · รางวัล POI)
+    /// แต่ในไฟล์ที่สกัดมาไม่มีคีย์ตัวเลขชื่อนี้ — มีแต่สตริงสูตร ⇒ คืน <c>null</c>
+    /// ไม่เดาเรทเอง ดู <c>docs/t-stone-reference.md</c>
+    /// </summary>
+    public static double? TStoneReference { get { EnsureLoaded(); return _tStoneReference; } }
+
     /// <summary>คิดสูตรที่มีตัวแปร <c>area</c> — คืนค่าสำรองถ้าสูตรเสีย</summary>
     public static double EvalByArea(string formula, int area, double fallback)
     {
         var vars = new Dictionary<string, double> { ["area"] = area };
         return StatFormula.TryEval(formula, vars, out double value) ? value : fallback;
+    }
+
+    /// <summary>
+    /// คิดค่าเก็บสิ่งปลูกสร้างเป็นแคปซูลจากสูตรใน constants
+    ///
+    /// <paramref name="insideEstate"/> = อยู่บนที่ดิน/แคลน (inside) หรือนอกที่ดิน (outside)
+    /// คืน <c>false</c> เมื่อสูตรใช้ตัวแปรที่ไม่มีค่า (โดยเฉพาะ <c>t_stone_reference</c>)
+    /// — ผู้เรียกต้องตัดสินใจเองว่าจะ Abort หรือตอบ 0 แบบ STUB ไม่ให้เดาเรท
+    /// </summary>
+    public static bool TryEvalCapsulatingCost(bool insideEstate, int artifactLevel, out long amount) =>
+        TryEvalCapsulatingCost(insideEstate, artifactLevel, TStoneReference, out amount);
+
+    /// <summary>เวอร์ชันระบุ <c>t_stone_reference</c> เอง — ใช้เทสสูตรโดยไม่เดาเรทของเซิร์ฟ</summary>
+    public static bool TryEvalCapsulatingCost(
+        bool insideEstate, int artifactLevel, double? tStoneReference, out long amount)
+    {
+        EnsureLoaded();
+        amount = 0;
+        string formula = insideEstate ? _capsulatingCostInside : _capsulatingCostOutside;
+        var vars = new Dictionary<string, double> { ["level"] = Math.Max(1, artifactLevel) };
+        if (tStoneReference.HasValue)
+        {
+            vars["t_stone_reference"] = tStoneReference.Value;
+        }
+        if (!StatFormula.TryEval(formula, vars, out double value))
+        {
+            return false;
+        }
+        if (double.IsNaN(value) || double.IsInfinity(value) || value < 0)
+        {
+            return false;
+        }
+        amount = (long)Math.Round(value, MidpointRounding.AwayFromZero);
+        return true;
     }
 
     private static void EnsureLoaded()
@@ -76,5 +129,34 @@ public static class BuildTuning
         // ค่าจริงในไฟล์เท่ากันหมด (0.5) ⇒ ใช้ default ตัวเดียวพอ ไม่ต้องแยกตามชนิด
         _capsulatingTime = (float?)build["capsulating"]?["capsulating_time"]?["default"] ?? _capsulatingTime;
         _placingTime = (float?)build["capsulating"]?["placing_time"] ?? _placingTime;
+        _capsulatingCostInside = (string)build["capsulating"]?["cost"]?["inside"] ?? _capsulatingCostInside;
+        _capsulatingCostOutside = (string)build["capsulating"]?["cost"]?["outside"] ?? _capsulatingCostOutside;
+        _tStoneReference = FindNumericTStoneReference(root);
+
+        Console.WriteLine($"[สร้าง] capsulating.cost inside=\"{_capsulatingCostInside}\" " +
+                          $"outside=\"{_capsulatingCostOutside}\"");
+        if (!_tStoneReference.HasValue)
+        {
+            Console.WriteLine("[สร้าง] ⚠️ t_stone_reference ไม่มีค่าตัวเลขในชุดข้อมูลที่สกัดมา " +
+                              "— ค่าเก็บนอกที่ดินตอบ 0 (STUB) จนกว่าจะมีแหล่งข้อมูลจริง");
+        }
+    }
+
+    /// <summary>
+    /// หาคีย์ <c>t_stone_reference</c> ที่เป็นตัวเลขใน constants ทั้งไฟล์
+    /// ไม่เก็บสตริงสูตร (เช่น <c>"t_stone_reference * 12"</c>) เพราะนั่นคือการใช้ตัวแปร ไม่ใช่ค่า
+    /// </summary>
+    private static double? FindNumericTStoneReference(JObject root)
+    {
+        if (root == null) return null;
+        foreach (JProperty prop in root.DescendantsAndSelf().OfType<JProperty>())
+        {
+            if (!string.Equals(prop.Name, "t_stone_reference", StringComparison.Ordinal)) continue;
+            if (prop.Value.Type == JTokenType.Integer || prop.Value.Type == JTokenType.Float)
+            {
+                return (double)prop.Value;
+            }
+        }
+        return null;
     }
 }

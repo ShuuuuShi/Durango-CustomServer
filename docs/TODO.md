@@ -66,8 +66,9 @@
 - [ ] เพิ่ม `docs/TODO.md` (ไฟล์นี้)
 - [ ] เพิ่ม `docs/ROADMAP-NEXT.md` (แผนเฟสถัดไป)
 - [ ] เพิ่ม `docs/NEXON-SERVER-ARCHITECTURE.md` (สรุป NDC)
+- [x] เพิ่ม `docs/ITEM-SYSTEM-MAP.md` (แผนที่ไอเทม/เลเวล/แอต/บัฟ vs ช่องว่าง Nexon — เอกสารอย่างเดียว)
 - [ ] รัน `python tools/scan-protocol.py --md` ใหม่ให้ตัวเลข coverage ตรงปัจจุบัน
-- [ ] README ชี้ไป TODO + ROADMAP-NEXT
+- [ ] README ชี้ไป TODO + ROADMAP-NEXT + ITEM-SYSTEM-MAP
 
 ---
 

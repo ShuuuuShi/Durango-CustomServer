@@ -15,7 +15,7 @@ server/          เซิร์ฟ .NET 9
 client/          ซอร์สเกม (Assembly-CSharp) ของ NEXON แท้ 3,755 ไฟล์
 game/            ตัวเกมที่เล่นได้จริง (ไม่อยู่ใน git — ก๊อปมาจากชุดแจก)
 tools/           สคริปต์ build / เปิดเซิร์ฟ / สแกนโปรโตคอล
-docs/           ROADMAP.md · ROADMAP-NEXT.md · TODO.md · NEXON-SERVER-ARCHITECTURE.md · protocol-coverage.md (แผนเติมเกมเพลย์) · protocol-coverage.md (สร้างอัตโนมัติ)
+docs/           ROADMAP.md · ROADMAP-NEXT.md · TODO.md · NEXON-SERVER-ARCHITECTURE.md · ITEM-SYSTEM-MAP.md · protocol-coverage.md
 ```
 
 ## เริ่มใช้งาน
@@ -80,4 +80,5 @@ python tools/scan-protocol.py --md     # เขียน docs/protocol-coverage.
 - แผนเฟสถัดไป: [docs/ROADMAP-NEXT.md](docs/ROADMAP-NEXT.md)
 - สถาปัตยกรรม Nexon (อ้างอิง): [docs/NEXON-SERVER-ARCHITECTURE.md](docs/NEXON-SERVER-ARCHITECTURE.md)
 - ประวัติ/รายละเอียดเดิม: [docs/ROADMAP.md](docs/ROADMAP.md)
+- แผนที่ระบบไอเทม/เลเวล/แอต/บัฟ: [docs/ITEM-SYSTEM-MAP.md](docs/ITEM-SYSTEM-MAP.md)
 
