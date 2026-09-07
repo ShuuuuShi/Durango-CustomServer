@@ -831,6 +831,11 @@ public partial class Player
         {
             Console.WriteLine($"[skill] {ShortId()} เลเวล {before} → {after} (exp {_skills.Exp}, จาก {reason})");
             ApplyLevel(after, sendStats: true);
+            if (after > before)
+            {
+                NotifyCharacterLevelUp(after);
+                if (ClearStatusEffectsOnLevelUp()) SendStatusEffects();
+            }
         }
         else
         {
@@ -871,6 +876,43 @@ public partial class Player
         int max = SkillDataStore.MaxPlayerLevel;
         if (table == null || max - 1 >= table.Length) return int.MaxValue;
         return Math.Max(0, table[max - 1] - 1);
+    }
+
+    /// <summary>
+    /// แพ็กเก็ต Rewarded ที่ AlarmGroup.DoLevelUpEffect รอ — แยกเป็น static เพื่อให้ --fx-check ตรวจได้
+    /// โดยไม่ต้องสร้าง Player ทั้งตัว
+    /// </summary>
+    internal static Rewarded BuildCharacterLevelUpRewarded(int level) => new()
+    {
+        Effect = new LevelUpEffect
+        {
+            Type = Shared.System.RewardEffect.LevelUp,
+            Level = level
+        }
+    };
+
+    /// <summary>
+    /// แพ็กเก็ต Rewarded ที่ AlarmGroup.DoCategoryLevelUpRewardEffect รอ
+    /// </summary>
+    internal static Rewarded BuildCategoryLevelUpRewarded(SkillCat category, int level) => new()
+    {
+        Effect = new CategoryLevelUpRewardEffect
+        {
+            Type = Shared.System.RewardEffect.CategoryLevelUp,
+            ChangedLevels = new Dictionary<SkillCat, int> { { category, level } }
+        }
+    };
+
+    private void NotifyCharacterLevelUp(int level)
+    {
+        if (level < 1) return;
+        Send(BuildCharacterLevelUpRewarded(level));
+    }
+
+    private void NotifyCategoryLevelUp(SkillCat category, int level)
+    {
+        if (level < 1) return;
+        Send(BuildCategoryLevelUpRewarded(category, level));
     }
 
     /// <summary>
@@ -939,11 +981,15 @@ public partial class Player
                 state.Exp -= need;
                 state.Level++;
             }
-            // หมวดขึ้นเลเวล = อาจปลดสกิลอัตโนมัติชุดใหม่ได้ (โหนดที่ติดเงื่อนไข category_level)
-            if (state.Level > levelBefore && GrantFreeSkills(save: false))
+            // หมวดขึ้นเลเวล = แจ้งแบนเนอร์ฝั่งเกม + อาจปลดสกิลอัตโนมัติชุดใหม่ได้
+            if (state.Level > levelBefore)
             {
-                SendSkills();
-                SendFullStatistics();
+                NotifyCategoryLevelUp(category, state.Level);
+                if (GrantFreeSkills(save: false))
+                {
+                    SendSkills();
+                    SendFullStatistics();
+                }
             }
         }
 
@@ -1004,11 +1050,16 @@ public partial class Player
         {
             state.Exp = 0;
         }
+        int levelBefore = state.Level;
         state.Level = Math.Min(state.Level + 1, SkillDataStore.MaxPlayerLevel);
         state.ResearchStart = 0.0;
         state.ResearchEnd = 0.0;
         state.ResearchSaved = 0f;
         Console.WriteLine($"[skill] {ShortId()} วิจัยหมวด {(SkillCat)cat} เสร็จ → หมวดเลเวล {state.Level}");
+        if (state.Level > levelBefore)
+        {
+            NotifyCategoryLevelUp((SkillCat)cat, state.Level);
+        }
 
         // [7 ก.ย. 2026] หมวดขึ้นเลเวล = โหนดสกิลอัตโนมัติชุดใหม่ปลดได้ ⇒ สูตรชุดใหม่ตามมา
         // ⚠️ ไม่ push = เมนูคราฟต์ยังเป็นชุดเก่าจนกว่าจะออกเข้าเกมใหม่
@@ -1642,9 +1693,15 @@ public partial class Player
 
             case "lv" when int.TryParse(parts[1], out int level):
             {
+                int before = _skillLevel;
                 level = Math.Clamp(level, 1, SkillDataStore.MaxPlayerLevel);
                 _skills.Exp = ExpForLevel(level);
                 ApplyLevel(level, sendStats: true);
+                if (level > before)
+                {
+                    NotifyCharacterLevelUp(level);
+                    if (ClearStatusEffectsOnLevelUp()) SendStatusEffects();
+                }
                 SaveSkillState();
                 Console.WriteLine($"[skill] {ShortId()} cheat ตั้งเลเวล {level} (exp {_skills.Exp})");
                 return true;
