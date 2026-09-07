@@ -1107,21 +1107,137 @@ internal static class CollectibleTable
                     // type 2 = SourceDescription.Collect ("เก็บ {generator} จาก {collectible}")
                     if (info == null || info.type != 2) continue;
                     if (string.IsNullOrEmpty(info.collectible_id) || string.IsNullOrEmpty(info.generator_id)) continue;
-                    // generator ที่ไม่ใช่ prototype จริง (ของอีเวนต์/season ที่ถูกตัดออกจากไฟล์ item)
-                    // ให้ทิ้ง ไม่งั้นจะได้ Generator ที่กดแล้วไม่มีของ
-                    if (PrototypeYaml.GetItemPrototype(info.generator_id) == null) continue;
+                    // generator ที่ไม่ใช่ prototype จริง ⇒ หาไอเทมตัวจริงที่ตรงกันให้ก่อน
+                    // ทิ้งเฉพาะตัวที่หาไม่เจอจริง ๆ (ดู <see cref="ResolveGenerator"/>)
+                    string prototypeId = ResolveGenerator(info.generator_id);
+                    if (prototypeId == null) continue;
                     if (!acc.TryGetValue(info.collectible_id, out List<string> list))
                     {
                         list = new List<string>();
                         acc[info.collectible_id] = list;
                     }
-                    if (!list.Contains(info.generator_id)) list.Add(info.generator_id);
+                    if (!list.Contains(prototypeId)) list.Add(prototypeId);
                 }
             }
         }
         foreach (var pair in acc) _collectibleGenerators[pair.Key] = pair.Value.ToArray();
         Console.WriteLine($"[gather] ขุดคู่ collectible→generator จาก recipes.json ได้ {_collectibleGenerators.Count} ตัว");
         return _collectibleGenerators;
+    }
+
+    /// <summary>
+    /// [7 ก.ย. 2026] ชื่อ generator ใน recipes.json → prototype ของไอเทมที่ผู้เล่นได้จริง
+    ///
+    /// ═══ ปัญหาที่แก้ ═══
+    /// recipes.json อ้าง generator 122 ชื่อ แต่ **มีแค่ 59 ชื่อที่เป็น prototype จริง** —
+    /// ที่เหลือเป็นชื่อของ generator ฝั่งเซิร์ฟ NEXON ที่ไม่ตรงกับ id ของไอเทมในไฟล์ item
+    /// เดิมโค้ดตรงนี้ทิ้งทั้งหมด ⇒ **ของหายไปจากเมนูเก็บเงียบ ๆ**
+    ///
+    /// อาการที่เจอจริง: ต้นกก (grass_reed) ให้ generator "reed" (줄기 = ลำต้น) ซึ่งไม่ใช่
+    /// prototype ⇒ ถูกทิ้ง ⇒ ตกไปใช้หมวดสำรอง grass_ → ได้แต่ "ใบไม้" ทั้งที่ทั้งเกาะ
+    /// ต้องพึ่งลำต้นไปทำเชือก/หลังคา (มี 42 ชนิดของธรรมชาติที่เป็นกก)
+    /// ⇒ collectible 40 ตัวที่มีของจริงบนเกาะเสียของหายไปแบบเดียวกัน
+    ///
+    /// ═══ สามชั้น — ทุกชั้นเทียบกับข้อมูลจริง ไม่มีตารางที่เราพิมพ์เอง ═══
+    ///   1. ชื่อตรงกับ prototype อยู่แล้ว (59 ตัว) — ใช้เลย
+    ///   2. **ชื่อที่แสดงตรงกัน** — generator_client_data.json มี name ของ generator และ
+    ///      prototype_data.json มี name ของไอเทม ทั้งคู่เป็นข้อมูลจริงของ NEXON
+    ///      ⇒ "reed" ชื่อ 줄기 ตรงกับไอเทม "stem" ที่ชื่อ 줄기 เป๊ะ (32 ตัวเข้าทางนี้)
+    ///      เทียบเฉพาะไอเทมหมวดวัตถุดิบธรรมชาติ (<see cref="NaturalCategories"/>) เพื่อไม่ให้
+    ///      ไปชนของที่คราฟต์แล้วซึ่งบังเอิญชื่อซ้ำ · หลายตัวเลือกเอาชื่อสั้นสุด = ตัวพื้นฐาน
+    ///   3. **ตัดส่วนต่อท้ายของอีเวนต์/ฤดูกาล** (_season2_week1 / _crop / _s01 …) แล้วหาใหม่
+    ///      ทั้งแบบเต็มและแบบตัดคำท้ายทีละคำ — leaf_small_season2_week1 → leaf_small ·
+    ///      wood_log_ash → wood_log · fish_harpoon → fish (10 ตัวเข้าทางนี้)
+    ///
+    /// เหลือ 21 ตัวที่หาไม่เจอจริง ๆ (almond · beehive · berry_black · olive …) —
+    /// ไอเทมพวกนั้น**ไม่มีอยู่ในไฟล์ item เลย** ⇒ ทิ้งเหมือนเดิม ดีกว่าจับคู่มั่วให้ผิดของ
+    /// </summary>
+    private static string ResolveGenerator(string generatorId)
+    {
+        if (string.IsNullOrEmpty(generatorId)) return null;
+        if (_resolvedGenerators.TryGetValue(generatorId, out string cached)) return cached;
+
+        string resolved = ResolveGeneratorUncached(generatorId);
+        _resolvedGenerators[generatorId] = resolved;
+        return resolved;
+    }
+
+    private static readonly Dictionary<string, string> _resolvedGenerators = new(StringComparer.Ordinal);
+
+    private static string ResolveGeneratorUncached(string generatorId)
+    {
+        // 1) ชื่อตรงกับ prototype อยู่แล้ว
+        if (PrototypeYaml.GetItemPrototype(generatorId) != null) return generatorId;
+
+        // 2) ชื่อที่แสดงตรงกัน (ข้อมูลจริงทั้งสองฝั่ง)
+        GeneratorClientData client = GeneratorNames().Get(generatorId);
+        string display = client?.name?.ToString();
+        if (!string.IsNullOrEmpty(display) && NaturalItemsByName().TryGetValue(display, out string byName))
+        {
+            return byName;
+        }
+
+        // 3) ตัดส่วนต่อท้ายของอีเวนต์/ฤดูกาล แล้วหาใหม่
+        string stripped = generatorId;
+        foreach (string suffix in EventSuffixes)
+        {
+            int at = stripped.IndexOf(suffix, StringComparison.Ordinal);
+            if (at > 0) stripped = stripped.Remove(at, suffix.Length);
+        }
+        if (PrototypeYaml.GetItemPrototype(stripped) != null) return stripped;
+
+        // ตัดคำท้ายทีละคำ: wood_log_ash → wood_log · fish_harpoon → fish
+        for (int cut = stripped.LastIndexOf('_'); cut > 0; cut = stripped.LastIndexOf('_', cut - 1))
+        {
+            string prefix = stripped[..cut];
+            if (PrototypeYaml.GetItemPrototype(prefix) != null) return prefix;
+        }
+        return null;
+    }
+
+    /// <summary>ส่วนต่อท้ายของ generator รุ่นอีเวนต์/ฤดูกาล — ถอดจากชื่อที่มีจริงใน recipes.json</summary>
+    private static readonly string[] EventSuffixes =
+    {
+        "_c_season2_week1", "_c_season2_week2", "_c_season2_week3",
+        "_season2_week1", "_season2_week2", "_season2_week3",
+        "_season2", "_crop", "_s01", "_todo"
+    };
+
+    /// <summary>
+    /// หมวดของ prototype ที่นับว่าเป็น "วัตถุดิบที่เก็บได้จากธรรมชาติ" — จาก category จริงใน
+    /// prototype_data.json (ใช้จำกัดขอบเขตการจับคู่ด้วยชื่อ ไม่ให้ไปชนของที่คราฟต์แล้ว)
+    /// </summary>
+    private static readonly HashSet<string> NaturalCategories = new(StringComparer.Ordinal)
+    {
+        "plant_collectible", "mineral", "food/medicine", "animal_collectible"
+    };
+
+    private static Dictionary<string, string> _naturalItemsByName;
+
+    /// <summary>ชื่อที่แสดง → prototype id ของวัตถุดิบธรรมชาติ (ชื่อซ้ำ ⇒ เอา id สั้นสุด = ตัวพื้นฐาน)</summary>
+    private static Dictionary<string, string> NaturalItemsByName()
+    {
+        if (_naturalItemsByName != null) return _naturalItemsByName;
+        _naturalItemsByName = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        Dictionary<string, List<Prototype>> all = Yaml.Util.SingletonDict<string, List<Prototype>>.Instance;
+        if (all == null) return _naturalItemsByName;
+
+        foreach (var (prototypeId, list) in all)
+        {
+            Prototype proto = list is { Count: > 0 } ? list[0] : null;
+            if (proto?.Category == null || !NaturalCategories.Contains(proto.Category)) continue;
+            string name = proto.Name?.ToString();
+            if (string.IsNullOrEmpty(name)) continue;
+
+            // ชื่อซ้ำกันหลายตัว (가죽 = leather/leather_raw) ⇒ id สั้นสุดคือตัวพื้นฐานที่สุด
+            if (!_naturalItemsByName.TryGetValue(name, out string current)
+                || prototypeId.Length < current.Length)
+            {
+                _naturalItemsByName[name] = prototypeId;
+            }
+        }
+        return _naturalItemsByName;
     }
 
     private static Dictionary<string, GeneratorClientData> GeneratorNames()

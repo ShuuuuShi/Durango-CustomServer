@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Durango.Network;
 using Messages;
 
@@ -55,6 +56,26 @@ public partial class Player
 
     /// <summary>ช่องโมเดลที่ของ Burnable ทุกชนิดตกลงมาใช้ (ไม่มีชนิดไหนมี looks รายช่อง)</summary>
     private const string BurnableLookSlot = "common";
+
+    /// <summary>
+    /// [7 ก.ย. 2026] หลังนี้ไฟติดอยู่ไหม — ใช้ตัดสินว่าเมนูควรโชว์ "จุดไฟ" หรือ "ดับไฟ"
+    /// (เรียกจาก <c>HandleTouchMsg</c> ใน Core/Player.cs)
+    ///
+    /// **สภาพไฟไม่มีฟิลด์เก็บของตัวเอง** — ทั้ง ArtifactState และ ArtifactDisplay ไม่มีบูลีน
+    /// "ติดไฟ" เลย สิ่งเดียวที่เปลี่ยนตอนจุดคือชื่อโมเดลในช่อง <c>common</c>
+    /// (<see cref="HandleBurnableMsg"/> ตั้งเป็น <c>default_look + "_burning"</c>)
+    /// ⇒ อ่านกลับจากที่เดียวกันคือความจริงเดียวที่มี ไม่ใช่การเดา
+    ///
+    /// หลังที่ไม่รู้จัก/ยังไม่มีโมเดลในช่องนั้น ⇒ ถือว่าไฟดับ = โชว์ปุ่ม "จุดไฟ"
+    /// ซึ่งเป็นฝั่งที่ปลอดภัยกว่า: กดแล้วได้ผลตามที่เห็น (จุดซ้ำตอนติดอยู่แล้วก็แค่เงียบ)
+    /// </summary>
+    private static bool IsBurning(AppearArtifact? artifact, Yaml.MergedBlueprint blueprint)
+    {
+        if (artifact is not { } value || string.IsNullOrEmpty(blueprint?.DefaultLook)) return false;
+        Dictionary<string, string> parts = value.Display.Parts;
+        if (parts == null || !parts.TryGetValue(BurnableLookSlot, out string look)) return false;
+        return string.Equals(look, blueprint.DefaultLook + BurningLookSuffix, StringComparison.Ordinal);
+    }
 
     private void RegisterFarmHandlers()
     {

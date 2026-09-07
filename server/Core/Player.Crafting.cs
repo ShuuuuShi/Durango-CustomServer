@@ -210,6 +210,13 @@ public static class CraftRecipeStore
         EnsureLoaded();
         return _craftableIds;
     }
+
+    /// <summary>สูตรทั้งหมดตามที่โหลดมา — ใช้โดย <c>--check-data</c> ตรวจว่าแท็กโต๊ะครบไหม</summary>
+    public static IEnumerable<CraftRecipeData> All()
+    {
+        EnsureLoaded();
+        return _byId.Values;
+    }
 }
 
 public partial class Player

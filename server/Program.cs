@@ -110,6 +110,18 @@ internal static class Program
                     Environment.Exit(rc);
                     return rc;
                 }
+                // [7 ก.ย. 2026] ตรวจตารางเก็บเกี่ยว/เมนูสิ่งปลูกสร้าง **โดยไม่ต้องเปิดเซิร์ฟ**
+                //
+                // มีไว้เพราะบั๊กสองตัวที่เพิ่งแก้ (ต้นกกไม่ให้ลำต้น · กองไฟไม่มีปุ่มจุดไฟ) เป็นเรื่อง
+                // "ข้อมูลที่เซิร์ฟส่งให้เกม" ล้วน ๆ ⇒ ตรวจได้จากตารางตรง ๆ ไม่ต้องเข้าเกมจริง
+                // ⇒ รอบหน้าที่แตะ CollectibleTable/HandleTouchMsg เช็คซ้ำได้ในคำสั่งเดียว
+                case "--check-data":
+                {
+                    MoCatalog.Load(dataDir);
+                    DataStore.Load(dataDir);
+                    WorkbenchTags.AssetsDir = Path.Combine(dataDir, "assets");
+                    return DataCheck.Run();
+                }
                 case "--name": name = args[++i]; break;
                 case "--gateway-port": gatewayPort = int.Parse(args[++i]); break;
                 case "--game-port": gamePort = int.Parse(args[++i]); break;

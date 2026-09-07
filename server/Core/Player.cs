@@ -1244,6 +1244,31 @@ public partial class Player
                 if (blueprint.Components.Contains("Washable")) list.Add(Shared.System.Interaction.Wash);
                 if (blueprint.Components.Contains("Shelter")) list.Add(Shared.System.Interaction.Rest);
 
+                // [7 ก.ย. 2026] "불 붙이기 / 불 끄기" — จุดไฟและดับไฟกองไฟ เตาเผา เตาอบ
+                //
+                // ⚠️ ไม่ใส่บล็อกนี้ = แตะกองไฟแล้ว **ไม่มีปุ่มจุดไฟเลย** ทั้งที่ handler ฝั่งเซิร์ฟ
+                // ทำครบตั้งแต่แรก (Core/Player.Farm.cs — FireBurnable/ExtinguishBurnable
+                // สลับโมเดล default_look ↔ default_look + "_burning" แล้วกระจายทั้งเกาะ)
+                // ฝั่งเกมผูกไว้ที่ client/Durango.Logic.Interactions/ArtifactInteractions.cs:80-81
+                // และไม่ได้ดู components เอง มันเชื่อรายการที่เซิร์ฟส่งมาล้วน ๆ
+                //
+                // ข้อมูลจริง entity_types/artifact.json: prototype ที่มี component นี้ 19 ชนิด
+                // (bonfire · s02_bonfire · kitchen_01-04 · kiln_01-04 · furnace_01 · camp_* ฯลฯ)
+                // และทั้ง 19 ชนิดมีโมเดล <default_look>_burning อยู่จริงใน building/artifact_models.json
+                // ⇒ ทุกตัวจุดไฟได้จริง ไม่มีตัวไหนกดแล้วค้าง
+                //
+                // โชว์ปุ่มเดียวตามสภาพปัจจุบัน (ติดอยู่ = โชว์ "ดับไฟ") เพราะฝั่งเกมไม่มีปุ่ม toggle
+                // — เกณฑ์เดียวกับที่เมนูประตู (Gate) ข้างล่างใช้อยู่แล้ว
+                //
+                // ไม่ผูกกับ `flag` (Mode.Editable) และไม่เช็คเจ้าของ: กองไฟเป็นของใช้ร่วมกัน
+                // (ต้นฉบับไม่เช็คเจ้าของในเมนูนี้) และ HandleBurnableMsg มีด่านระยะทางอยู่แล้ว
+                if (blueprint.Components.Contains("Burnable") && !string.IsNullOrEmpty(blueprint.DefaultLook))
+                {
+                    list.Add(IsBurning(touched, blueprint)
+                        ? Shared.System.Interaction.Extinguish
+                        : Shared.System.Interaction.Fire);
+                }
+
                 // [6 ก.ย. 2026] "ตั้งเป็นจุดกลับ" — ข้อมูลจริงมี 12 แบบแปลนที่มี component Home
                 // (bed_01..bed_04 · tent · temptent ฯลฯ) ทั้งหมดเป็นที่นอน
                 //
