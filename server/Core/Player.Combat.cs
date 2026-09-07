@@ -448,6 +448,7 @@ public partial class Player
         if (attack == null) return;                          // ท่าหลบ (onehand_dodge ฯลฯ) ไม่มีดาเมจ
 
         string targetId = msg.TargetEntityId ?? _battleTargetId;
+        Console.WriteLine($"[combat] {Short(EntityId)} ใช้ท่า {msg.ActionId} → เป้า '{targetId ?? "(ไม่มี)"}'");
         Player victim = TryResolveVictim(targetId);
         if (victim != null)
         {
@@ -514,11 +515,14 @@ public partial class Player
         }
 
         float bonus = attack.damage_bonus > 0f ? attack.damage_bonus : 1f;
-        float raw = attacker.CurrentAttackPower() * bonus;
-        // [7 ก.ย. 2026] เกราะ/หลบใช้ค่า Derived ของผู้ถูกตีหลังรวมสกิล ไม่ใช่ค่าฐานดิบอย่างเดียว
+        // [7 ก.ย. 2026] สกิลหมวดต่อสู้เพิ่มดาเมจที่ตีออก · หมวดป้องกันลดดาเมจที่รับ
+        // (ดู Player.SkillEffects.cs — คนละสายกับ Derived ที่มาจาก modifiers ของสกิลรายตัว)
+        float raw = attacker.CurrentAttackPower() * bonus * attacker.OutgoingDamageScale();
+        // เกราะ/หลบใช้ค่า Derived ของผู้ถูกตีหลังรวมสกิล ไม่ใช่ค่าฐานดิบอย่างเดียว
         float baseDefense = CurrentDerivedDefense();
         float defense = baseDefense * defenseRatio * (1f - Math.Clamp(attack.armor_penetration, 0f, 1f));
-        int value = Math.Max(CombatTuning.MinDamage, (int)Math.Round((raw - defense) * directionRatio));
+        int value = Math.Max(CombatTuning.MinDamage,
+                             (int)Math.Round((raw - defense) * directionRatio * DamageTakenScale()));
 
         // โดนหรือหลบ — ใช้ Derived.Dodge / Accuracy ของทั้งสองฝ่ายหลังรวมสกิล
         float myDodge = CurrentDerivedDodge();

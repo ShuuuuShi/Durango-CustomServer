@@ -76,8 +76,30 @@ namespace Durango.Online;
 /// </summary>
 public static class GatheringTuning
 {
-    /// <summary>**ค่าของเรา** — จำนวนชิ้นที่ได้ต่อการเก็บหนึ่งครั้ง (ของจริงอยู่ในตาราง generator ที่ไม่มี)</summary>
-    public const int Amount = 1;
+    /// <summary>
+    /// **ค่าของเรา** — จำนวนชิ้นที่ได้ต่อการเก็บหนึ่งครั้ง (ของจริงอยู่ในตาราง generator ที่ไม่มี)
+    ///
+    /// ⚠️ เดิมเป็นค่าคงที่ 1 ⇒ เก็บอะไรก็ได้ทีละชิ้นทั้งเกม ซึ่งผิดจากเกมจริงที่ได้ 1-5 ชิ้น
+    /// ยกวิธีคิดมาจากโปรเจกต์ Opencode (ServerPlayer.Gathering.MakeGenerators กับ ButcheryData)
+    /// ซึ่งใช้หลักเดียวกันสองข้อ:
+    ///   • generator ตัวแรกของเป้า = "ของหลัก" ได้เยอะกว่าตัวรอง (3 · 2 · 3 · 2 …)
+    ///   • ทุก <see cref="BonusPerLevel"/> เลเวลได้เพิ่มอีก 1 ชิ้น ⇒ ของเลเวลสูงคุ้มกว่า
+    ///
+    /// ฝั่งเกมไม่ได้เอา Generator.Amount ไปโชว์เป็นตัวเลข ใช้แค่เลือกไอคอนดาว
+    /// (client/Durango.UI/InteractionMenuWidgetBase.cs:232 <c>Amount == 1</c>)
+    /// ⇒ จำนวนที่ผู้เล่นได้จริงมาจากจำนวน Item ใน Collected เท่านั้น — ต้องส่งให้ตรงกันเอง
+    /// </summary>
+    public static int AmountFor(int order, int level) =>
+        Mathf.Clamp(BaseAmount(order) + Mathf.Max(0, level - 1) / BonusPerLevel, 1, MaxAmount);
+
+    /// <summary>ของหลัก (ตัวแรก) ได้ 3 · ตัวรองสลับ 2/3 — รูปแบบ 3 - (i % 2) ของ Opencode</summary>
+    private static int BaseAmount(int order) => 3 - (Mathf.Max(0, order) % 2);
+
+    /// <summary>**ค่าของเรา** — ทุกกี่เลเวลได้ของเพิ่มอีก 1 ชิ้น</summary>
+    private const int BonusPerLevel = 5;
+
+    /// <summary>เพดานกันข้อมูลเพี้ยนทำให้ได้ของทีเดียวเป็นร้อยชิ้นจนกระเป๋าแตก</summary>
+    public const int MaxAmount = 5;
 
     /// <summary>
     /// **ค่าของเรา** — ระยะที่ยอมให้เก็บได้ (หน่วย tile)
@@ -92,6 +114,12 @@ public static class GatheringTuning
     /// กันข้อมูลเพี้ยนทำให้ผู้เล่นค้างหลอด (ค่าจากสูตรจริงที่เลเวล 1 คือ 2.5 วิ)
     /// </summary>
     public const float MaxCollectSeconds = 60f;
+
+    /// <summary>
+    /// **ค่าของเรา** — เวลาเก็บต่ำสุดหลังหักโบนัสสกิลแล้ว (วินาที)
+    /// สั้นกว่านี้ท่าเก็บของยังเล่นไม่ทันจบ ⇒ เห็นเป็นตัวกระตุก
+    /// </summary>
+    public const float MinCollectSeconds = 0.5f;
 
     /// <summary>
     /// **ค่าของเรา** — เลเวลขั้นต่ำของเครื่องมือที่ต้องมี
@@ -164,8 +192,14 @@ public partial class Player
         // (client แตะใหม่ทุกครั้งก่อนกดเก็บอยู่แล้ว) 256 = เผื่อไว้เยอะกว่าที่หน้าจอเดียวจะมีได้
         if (_touchedNaturals.Count > 256) _touchedNaturals.Clear();
         _touchedNaturals[tile] = entityType;
+
+        // ซากสัตว์แล่ได้กี่ครั้งขึ้นกับเลเวลตัวมัน — ตัวใหญ่/เลเวลสูงให้ของมากกว่า
+        AnimalManager.Animal animal = _world.AnimalManager?.Get(entityId);
+        int animalLevel = animal != null && !animal.IsAlive ? animal.CombatLevel : 0;
+
         return CollectibleTable.Build(entityId, entityType,
-                                      _world.HarvestedGenerators(HarvestKeyOf(entityId, tile)));
+                                      _world.HarvestedGenerators(HarvestKeyOf(entityId, tile)),
+                                      animalLevel, UnlockedCollectibleCategories());
     }
 
     /// <summary>
@@ -180,8 +214,13 @@ public partial class Player
     private void HandleGetCollectibleMsg(GetCollectible msg, uint seq)
     {
         _touchedNaturals.TryGetValue(msg.Tile, out ushort entityType);
+        AnimalManager.Animal animal = _world.AnimalManager?.Get(msg.EntityId);
+        if (animal != null && !animal.IsAlive) entityType = animal.EntityType;
+        int animalLevel = animal != null && !animal.IsAlive ? animal.CombatLevel : 0;
+
         Send(CollectibleTable.Build(msg.EntityId, entityType,
-                                    _world.HarvestedGenerators(HarvestKeyOf(msg.EntityId, msg.Tile))), seq);
+                                    _world.HarvestedGenerators(HarvestKeyOf(msg.EntityId, msg.Tile)),
+                                    animalLevel, UnlockedCollectibleCategories()), seq);
     }
 
     // ── ตอน Collect: ตรวจ → ตอบ Timer → ครบเวลาส่ง Collected ────────────────────────
@@ -220,12 +259,36 @@ public partial class Player
             return;
         }
 
-        // generator ตัวนี้ถูกเก็บไปแล้วจากเป้าชิ้นนี้ — ไม่งั้นกดรัวเอาของฟรีไม่จำกัด
-        // (ฝั่งเกมทำปุ่มจางให้แล้วจาก Enabled=false แต่ห้ามเชื่อฝั่งเกม)
-        string harvestKey = HarvestKeyOf(carcass?.EntityId ?? msg.EntityId, carcass?.Tile ?? msg.Tile);
-        if (_world.HarvestedGenerators(harvestKey).Contains(spec.Id))
+        // [7 ก.ย. 2026] ปลดสกิลของหมวดนี้แล้วหรือยัง
+        //
+        // ตอบ SkillNeeded(2449) ไม่ใช่ Abort — ฝั่งเกมเอาไปเปิดป๊อปอัพ "ต้องมีสกิล X"
+        // พร้อมปุ่มเปิดหน้าสกิลไปที่โหนดนั้น (client/Durango.Logic/SkillSystem.cs:151-165)
+        // ⇒ ผู้เล่นรู้ทันทีว่าต้องไปเรียนอะไร แทนที่จะกดแล้วเงียบ
+        string genCategory = CollectibleTable.CategoryOfGenerator(spec);
+        if (genCategory != null && !UnlockedCollectibleCategories().ContainsKey(genCategory))
         {
-            RejectCollect(seq, $"เก็บ '{spec.Id}' จากเป้านี้ไปแล้ว", msg);
+            Console.WriteLine($"[gather] {ShortId()} ยังไม่ได้ปลดหมวด '{genCategory}' (gen={spec.Id})");
+            Send(BuildSkillNeededFor(genCategory), seq);
+            return;
+        }
+
+        // generator ตัวนี้เหลือให้เก็บอีกไหม — ไม่งั้นกดรัวเอาของฟรีไม่จำกัด
+        // (ฝั่งเกมทำปุ่มจางให้แล้วจาก Enabled=false แต่ห้ามเชื่อฝั่งเกม)
+        //
+        // ⚠️ เดิมเช็คแค่ Contains = "เคยเก็บไหม" ⇒ ต้นไม้ที่ให้กิ่งไม้ได้ 3 ครั้ง
+        // เก็บได้ครั้งเดียวแล้วโดนปฏิเสธ ทั้งที่เมนูยังโชว์ว่าเหลืออยู่
+        string harvestKey = HarvestKeyOf(carcass?.EntityId ?? msg.EntityId, carcass?.Tile ?? msg.Tile);
+        int allowed = carcass != null
+            ? CollectibleTable.AmountForCarcass(spec, carcass.CombatLevel)
+            : spec.Amount;
+        int already = 0;
+        foreach (string id in _world.HarvestedGenerators(harvestKey))
+        {
+            if (string.Equals(id, spec.Id, StringComparison.Ordinal)) already++;
+        }
+        if (already >= allowed)
+        {
+            RejectCollect(seq, $"เก็บ '{spec.Id}' จากเป้านี้ครบ {allowed} ครั้งแล้ว", msg);
             return;
         }
 
@@ -239,7 +302,9 @@ public partial class Player
         }
 
         // แรง/ความเหนื่อย — สูตรจาก data/assets/constants.json ทั้งหมด ดู CollectibleTable
-        float energyCost = CollectibleTable.EnergyCost(spec.Effort);
+        // [7 ก.ย. 2026] คูณด้วยตัวคูณจากสกิลหมวดเอาชีวิตรอด (ดู Player.SkillEffects.cs)
+        // ⚠️ ไม่คูณ = เรียนสกิลไปเท่าไรก็เปลืองพลังงานเท่าเดิม
+        float energyCost = CollectibleTable.EnergyCost(spec.Effort) * EnergyCostScale();
         float fatigueCost = CollectibleTable.FatigueCost(energyCost);
         double now = Gauge.CurrentTime;
         bool lowEnergy = _survival.ValueAt(SurvivalState.KeyEnergy, now) < energyCost;
@@ -253,22 +318,42 @@ public partial class Player
             // **นี่เป็นการตีความของเรา**: ข้อมูลจริงไม่ได้บอกว่าแรงไม่พอแล้วห้ามเก็บหรือแค่เตือน
             Send(default(EnergyWarning), seq);
         }
-        Send(new Messages.Timer { Duration = spec.Duration }, seq);
+        // [7 ก.ย. 2026] สกิลทำให้เก็บเร็วขึ้น — ซากใช้หมวดชำแหละ ของธรรมชาติใช้หมวดเก็บของ
+        // ⚠️ เวลาที่บอก client กับที่เซิร์ฟหน่วงจริงต้องเป็นค่าเดียวกัน ไม่งั้นหลอดวิ่งไม่ตรงของ
+        float gatherDuration = Math.Max(GatheringTuning.MinCollectSeconds,
+            spec.Duration * (carcass != null ? ButcheryDurationScale() : GatherDurationScale()));
+
+        Send(new Messages.Timer { Duration = gatherDuration }, seq);
 
         // จอง generator ทันทีกันกดรัวระหว่างรอท่า (แบบ OpenCode TryReserveGenerator)
         // แต่ยังไม่ให้ของ / ไม่รีเฟรชปุ่ม / ไม่ลบเป้า — เลื่อนไปตอนครบเวลา
         _world.MarkGeneratorHarvested(harvestKey, spec.Id);
+
+        // [7 ก.ย. 2026] "หมดเป้า" = เก็บครบทุกครั้งของ **ทุก** generator แล้ว
+        // ⚠️ เดิมนับจำนวน generator ที่แตะ ⇒ ต้นไม้หายทั้งต้นตั้งแต่เก็บกิ่งไม้ครั้งแรก
+        // ซากสัตว์คิดครั้งจากเลเวลตัวสัตว์ ของธรรมชาติใช้ตามที่ spec คิดไว้
         int taken = _world.HarvestedGenerators(harvestKey).Count;
-        int total = CollectibleTable.GeneratorCount(entityType);
-        bool ranOut = taken >= total;
+        int total = 0;
+        foreach (CollectibleTable.GeneratorSpec s in CollectibleTable.AllSpecs(entityType))
+        {
+            total += carcass != null
+                ? CollectibleTable.AmountForCarcass(s, carcass.CombatLevel)
+                : s.Amount;
+        }
+        bool ranOut = total > 0 && taken >= total;
 
         // หักแรงตอนเริ่มเก็บ (ลงมือแล้ว) — ของเข้ากระเป๋าเลื่อนไปตอนจบ
         _survival.Add(SurvivalState.KeyEnergy, -energyCost);
         _survival.Add(SurvivalState.KeyFatigue, fatigueCost);
         FlushSurvival();
 
+        // [7 ก.ย. 2026] สกิลสูงมีโอกาสได้ของเพิ่มอีกชิ้น (ดู Player.SkillEffects.cs)
+        int itemCount = CollectibleTable.ItemsPerCollect;
+        bool bonus = carcass != null ? RollButcheryBonus() : RollGatherBonus();
+        if (bonus) itemCount++;
+
         var items = new List<Item>();
-        for (int i = 0; i < spec.Amount; i++)
+        for (int i = 0; i < itemCount; i++)
         {
             Item? item = Cheats.MakeItem(spec.PrototypeId, spec.Level);
             if (!item.HasValue) continue;
@@ -305,13 +390,14 @@ public partial class Player
             RanOut = ranOut
         };
         Console.WriteLine($"[gather] {EntityId[..Math.Min(8, EntityId.Length)]} เริ่มเก็บ {spec.Id} x{items.Count} " +
-                          $"จาก {spec.CollectibleId} ที่ ({msg.Tile.x},{msg.Tile.y}) — รอ {spec.Duration:0.#} วิ " +
+                          $"จาก {spec.CollectibleId} ที่ ({msg.Tile.x},{msg.Tile.y}) — รอ {gatherDuration:0.#} วิ " +
                           $"· จองแล้ว {taken}/{total}" + (ranOut ? " (จะหมด)" : ""));
 
         Point2 tile = carcass?.Tile ?? msg.Tile;
         string entityId = msg.EntityId;
         bool isCarcass = carcass != null;
-        ScheduleCollectFinish(collected, items, seq, spec.Duration, harvestKey, tile, entityId, isCarcass, ranOut);
+        ScheduleCollectFinish(collected, items, seq, gatherDuration, harvestKey, tile, entityId, isCarcass,
+                              ranOut, msg.ToolItemId);
         OnContextChanged();
     }
 
@@ -352,10 +438,18 @@ public partial class Player
     /// </summary>
     private void CompleteCollectAfterDelay(
         Collected collected, List<Item> items, uint seq,
-        string harvestKey, Point2 tile, string entityId, bool isCarcass, bool ranOut)
+        string harvestKey, Point2 tile, string entityId, bool isCarcass, bool ranOut,
+        string toolItemId)
     {
         AddItems(items);
+        // ⚠️ ReplyOf = 0 (global push) — ถ้าตอบที่ seq ของ Collect ฝั่งเกมจะนับเป็น
+        // "packet ที่ไม่ใช่ 104/1134/2019/3648" แล้วสั่ง StopCollectTimer + OnGatheringFailed
+        // (client/GatheringSystem.cs:389-403 .All) ⇒ หลอดเก็บดับกลางคัน
         Send(new InventoryUpdated { EntityId = EntityId, Items = items.ToArray() });
+
+        // [7 ก.ย. 2026] เครื่องมือสึกตอน "ได้ของจริง" เท่านั้น (ดู Player.ToolWear.cs)
+        // ⚠️ สึกตอนกดเริ่ม = ยกเลิกกลางคัน/โดนปฏิเสธก็เสียความทนทานฟรี
+        WearTool(toolItemId);
 
         // [7 ก.ย. 2026] ให้ exp ตอนของเข้ากระเป๋าจริง — ไม่ให้ตอนเริ่มหลอด/ตอนส่ง Collected
         // ชำแหละซากใช้หมวด Butchery · เก็บของธรรมชาติใช้ Gathering
@@ -368,17 +462,12 @@ public partial class Player
             AddExpForAction(SkillTuning.GatherWeight, Shared.Skill.Category.Gathering, "เก็บของ");
         }
 
-        if (!ranOut)
-        {
-            // ตอนนี้ค่อยบอกเกมให้ดึงรายการใหม่ — ปุ่มที่เพิ่งใช้จึงหายหลังจบท่า
-            Send(new CollectibleChanged { EntityId = entityId });
-        }
-        else if (!isCarcass)
+        if (ranOut && !isCarcass)
         {
             _world.DestroyNatural(tile);
             _touchedNaturals.Remove(tile);
         }
-        else
+        else if (ranOut)
         {
             AnimalManager.Animal carcass = _world.AnimalManager?.Get(entityId);
             if (carcass != null)
@@ -389,17 +478,33 @@ public partial class Player
         }
 
         FinishCollect(collected, seq);
+
+        // [7 ก.ย. 2026] ⚠️ ต้องส่ง **หลัง** Collected เท่านั้น
+        //
+        // CollectibleChanged ทำให้ฝั่งเกมยิง GetCollectible แล้วเอาผลไป SetCollectible
+        // ซึ่งอ่าน InteractionSystem.Target ตอนนั้น (client/GatheringSystem.cs:96-111,193)
+        // ถ้าส่งก่อน Collected รายการใหม่จะมาถึงตอนที่ CurrentGatheringData ยังค้างค่าเก่าอยู่
+        // แล้ว Collected ตามมาล้างทีหลัง ⇒ เมนูกะพริบปิด-เปิด เก็บต่อเนื่องไม่ลื่น
+        //
+        // เรียงแบบนี้แล้วฝั่งเกมอัปเดตรายการในที่ ไม่ Reset ทั้งแผง
+        // (InteractionMenuList.Clear ไม่แตะ ResetFrame ⇒ widget ไม่ RemoveAll)
+        if (!ranOut)
+        {
+            Send(new CollectibleChanged { EntityId = entityId });
+        }
         OnContextChanged();
         Console.WriteLine($"[gather] {EntityId[..Math.Min(8, EntityId.Length)]} จบเก็บครบเวลา · RanOut={ranOut}");
     }
 
     private void ScheduleCollectFinish(
         Collected collected, List<Item> items, uint seq, float duration,
-        string harvestKey, Point2 tile, string entityId, bool isCarcass, bool ranOut)
+        string harvestKey, Point2 tile, string entityId, bool isCarcass, bool ranOut,
+        string toolItemId)
     {
         if (duration <= 0f || duration > GatheringTuning.MaxCollectSeconds)
         {
-            CompleteCollectAfterDelay(collected, items, seq, harvestKey, tile, entityId, isCarcass, ranOut);
+            CompleteCollectAfterDelay(collected, items, seq, harvestKey, tile, entityId, isCarcass, ranOut,
+                                      toolItemId);
             return;
         }
 
@@ -412,6 +517,7 @@ public partial class Player
         bool isCarcassCopy = isCarcass;
         bool ranOutCopy = ranOut;
         uint seqCopy = seq;
+        string toolCopy = toolItemId;
 
         System.Threading.Timer timer = null;
         timer = new System.Threading.Timer(delegate
@@ -420,7 +526,8 @@ public partial class Player
             {
                 // ส่ง packet + แตะ inventory/โลก — รูปแบบเดียวกับ craft/build ของเรา
                 // (Send ปลอดภัยข้ามเธรด; AddItems/DestroyNatural ใช้บน timer ตามแพทเทิร์นเดิมของโปรเจกต์นี้)
-                CompleteCollectAfterDelay(collectedCopy, itemsCopy, seqCopy, harvestKeyCopy, tileCopy, entityIdCopy, isCarcassCopy, ranOutCopy);
+                CompleteCollectAfterDelay(collectedCopy, itemsCopy, seqCopy, harvestKeyCopy, tileCopy,
+                                          entityIdCopy, isCarcassCopy, ranOutCopy, toolCopy);
             }
             catch (Exception e)
             {
@@ -551,6 +658,10 @@ internal static class CollectibleTable
         public string Icon;
         public int Level;
         public int Amount;
+
+        /// <summary>ลำดับในเป้า (0 = ของหลัก) — ใช้คิดจำนวนชิ้นตอนแล่ซากที่ต้องใช้เลเวลสัตว์</summary>
+        public int Order;
+
         public float Effort;
         public float Duration;
         public Dictionary<string, int> ToolRequirements;
@@ -578,7 +689,18 @@ internal static class CollectibleTable
 
     // ── การประกอบ Collectible ───────────────────────────────────────────────────────
 
-    public static Collectible Build(string entityId, ushort entityType, IReadOnlyList<string> harvested = null)
+    /// <param name="animalLevel">
+    /// เลเวลของสัตว์ถ้าเป้านี้เป็นซาก (0 = ของธรรมชาติ) — ซากแล่ได้กี่ครั้งขึ้นกับเลเวลตัวสัตว์
+    /// </param>
+    /// <param name="unlockedCategories">
+    /// [7 ก.ย. 2026] หมวดของที่ปลดจากสกิลแล้ว (หมวด → ระดับสูงสุด) — null = ไม่กรอง
+    ///
+    /// ⚠️ ต้องกรองตั้งแต่ตอนประกอบเมนู ไม่ใช่ปฏิเสธตอนกด เพราะฝั่งเกมไม่แสดงข้อความใด ๆ
+    /// เมื่อการเก็บถูก Abort ⇒ โชว์ปุ่มที่กดไม่ได้ = ผู้เล่นกดแล้วเงียบโดยไม่รู้เหตุผล
+    /// </param>
+    public static Collectible Build(string entityId, ushort entityType,
+                                    IReadOnlyList<string> harvested = null, int animalLevel = 0,
+                                    Dictionary<string, int> unlockedCategories = null)
     {
         if (!_cache.TryGetValue(entityType, out Collectible template))
         {
@@ -586,6 +708,44 @@ internal static class CollectibleTable
             _cache[entityType] = template;
         }
         template.EntityId = entityId;
+
+        // ซาก: จำนวนครั้งที่แล่ได้คิดจากเลเวลตัวสัตว์ ไม่ใช่เลเวลไอเทม (ดู AmountForCarcass)
+        // ⚠️ ต้องสร้างอาเรย์ใหม่ ห้ามแก้ของเดิม — template ที่แคชไว้ใช้ร่วมกันทุกผู้เล่น
+        if (animalLevel > 0 && template.Generators != null)
+        {
+            List<GeneratorSpec> specs = SpecsFor(entityType);
+            var scaled = new Generator[template.Generators.Length];
+            for (int i = 0; i < template.Generators.Length; i++)
+            {
+                Generator gen = template.Generators[i];
+                if (i < specs.Count) gen.Amount = AmountForCarcass(specs[i], animalLevel);
+                scaled[i] = gen;
+            }
+            template.Generators = scaled;
+        }
+
+        // [7 ก.ย. 2026] ของที่ยังไม่ได้ปลดสกิล — **คงปุ่มไว้ในเมนู แต่ปิดไม่ให้ใช้**
+        //
+        // ⚠️ ห้ามตัดออกจากรายการ: ผู้เล่นต้องเห็นว่าซากนี้ยังมีอะไรให้เอาอีก จะได้รู้ว่า
+        //    ควรไปปลดสกิลอะไร ถ้าตัดทิ้งเลยจะไม่มีทางรู้ว่ามีของซ่อนอยู่
+        // Enabled = false ทำให้ฝั่งเกมหรี่ปุ่มลง (client/Durango.UI/InteractionMenuWidgetBase.cs:213
+        //    IsAvailableForGathering() = false ⇒ Alpha = _alphaBgDisabled)
+        // แล้วตอนกดจริง เซิร์ฟตอบ SkillNeeded(2449) ⇒ เกมเด้งป๊อปอัพ "ต้องมีสกิล X"
+        //    พร้อมปุ่ม "ดูสกิล" ที่เปิดหน้าสกิลไปที่โหนดนั้นให้เลย (SkillSystem.cs:151-165)
+        if (unlockedCategories != null && template.Generators != null)
+        {
+            List<GeneratorSpec> specs = SpecsFor(entityType);
+            var marked = new Generator[template.Generators.Length];
+            for (int i = 0; i < template.Generators.Length; i++)
+            {
+                Generator gen = template.Generators[i];
+                string category = i < specs.Count ? CategoryOfGenerator(specs[i]) : null;
+                // ไม่มีหมวดคุม = ของพื้นฐาน เก็บได้เสมอ (กิ่งไม้/ใบไม้/หญ้า)
+                if (category != null && !unlockedCategories.ContainsKey(category)) gen.Enabled = false;
+                marked[i] = gen;
+            }
+            template.Generators = marked;
+        }
 
         // generator ที่เก็บไปแล้ว ต้อง **ตัดออกจากรายการ** ไม่ใช่แค่ปิด Enabled
         //
@@ -605,7 +765,20 @@ internal static class CollectibleTable
             var left = new List<Generator>(template.Generators.Length);
             foreach (Generator gen in template.Generators)
             {
-                if (!harvested.Contains(gen.Id)) left.Add(gen);
+                // [7 ก.ย. 2026] เหลืออีกกี่ครั้ง = จำนวนครั้งที่ให้ได้ − ครั้งที่เก็บไปแล้ว
+                // ⚠️ เดิมเช็คแค่ Contains ⇒ เก็บครั้งเดียวก็หายจากเมนูทั้งที่ยังมีเหลือ
+                int taken = 0;
+                foreach (string id in harvested)
+                {
+                    if (string.Equals(id, gen.Id, StringComparison.Ordinal)) taken++;
+                }
+                int remain = gen.Amount - taken;
+                if (remain <= 0) continue;
+
+                // บอกฝั่งเกมว่าเหลืออีกกี่ครั้ง — struct จึงคัดลอกค่าไป ไม่กระทบ template ที่แคชไว้
+                Generator copy = gen;
+                copy.Amount = remain;
+                left.Add(copy);
             }
             template.Generators = left.ToArray();
         }
@@ -614,6 +787,58 @@ internal static class CollectibleTable
 
     /// <summary>เป้าชนิดนี้มี generator ทั้งหมดกี่ตัว — ใช้ตัดสินว่าเก็บครบแล้วหรือยัง</summary>
     public static int GeneratorCount(ushort entityType) => SpecsFor(entityType).Count;
+
+    /// <summary>generator ทั้งชุดของเป้าชนิดนี้ — ใช้รวมจำนวนครั้งที่เก็บได้ทั้งหมด</summary>
+    public static IReadOnlyList<GeneratorSpec> AllSpecs(ushort entityType) => SpecsFor(entityType);
+
+    /// <summary>
+    /// [7 ก.ย. 2026] หมวดของที่ generator ตัวนี้สังกัด — ใช้ตรวจว่าผู้เล่นปลดสกิลแล้วหรือยัง
+    ///
+    /// ที่มาเป็น **ข้อมูลจริงล้วน**: rewards.json (type 0) ใช้ชื่อหมวดชุดเดียวกับ tag ของไอเทม
+    /// ใน item/prototype_data.json — ตรวจแล้ว 29 จาก 41 หมวดมี tag ชื่อตรงกันเป๊ะ
+    /// (fat → tag "fat" · meat → tag "meat" · leather → tag "leather" · ore/stone/wood/…)
+    /// ⇒ อ่าน tag ของไอเทมที่จะได้ แล้วเทียบกับหมวดที่รางวัลสกิลปลดไว้
+    ///
+    /// คืน null = ไม่มีหมวดไหนคุมของชิ้นนี้ ⇒ เก็บได้เสมอ (ของพื้นฐานอย่างกิ่งไม้/ใบไม้)
+    /// ⚠️ ต้องคืน null ไม่ใช่ปิดตาย — ไม่งั้นผู้เล่นใหม่เก็บอะไรไม่ได้เลยสักอย่าง
+    /// </summary>
+    public static string CategoryOfGenerator(GeneratorSpec spec)
+    {
+        if (spec == null) return null;
+        if (_categoryOfPrototype.TryGetValue(spec.PrototypeId, out string cached)) return cached;
+
+        string found = null;
+        Prototype proto = PrototypeYaml.GetItemPrototype(spec.PrototypeId);
+        if (proto?.Tags != null)
+        {
+            foreach (string tag in proto.Tags.Keys)
+            {
+                if (SkillDataStore.CollectibleCategories.Contains(tag)) { found = tag; break; }
+            }
+        }
+        _categoryOfPrototype[spec.PrototypeId] = found;
+        return found;
+    }
+
+    private static readonly Dictionary<string, string> _categoryOfPrototype = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// ได้ไอเทมกี่ชิ้นต่อการกดเก็บ **หนึ่งครั้ง**
+    ///
+    /// 1 ชิ้นต่อครั้ง แล้วให้กดซ้ำได้ตามจำนวนที่ <c>Generator.Amount</c> บอก
+    /// (แบบเดียวกับโปรเจกต์ Opencode — ServerWorld.TryReserveGenerator หัก Amount ทีละ 1)
+    /// ⇒ ต้นไม้ที่ให้กิ่งไม้ 3 = กดเก็บได้ 3 ครั้ง ครั้งละกิ่ง ไม่ใช่กดทีเดียวได้ 3 กิ่งแล้วหาย
+    /// </summary>
+    public const int ItemsPerCollect = 1;
+
+    /// <summary>
+    /// ซากสัตว์แล่ได้กี่ครั้งต่อชิ้นส่วน — คิดจากเลเวลของสัตว์ ไม่ใช่เลเวลของไอเทม
+    ///
+    /// วัตถุดิบธรรมชาติทุกตัวมี min_level = 1 ⇒ ใช้ spec.Level จะได้เท่ากันหมดทุกตัว
+    /// ⇒ ล่าไดโนเสาร์ตัวใหญ่ไม่คุ้มกว่าล่ากิ้งก่าเลย ซึ่งขัดกับที่เกมออกแบบไว้
+    /// </summary>
+    public static int AmountForCarcass(GeneratorSpec spec, int animalLevel) =>
+        GatheringTuning.AmountFor(spec.Order, animalLevel);
 
     public static GeneratorSpec FindGenerator(ushort entityType, string generatorId)
     {
@@ -691,7 +916,9 @@ internal static class CollectibleTable
 
             foreach (string prototypeId in ids)
             {
-                GeneratorSpec spec = MakeSpec(collectibleId, prototypeId);
+                // ลำดับในลิสต์ = ความสำคัญ (ตัวแรกคือของหลักที่เกมไฮไลต์เป็น CriticalGenerator)
+                // ส่งเข้าไปให้ MakeSpec คิดจำนวนชิ้น — ของหลักได้เยอะกว่าของรอง
+                GeneratorSpec spec = MakeSpec(collectibleId, prototypeId, list.Count);
                 if (spec != null) list.Add(spec);
             }
         }
@@ -713,7 +940,8 @@ internal static class CollectibleTable
         return info?.CollectibleId;
     }
 
-    private static GeneratorSpec MakeSpec(string collectibleId, string prototypeId)
+    /// <param name="order">ลำดับที่เท่าไรในเป้านี้ (0 = ของหลัก) — ใช้คิดจำนวนชิ้นที่ได้</param>
+    private static GeneratorSpec MakeSpec(string collectibleId, string prototypeId, int order)
     {
         Prototype proto = PrototypeYaml.GetItemPrototype(prototypeId);
         if (proto == null) return null;
@@ -730,7 +958,8 @@ internal static class CollectibleTable
             Name = client?.name != null ? client.name.ToString() : proto.Name?.ToString() ?? prototypeId,
             Icon = !string.IsNullOrEmpty(client?.icon) ? client.icon : proto.Icon,
             Level = level,
-            Amount = GatheringTuning.Amount,
+            Amount = GatheringTuning.AmountFor(order, level),
+            Order = order,
             Effort = effort,
             Duration = Duration(effort),
             ToolRequirements = ToolsFor(proto)

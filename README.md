@@ -1,4 +1,4 @@
-# Durango LastHuman
+﻿# Durango LastHuman
 
 เซิร์ฟเวอร์ส่วนตัวของเกม **Durango: Wild Lands** สร้างจากโค้ดเซิร์ฟที่ NEXON ฝังมาในตัวเกมเอง
 พอร์ตขึ้น .NET 9 แล้วเปลี่ยนชื่อ `Durango.Offline` → **`Durango.Online`** เพราะโปรเจกต์นี้ทำเวอร์ชันออนไลน์เท่านั้น
@@ -15,7 +15,7 @@ server/          เซิร์ฟ .NET 9
 client/          ซอร์สเกม (Assembly-CSharp) ของ NEXON แท้ 3,755 ไฟล์
 game/            ตัวเกมที่เล่นได้จริง (ไม่อยู่ใน git — ก๊อปมาจากชุดแจก)
 tools/           สคริปต์ build / เปิดเซิร์ฟ / สแกนโปรโตคอล
-docs/            ROADMAP.md (แผนเติมเกมเพลย์) · protocol-coverage.md (สร้างอัตโนมัติ)
+docs/           ROADMAP.md · ROADMAP-NEXT.md · TODO.md · NEXON-SERVER-ARCHITECTURE.md · protocol-coverage.md (แผนเติมเกมเพลย์) · protocol-coverage.md (สร้างอัตโนมัติ)
 ```
 
 ## เริ่มใช้งาน
@@ -73,3 +73,11 @@ python tools/scan-protocol.py --md     # เขียน docs/protocol-coverage.
 - ซอร์สเกม build ผ่าน · เกมเปิดได้
 - รับ message ได้ **42 ชนิด** จากที่เกมยิงออกมา **391** — งานต่อไปดู [docs/ROADMAP.md](docs/ROADMAP.md)
 - งานถัดไปที่ตกลงกันไว้: **ระบบล่องเรือ/หมู่เกาะ** (ต้องรื้อให้เซิร์ฟรองรับหลาย region ก่อน)
+
+## แผนงานล่าสุด
+
+- รายการติ๊ก: [docs/TODO.md](docs/TODO.md)
+- แผนเฟสถัดไป: [docs/ROADMAP-NEXT.md](docs/ROADMAP-NEXT.md)
+- สถาปัตยกรรม Nexon (อ้างอิง): [docs/NEXON-SERVER-ARCHITECTURE.md](docs/NEXON-SERVER-ARCHITECTURE.md)
+- ประวัติ/รายละเอียดเดิม: [docs/ROADMAP.md](docs/ROADMAP.md)
+

@@ -30,8 +30,12 @@ namespace Durango.Online;
 ///   รอบจุดเกิดเองทุกเฟรม (<c>_wanderRadius</c> 500 = 2.5 ช่อง) ⇒ **ห้ามส่ง Move ให้สัตว์**
 ///   จะไปสู้กับตัวมันเอง · ตำแหน่งที่เซิร์ฟเก็บจึงเป็น "จุดเกิด" ไม่ใช่ตำแหน่งจริงบนจอ
 ///   ซึ่งพอใช้ได้เพราะรัศมีเดินเล่นเล็กกว่าระยะไล่กัด (ดู Player.Hunting.AnimalTurn)
-/// • **ยังไม่เกิดใหม่หลังตาย** — ตายแล้วซากอยู่จนกว่าจะปิดเซิร์ฟ (เปิดใหม่กลับมาครบ)
 /// • ยังไม่เซฟ — สัตว์ที่ล้มไปแล้วฟื้นหมดตอนเปิดเซิร์ฟใหม่
+///
+/// ═══ [7 ก.ย. 2026] ซากหายแล้ว + เกิดใหม่ ═══
+/// เดิมตายแล้วซากอยู่ถาวรจนปิดเซิร์ฟ (<c>DiedAt</c> ถูกเขียนไว้แต่ไม่มีใครอ่านเลยสักที่)
+/// ⇒ เกาะเต็มไปด้วยศพ และสัตว์ร่อยหรอลงเรื่อย ๆ จนไม่เหลือให้ล่า
+/// เวลารอใช้ <c>constants.json → herd.collectible_dispose_delay</c> = 180 วิ (ข้อมูลจริง)
 /// </summary>
 public class AnimalManager
 {
@@ -92,8 +96,11 @@ public class AnimalManager
         /// </summary>
         public bool Butchered;
 
-        /// <summary>เวลาที่ตาย (Gauge.CurrentTime) — 0 คือยังไม่ตาย · ใช้ตอนทำระบบเกิดใหม่</summary>
+        /// <summary>เวลาที่ตาย (Gauge.CurrentTime) — 0 คือยังไม่ตาย · ครบ 180 วิ แล้วซากหาย</summary>
         public double DiedAt;
+
+        /// <summary>พิมพ์เวลาถอยหลังของซากตัวนี้ครั้งล่าสุดเมื่อไร (แยกรายตัว ไม่งั้นตัวเดียวบังตัวอื่น)</summary>
+        public double LastCorpseLogAt;
 
         /// <summary>ผู้เล่นที่มันกำลังเล่นงานอยู่ — สัตว์กินพืชจะตั้งค่านี้ก็ต่อเมื่อถูกตีก่อน</summary>
         public string AggroTargetId;
@@ -345,6 +352,9 @@ public class AnimalManager
 
     private readonly Random _rng = new();
 
+    /// <summary>พิมพ์เวลาถอยหลังของซากทุกกี่วินาที</summary>
+    private const double CorpseLogInterval = 15.0;
+
     private readonly List<Animal> _animals = new();
     private readonly Dictionary<string, Animal> _byId = new(StringComparer.Ordinal);
 
@@ -367,12 +377,36 @@ public class AnimalManager
     /// วิธี: เดินไปจุดสุ่มในรัศมีรอบจุดเกิด → พอถึงเวลาก็กลับไปยืน → พักแล้วเดินใหม่
     /// สัตว์ที่กำลังโกรธใครอยู่ไม่เดินเล่น (มันควรจ้องเป้าหมาย)
     /// </summary>
-    public void Process(double now, Action<Move> broadcast)
+    /// <param name="onCorpseGone">
+    /// [7 ก.ย. 2026] ซากตัวนี้ครบเวลาแล้ว — ผู้เรียกต้องบอกฝั่งเกมให้ลบออกจากจอ
+    /// แล้วส่งตัวใหม่เข้าไปแทน (ดู World.Process)
+    /// </param>
+    public void Process(double now, Action<Move> broadcast, Action<Animal> onCorpseGone = null)
     {
         if (broadcast == null) return;
         foreach (Animal animal in _animals)
         {
-            if (!animal.IsAlive) continue;
+            // [7 ก.ย. 2026] ซากครบเวลาแล้ว — คืนชีพที่จุดเกิดเดิม
+            //
+            // ⚠️ เดิม DiedAt ถูกเขียนไว้แต่ไม่มีใครอ่านเลย ⇒ ซากอยู่ถาวรจนปิดเซิร์ฟ
+            // และสัตว์ร่อยหรอลงเรื่อย ๆ จนเกาะไม่เหลืออะไรให้ล่า
+            if (!animal.IsAlive)
+            {
+                if (animal.DiedAt > 0.0 && now >= animal.DiedAt + CorpseDisposeDelay)
+                {
+                    ReviveAtHome(animal);
+                    onCorpseGone?.Invoke(animal);
+                }
+                else if (animal.DiedAt > 0.0 && now - animal.LastCorpseLogAt >= CorpseLogInterval)
+                {
+                    animal.LastCorpseLogAt = now;
+                    double left = animal.DiedAt + CorpseDisposeDelay - now;
+                    string at = DateTimeOffset.FromUnixTimeSeconds((long)(now + left))
+                                              .ToLocalTime().ToString("HH:mm:ss");
+                    Console.WriteLine($"[สัตว์] ซาก {animal.EntityId} จะหายในอีก {left:F0} วิ (เวลา {at})");
+                }
+                continue;
+            }
 
             // [7 ก.ย. 2026] ตีจบแล้ว — ดึงกลับท่ายืนที่ตำแหน่งจริง
             //
@@ -530,6 +564,41 @@ public class AnimalManager
 
     public Animal Get(string entityId) =>
         entityId != null && _byId.TryGetValue(entityId, out Animal animal) ? animal : null;
+
+    /// <summary>
+    /// [7 ก.ย. 2026] ซากอยู่บนพื้นกี่วินาทีก่อนหายไป
+    /// **ข้อมูลจริง** — constants.json → herd.collectible_dispose_delay = 180
+    /// (สำรอง 180 ไว้เผื่ออ่านไฟล์ไม่ได้ ไม่ใช่ค่าที่เราตั้งเอง)
+    /// </summary>
+    public static double CorpseDisposeDelay
+    {
+        get
+        {
+            double v = Yaml.Util.Singleton<Yaml.Constants>.Instance?.Herd?.CollectibleDisposeDelay ?? 0.0;
+            return v > 0.0 ? v : 180.0;
+        }
+    }
+
+    /// <summary>
+    /// คืนชีพสัตว์ตัวนี้ที่จุดเกิดเดิม — เลือดเต็ม ล้างสถานะซากทั้งหมด
+    ///
+    /// ⚠️ ต้องล้าง Butchered ด้วย ไม่งั้นตัวที่เกิดใหม่แล่ไม่ได้เลย
+    /// และ ForgetHarvests ของ world ต้องถูกล้างคู่กัน (ดู World.Process)
+    /// </summary>
+    private void ReviveAtHome(Animal animal)
+    {
+        animal.IsAlive = true;
+        animal.Life = animal.LifeMax;
+        animal.DiedAt = 0.0;
+        animal.LastCorpseLogAt = 0.0;
+        animal.Butchered = false;
+        animal.AggroTargetId = null;
+        animal.StandAt = 0.0;
+        animal.StopWalkingAt = 0.0;
+        animal.WalkStartAt = animal.WalkEndAt = 0.0;
+        animal.Position = new WorldPosition(animal.HomeTile.x * TileSize, animal.HomeTile.y * TileSize);
+        animal.Yaw = (float)(_rng.NextDouble() * 360.0);
+    }
 
     /// <summary>
     /// [7 ก.ย. 2026] เสกสัตว์หนึ่งตัวลงตรงจุดที่สั่ง — ใช้กับคำสั่ง cheat "animal" เท่านั้น

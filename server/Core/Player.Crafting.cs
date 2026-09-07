@@ -362,6 +362,8 @@ public partial class Player
         {
             if (unlocked.Contains(id)) ids.Add(id);
         }
+        Console.WriteLine($"[craft] {Short(EntityId)} ส่งสูตรที่ปลดแล้ว {ids.Count} จาก " +
+                          $"{CraftRecipeStore.CraftableIds().Length} สูตร (ReplyOf={replyOf})");
         Send(new Recipes
         {
             Ids = ids.ToArray(),
@@ -445,7 +447,9 @@ public partial class Player
         };
 
         // เวลาคราฟต์จากไฟล์จริง (recipes.json → duration) — 424 สูตรจาก 625 เป็น 0 = เสร็จทันที
-        float duration = Math.Clamp(recipe.duration, 0f, CraftTuning.MaxCraftSeconds);
+        // [7 ก.ย. 2026] คูณตัวคูณจากสกิลหมวดคราฟต์ที่เก่งที่สุด (ดู Player.SkillEffects.cs)
+        // สูตรที่ duration = 0 อยู่แล้วก็ยังเป็น 0 (คูณแล้วไม่เปลี่ยน) ⇒ ไม่กระทบของที่เสร็จทันที
+        float duration = Math.Clamp(recipe.duration * CraftDurationScale(), 0f, CraftTuning.MaxCraftSeconds);
 
         // เปิดชุดคำตอบต่อเนื่อง แล้วบอกเวลาจริงของหลอดทันที (ไม่งั้น client ใช้ Ping+10 วิ ค้างไว้)
         Send(default(ReplySequenceMark), seq);

@@ -149,6 +149,40 @@ public sealed class SurvivalState
         if (context != null) _ = new SurvivalState(context, live: false);
     }
 
+    /// <summary>
+    /// [7 ก.ย. 2026] ส่วนที่บวกเพิ่มให้ค่าสูงสุดของหลอด — คีย์หลอด → จำนวนที่บวก
+    ///
+    /// SurvivalState มองเห็นแค่ PlayerContext ไม่เห็นเลเวล/ค่าสถานะซึ่งอยู่ฝั่ง Player
+    /// ⇒ ให้ Player เป็นคนคำนวณแล้วส่งเข้ามาแทนที่จะดึงเอง (ดู Player.SetSurvivalMaxBonus)
+    /// </summary>
+    private readonly Dictionary<string, float> _maxBonus = new();
+
+    /// <summary>
+    /// ตั้งส่วนบวกของค่าสูงสุด แล้วสร้างหลอดใหม่ถ้าค่าเปลี่ยนจริง
+    /// คืน true ถ้าเปลี่ยน ⇒ ผู้เรียกต้อง flush ให้ฝั่งเกมเห็นเพดานใหม่
+    /// </summary>
+    public bool SetMaxBonus(string key, float bonus, double now)
+    {
+        _maxBonus.TryGetValue(key, out float old);
+        if (Math.Abs(old - bonus) < 0.01f) return false;
+        _maxBonus[key] = bonus;
+
+        // ⚠️ ขยายเพดานอย่างเดียวไม่พอ — health/energy เป็น "หลอดที่เป็นค่าสูงสุดของหลอดอื่น"
+        // และเลือดสูงสุดที่เห็นบนจอคือ **ค่าปัจจุบัน** ของ health ไม่ใช่เพดานของ health
+        // (BuildGauge: maxNow ของ life = maxGauge.Get(now)) ส่วน health เองไต่ขึ้นด้วย
+        // velocity 0.001157/วิ = ใช้เวลา ~71 ชั่วโมงกว่าจะเต็ม ⇒ ขึ้นเลเวลแล้วแทบไม่เปลี่ยนอะไร
+        // ⇒ ดันค่าปัจจุบันขึ้นตามส่วนที่เพิ่มด้วย เลเวลอัพถึงจะเห็นผลทันที
+        if (bonus > old && _values.TryGetValue(key, out float cur))
+        {
+            _values[key] = cur + (bonus - old);
+        }
+
+        Rebuild(now);
+        return true;
+    }
+
+    private float MaxBonus(string key) => _maxBonus.TryGetValue(key, out float v) ? v : 0f;
+
     /// <summary>แช่หลอดไว้ที่ค่าปัจจุบัน — เรียกตอนผู้เล่นหลุดการเชื่อมต่อ</summary>
     public void Freeze(double now)
     {
@@ -246,6 +280,13 @@ public sealed class SurvivalState
         Gauge g = GaugeOf(key);
         if (g?.Determination != null && g.Determination.Length > 0) return g.Get(at);
         return _values.TryGetValue(key, out float v) ? v : 0f;
+    }
+
+    /// <summary>ค่าสูงสุดของหลอดหนึ่งหลังรวมส่วนที่บวกเพิ่มแล้ว (0 = ไม่มีหลอดนี้)</summary>
+    public float MaxOf(string key, double at)
+    {
+        Gauge g = GaugeOf(key);
+        return g != null ? g.Max(at) : 0f;
     }
 
     // ── รอบตรวจ ─────────────────────────────────────────────────────────────────────
@@ -383,7 +424,10 @@ public sealed class SurvivalState
         }
         else
         {
-            maxNow = maxEnd = def.Max ?? def.Value ?? 0f;
+            // [7 ก.ย. 2026] หลอดที่เป็นเพดานของหลอดอื่น (health→life, energy→stamina)
+            // โตตามเลเวล/ค่าสถานะของตัวละคร ไม่ใช่ค่าคงที่จาก players.json อย่างเดียว
+            // ⚠️ ไม่บวก = ขึ้นเลเวลแล้วเลือดสูงสุดเท่าเดิม ไม่มีเหตุผลจะเลเวลอัพ
+            maxNow = maxEnd = (def.Max ?? def.Value ?? 0f) + MaxBonus(key);
         }
         maxNow = Mathf.Max(maxNow, min);
         maxEnd = Mathf.Max(maxEnd, min);

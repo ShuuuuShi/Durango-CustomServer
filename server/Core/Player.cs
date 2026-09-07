@@ -1630,6 +1630,10 @@ public partial class Player
             Point2 tile = _world.ArtifactManager.Get(msg.EntityId)?.Tile ?? default;
             _world.ArtifactManager.SeedPlant(msg.EntityId, inventoryItem.Prototype,
                 inventoryItem.Level, _world.BiomeAt(tile));
+
+            // [7 ก.ย. 2026] exp หมวดเกษตร — ⚠️ ก่อนหน้านี้ไม่มีจุดไหนให้ exp หมวดนี้เลย
+            // ⇒ ปลูกทั้งวันหมวด Farming ค้างที่เลเวล 1 ตลอดกาล และไม่ได้ exp ตัวละครด้วย
+            AddExpForAction(SkillTuning.GatherWeight, Shared.Skill.Category.Farming, "ปลูกพืช");
             break;
         }
     }

@@ -109,6 +109,24 @@ public static class SkillTuning
     /// </summary>
     public const int BasicAbilityBase = 10;
 
+    // ── [7 ก.ย. 2026] ค่าสถานะที่โตจริงตามการเล่น ────────────────────────────────
+    //
+    // ⚠️ เดิมทุกช่องเป็น BasicAbilityBase (10) เท่ากันหมดตลอดชีพ ⇒ หน้า "ความสามารถ"
+    //    เป็นของปลอม ตัวละครเลเวล 1 กับ 60 เห็นเลขชุดเดียวกัน
+    //
+    // **ค่าของเราทั้งหมด** — ตัวเลข ability จริงคิดฝั่งเซิร์ฟของ NEXON ไม่เคยหลุดมากับ client
+    // ยึดหลักที่ตรวจสอบได้: ค่าสถานะโตจากสิ่งที่ตัวละคร "ทำจริง" คือเลเวล + เลเวลหมวดสกิล
+    // (ตารางว่าค่าไหนโตจากหมวดอะไร อยู่ที่ AbilitySources ใน Player.Skills.cs)
+
+    /// <summary>เพิ่มต่อ 1 เลเวลตัวละคร (ได้ทุกค่าเท่ากัน)</summary>
+    public const float AbilityPerLevel = 0.5f;
+
+    /// <summary>เพิ่มต่อ 1 เลเวลหมวดสกิลที่ป้อนค่านั้น</summary>
+    public const float AbilityPerCategory = 0.35f;
+
+    /// <summary>เพดาน — กันเคสฟาร์มหมวดจนตัวเลขหลุดโลก</summary>
+    public const float AbilityMax = 100f;
+
     /// <summary>คีย์ใน <c>PlayerContext.Storage</c> ที่เก็บสถานะสกิล/exp</summary>
     /// <remarks>
     /// ⚠️ ต้องไม่ชนกับคีย์ที่ client เขียนเองผ่าน SetStorageItem (Player.cs:452 เขียนทับได้ทุกคีย์):
@@ -157,6 +175,19 @@ internal class SkillCategoryJson
 }
 
 /// <summary>หนึ่งรางวัลใน <c>skill/rewards.json</c> (1,321 รายการ)</summary>
+/// <summary>
+/// ชนิดของรางวัลสกิลใน <c>skill/rewards.json</c> → <c>type</c>
+/// (ค่าจากข้อมูลจริง — นับได้ 11 ชนิด ที่นี่ประกาศเฉพาะตัวที่เซิร์ฟใช้)
+/// </summary>
+internal enum SkillRewardKind
+{
+    /// <summary>ปลดหมวดของที่เก็บ/แล่ได้ (171 รายการ — meat/fat/leather/ore/…)</summary>
+    Collectible = 0,
+
+    /// <summary>ปลดสูตรคราฟต์ (604 รายการ)</summary>
+    Recipe = 2
+}
+
 internal class SkillRewardJson
 {
     [JsonProperty("type")] public int Type;
@@ -171,6 +202,20 @@ internal class SkillRewardJson
 
     /// <summary>สูตรที่รางวัลนี้ปลดล็อก (type 2 — 604 จาก 1,321 รายการมีช่องนี้)</summary>
     [JsonProperty("recipe_ids")] public string[] RecipeIds;
+
+    /// <summary>
+    /// [7 ก.ย. 2026] หมวดของ "ของที่เก็บ/แล่ได้" ที่รางวัลนี้ปลด (type 0 — 171 รายการ)
+    ///
+    /// ⚠️ ก่อนหน้านี้ไม่เคยอ่านช่องนี้เลย ⇒ **สกิลไม่มีผลกับสิ่งที่เก็บได้**
+    /// ผู้เล่นใหม่แล่ไขมัน/กระดูก/เขาได้ทันทีตั้งแต่ตัวแรก ทั้งที่ของจริงต้องเรียนสกิลก่อน
+    ///
+    /// ข้อมูลจริงมี 41 หมวด เช่น meat(5 ระดับ) · fat(1) · leather(2) · bone(3) · ore(4)
+    /// โดย category_level = ระดับที่รางวัลนี้ให้ (meat_02 = ระดับ 2 ปลด "ไขมัน" ตามชื่อเกาหลี 지방)
+    /// </summary>
+    [JsonProperty("category")] public string Category;
+
+    /// <summary>ระดับของหมวดที่รางวัลนี้ให้ (คู่กับ <see cref="Category"/>)</summary>
+    [JsonProperty("category_level")] public int CategoryLevel;
 }
 
 /// <summary>นิยามโมดิฟายเออร์ใน <c>skill/modifiers.json</c> (154 รายการ)</summary>
@@ -317,6 +362,15 @@ internal static class SkillDataStore
     /// <summary>modifierId → Derived ที่มันไปเพิ่ม (mapping ของเรา — ดูหมายเหตุใน BuildDerivedMap)</summary>
     public static Dictionary<string, Derived> DerivedOfModifier { get; } = new();
 
+    /// <summary>
+    /// [7 ก.ย. 2026] ชื่อหมวดของ "ของที่เก็บ/แล่ได้" ทั้งหมดที่มีสกิลคุมอยู่ (41 หมวด)
+    ///
+    /// รวบจาก rewards.json → รางวัล type 0 → ช่อง category
+    /// ใช้ตรวจว่า generator ตัวหนึ่งอยู่ใต้หมวดที่ต้องปลดสกิลก่อนไหม
+    /// (ดู CollectibleTable.CategoryOfGenerator)
+    /// </summary>
+    public static HashSet<string> CollectibleCategories { get; } = new(StringComparer.Ordinal);
+
     /// <summary>เลเวลผู้เล่นสูงสุด — จาก constants.json → max_levels.player (60)</summary>
     public static int MaxPlayerLevel { get; private set; } = 60;
 
@@ -374,10 +428,18 @@ internal static class SkillDataStore
         BuildDerivedMap();
         BuildFreeSkillNodes();
 
+        // [7 ก.ย. 2026] รวบหมวดของที่เก็บ/แล่ได้ที่มีสกิลคุม (rewards type 0)
+        foreach (SkillRewardJson reward in Rewards.Values)
+        {
+            if (reward == null || reward.Type != (int)SkillRewardKind.Collectible) continue;
+            if (!string.IsNullOrEmpty(reward.Category)) CollectibleCategories.Add(reward.Category);
+        }
+
         Console.WriteLine($"[skill] โหลดตารางสกิล: {CategoryOfBundle.Count} bundle · {Categories.Count} หมวด · " +
                           $"{Rewards.Count} รางวัล · {Modifiers.Count} โมดิฟายเออร์ ({DerivedOfModifier.Count} ตัวผูกกับ Derived) · " +
                           $"{Jobs.Count} อาชีพ · เลเวลสูงสุด {MaxPlayerLevel} · " +
-                          $"สกิลอัตโนมัติ {FreeSkillNodes.Count} โหนด");
+                          $"สกิลอัตโนมัติ {FreeSkillNodes.Count} โหนด · " +
+                          $"หมวดของที่ต้องปลดสกิล {CollectibleCategories.Count} หมวด");
     }
 
     /// <summary>
@@ -937,7 +999,21 @@ public partial class Player
         state.ResearchEnd = 0.0;
         state.ResearchSaved = 0f;
         Console.WriteLine($"[skill] {ShortId()} วิจัยหมวด {(SkillCat)cat} เสร็จ → หมวดเลเวล {state.Level}");
+
+        // [7 ก.ย. 2026] หมวดขึ้นเลเวล = โหนดสกิลอัตโนมัติชุดใหม่ปลดได้ ⇒ สูตรชุดใหม่ตามมา
+        // ⚠️ ไม่ push = เมนูคราฟต์ยังเป็นชุดเก่าจนกว่าจะออกเข้าเกมใหม่
+        //    (client ขอ Recipes ครั้งเดียวตอน OnReady แล้วแคชทั้งเซสชัน)
+        GrantFreeSkills(save: true);
+        PushUnlockedRecipes();
     }
+
+    /// <summary>
+    /// [7 ก.ย. 2026] ส่งชุดสูตรที่ปลดแล้วใหม่แบบ global push (ReplyOf = 0)
+    ///
+    /// ⚠️ ต้องเป็น 0 ไม่ใช่ seq ของคำขอที่กำลังทำอยู่ — ฝั่งเกมรับ Recipes ด้วย handler กลาง
+    /// เรียกหลังทุกจุดที่ "ชุดสูตรที่ปลดได้" เปลี่ยน: เรียนสกิล · แจกสกิลอัตโนมัติ · วิจัยหมวดเสร็จ
+    /// </summary>
+    private void PushUnlockedRecipes() => SendRecipes(0u);
 
     private void HandleResearch(ResearchSkillCategory msg, uint seq)
     {
@@ -1058,6 +1134,7 @@ public partial class Player
         Send(default(OK), seq);
         SendSkills();
         SendFullStatistics();   // สกิลใหม่ = ค่าสถานะเปลี่ยน (rewards → modifiers)
+        PushUnlockedRecipes();  // สกิลใหม่ปลดสูตรใหม่ — ไม่ push เมนูคราฟต์ค้างชุดเก่า
     }
 
     /// <summary>
@@ -1086,6 +1163,7 @@ public partial class Player
         Send(default(OK), seq);
         SendSkills();
         SendFullStatistics();
+        PushUnlockedRecipes();  // ถอนสกิลแล้วสูตรที่มันปลดต้องหายจากเมนูด้วย
     }
 
     /// <summary>หาโหนดสกิลในตารางจริง (คืน null ถ้าไม่มี) พร้อมบอกหมวดที่มันสังกัด</summary>
@@ -1138,6 +1216,84 @@ public partial class Player
             }
         }
         return unlocked;
+    }
+
+    /// <summary>
+    /// [7 ก.ย. 2026] หมวดของที่เก็บ/แล่ได้ที่ปลดแล้ว → ระดับสูงสุดที่ปลดถึง
+    ///
+    /// เส้นทางเดียวกับสูตรคราฟต์: สกิลที่เรียน → rewards[] → rewards.json (type 0)
+    /// ⇒ "ปลดจากสกิลเท่านั้น" ทั้งของที่คราฟต์ได้และของที่เก็บได้ ใช้กติกาเดียวกัน
+    /// </summary>
+    public Dictionary<string, int> UnlockedCollectibleCategories()
+    {
+        var unlocked = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (_skills?.Learned == null) return unlocked;
+
+        foreach (var (skillId, subs) in _skills.Learned)
+        {
+            foreach (var (subId, level) in subs)
+            {
+                for (int lv = 1; lv <= level; lv++)
+                {
+                    SkillNodeJson node = FindNode(skillId, subId, lv, out _);
+                    foreach (string rewardId in node?.Rewards ?? Array.Empty<string>())
+                    {
+                        if (!SkillDataStore.Rewards.TryGetValue(rewardId, out SkillRewardJson reward)) continue;
+                        if (reward == null || string.IsNullOrEmpty(reward.Category)) continue;
+                        // type 0 เท่านั้น — type อื่นก็มีช่อง category แต่คนละความหมาย
+                        if (reward.Type != (int)SkillRewardKind.Collectible) continue;
+
+                        int have = unlocked.GetValueOrDefault(reward.Category);
+                        if (reward.CategoryLevel > have) unlocked[reward.Category] = reward.CategoryLevel;
+                    }
+                }
+            }
+        }
+        return unlocked;
+    }
+
+    /// <summary>
+    /// [7 ก.ย. 2026] หาโหนดสกิลที่ปลดหมวดของนี้ แล้วประกอบเป็น SkillNeeded(2449)
+    ///
+    /// ฝั่งเกมเอาไปเปิดป๊อปอัพ "ต้องมีสกิล X" พร้อมปุ่มเปิดหน้าสกิลไปที่โหนดนั้น
+    /// (client/Durango.Logic/SkillSystem.cs:146-165 — FindSkill(SkillId, SubId, Level))
+    ///
+    /// เลือกโหนด "ระดับต่ำสุดที่ยังไม่มี" เพราะเป็นตัวที่ผู้เล่นควรไปเรียนต่อไป
+    /// ⚠️ ต้องส่ง SubId/Level ให้ตรงกับตารางจริง ไม่งั้น FindSkill คืน null แล้วป๊อปอัพไม่ขึ้นเลย
+    /// </summary>
+    private SkillNeeded BuildSkillNeededFor(string collectibleCategory)
+    {
+        foreach (var (catId, bundles) in SkillDataStore.Skills)
+        {
+            foreach (var (skillId, subs) in bundles)
+            {
+                foreach (var (subId, nodes) in subs)
+                {
+                    for (int i = 0; i < (nodes?.Length ?? 0); i++)
+                    {
+                        SkillNodeJson node = nodes[i];
+                        if (node?.Rewards == null) continue;
+                        foreach (string rewardId in node.Rewards)
+                        {
+                            if (!SkillDataStore.Rewards.TryGetValue(rewardId, out SkillRewardJson reward)) continue;
+                            if (reward == null || reward.Type != (int)SkillRewardKind.Collectible) continue;
+                            if (!string.Equals(reward.Category, collectibleCategory, StringComparison.Ordinal)) continue;
+
+                            int level = i + 1;                 // ดัชนีในอาเรย์ = ระดับ - 1
+                            int have = _skills?.Learned.GetValueOrDefault(skillId)?.GetValueOrDefault(subId) ?? 0;
+                            if (have >= level) continue;       // ระดับนี้มีแล้ว มองหาตัวถัดไป
+
+                            // ⚠️ ส่ง subId ดิบตามไฟล์ ห้ามแปลง "__base__" เป็นค่าว่าง —
+                            // ฝั่งเกมเทียบ Skill.SubId ที่อ่านมาจาก skills.json ตรง ๆ
+                            // (client/Durango.Logic.Skill/Skill.cs:26 SubId = data.Key
+                            //  → Bundle.Get(key) เทียบสตริงตรง ๆ) ส่งค่าว่าง = หาไม่เจอ ⇒ ป๊อปอัพไม่ขึ้น
+                            return new SkillNeeded { SkillId = skillId, SubId = subId, Level = level };
+                        }
+                    }
+                }
+            }
+        }
+        return default;   // ไม่เจอโหนดที่ปลดหมวดนี้ — ส่งเปล่าไป ฝั่งเกมไม่เปิดป๊อปอัพ
     }
 
     /// <summary>
@@ -1279,10 +1435,16 @@ public partial class Player
         deriveds[Derived.KnockBackResistance] = b.KnockBackResistance;
         deriveds[Derived.InventoryCapacity] = b.InventoryCapacity;
 
+        // [7 ก.ย. 2026] ขยายเพดานหลอดตามเลเวล/ค่าสถานะก่อน แล้วค่อยอ่านค่าไปใส่ Statistics
+        // ⚠️ สลับลำดับไม่ได้ — FillDeriveds อ่านจาก players.json ตรง ๆ ไม่รู้จักส่วนที่บวกเพิ่ม
+        //    (ตัวเลขที่ client โชว์จึงจะตรงกับหลอดจริงก็ต่อเมื่อขยายเสร็จก่อน)
+        RefreshSurvivalMax();
+
         // ⚠️ ต้องเรียกหลังตั้งค่าฐาน และห้ามไปเขียนทับหลังจากนี้ — ตัวนี้เติมค่าสูงสุดของหลอด
         //    (LifeMax/MaxEnergy/FatigueMax/MaxHealth) + เกณฑ์ FatigueCaution/FatigueDanger
         //    ซึ่งเป็นของระบบ survival ทั้งหมด (Core/SurvivalState.cs:543-562)
         SurvivalState.FillDeriveds(deriveds);
+        ApplySurvivalMaxToDeriveds(deriveds);
 
         // 2) โมดิฟายเออร์จากสกิลที่เรียนแล้ว — สกิล → rewards.json → modifiers
         Dictionary<string, float> modifiers = CollectModifiers();
@@ -1293,7 +1455,7 @@ public partial class Player
         foreach (Basic ability in Enum.GetValues<Basic>())
         {
             if (ability == Basic.Invalid) continue;
-            basicRaw[ability] = SkillTuning.BasicAbilityBase;
+            basicRaw[ability] = BaseAbilityValue(ability);
         }
         ApplyModifiers(modifiers, basicRaw, deriveds);
         foreach (var (ability, value) in basicRaw)

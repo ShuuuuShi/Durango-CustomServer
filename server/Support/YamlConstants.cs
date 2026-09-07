@@ -27,6 +27,18 @@ public class Constants : Singleton<Constants>
     // client ไม่ parse บล็อกนี้ เป็นสูตรฝั่งเซิร์ฟล้วน ๆ
     [JsonProperty("energy")]
     public EnergyConstants Energy;
+
+    // พอร์ตเพิ่ม [7 ก.ย. 2026]: เวลาที่ซากสัตว์อยู่บนพื้นก่อนหายไป
+    // ⚠️ ไม่มีตัวนี้ = ซากอยู่ถาวรจนปิดเซิร์ฟ (AnimalManager.DiedAt ถูกเขียนแต่ไม่มีใครอ่าน)
+    [JsonProperty("herd")]
+    public HerdConstants Herd;
+}
+
+public class HerdConstants
+{
+    /// <summary>ซากอยู่กี่วินาทีก่อนหายไป — ไฟล์จริงมีคีย์เดียว = 180</summary>
+    [JsonProperty("collectible_dispose_delay")]
+    public double CollectibleDisposeDelay;
 }
 
 public class EnergyConstants

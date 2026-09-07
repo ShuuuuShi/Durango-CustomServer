@@ -315,7 +315,7 @@ public class World
         // (ถ้าไม่มีใครอยู่บนเกาะก็ไม่ต้องเดิน จะได้ไม่เปลืองแรงเปล่า)
         if (_players.Count > 0)
         {
-            AnimalManager?.Process(Gauge.CurrentTime, BroadCast);
+            AnimalManager?.Process(Gauge.CurrentTime, BroadCast, OnCorpseDisposed);
             ProcessWeather(Gauge.CurrentTime);
             ArtifactManager?.ProcessFarming(Gauge.CurrentTime);
             ProcessRegrow(Gauge.CurrentTime);
@@ -383,6 +383,26 @@ public class World
         {
             player.Send(msg);
         }
+    }
+
+    /// <summary>
+    /// [7 ก.ย. 2026] ซากครบเวลาแล้วและสัตว์ตัวนั้นคืนชีพที่จุดเกิด — บอกฝั่งเกมให้อัปเดตตาม
+    ///
+    /// ต้องทำสามอย่างครบ ไม่งั้นเห็นผลครึ่ง ๆ:
+    ///   1. DisappearEntity — ลบซากออกจากจอ (ไม่ส่ง = ศพค้างอยู่ทั้งที่เซิร์ฟถือว่าฟื้นแล้ว)
+    ///   2. ล้างประวัติการแล่ — ไม่ล้าง = ตัวที่เกิดใหม่แล่ไม่ได้เลยเพราะระบบจำว่าเก็บครบแล้ว
+    ///   3. ให้ทุกคนลืมว่าเคยเห็นตัวนี้ — SyncAnimalVisibility จะได้ส่ง AppearAnimal ตัวใหม่ให้
+    /// </summary>
+    private void OnCorpseDisposed(AnimalManager.Animal animal)
+    {
+        BroadCast(new DisappearEntity { EntityId = animal.EntityId });
+        ForgetHarvests(animal.EntityId);
+        foreach (Player player in _players)
+        {
+            player.ForgetAnimal(animal.EntityId);
+        }
+        Console.WriteLine($"[สัตว์] ซาก {animal.EntityId} หายไปแล้ว — เกิดใหม่ที่ " +
+                          $"[{animal.HomeTile.x},{animal.HomeTile.y}]");
     }
 
     public void Save() => _context.Save();
@@ -631,6 +651,12 @@ public class World
     public IReadOnlyList<string> HarvestedGenerators(string targetKey)
         => _context.NaturalHarvests.TryGetValue(targetKey, out List<string> list) ? list : NoHarvest;
 
+    /// <summary>
+    /// บันทึกว่าเก็บ generator ตัวนี้ไปอีกหนึ่งครั้ง
+    ///
+    /// ⚠️ ใส่ซ้ำได้ตั้งใจ — จำนวนที่ซ้ำ = จำนวนครั้งที่เก็บไปแล้ว (ดู WorldContext.NaturalHarvests)
+    /// เดิมกันไม่ให้ซ้ำ ⇒ generator ตัวนั้นถูกตัดออกจากเมนูตั้งแต่เก็บครั้งแรก
+    /// </summary>
     public void MarkGeneratorHarvested(string targetKey, string generatorId)
     {
         if (!_context.NaturalHarvests.TryGetValue(targetKey, out List<string> list))
@@ -638,7 +664,7 @@ public class World
             list = new List<string>();
             _context.NaturalHarvests[targetKey] = list;
         }
-        if (!list.Contains(generatorId)) list.Add(generatorId);
+        list.Add(generatorId);
     }
 
     public void ForgetHarvests(string targetKey) => _context.NaturalHarvests.Remove(targetKey);

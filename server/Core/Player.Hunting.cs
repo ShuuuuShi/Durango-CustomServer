@@ -64,6 +64,13 @@ public partial class Player
     /// ระยะที่ใช้คือกรอบ 3×3 chunk รอบตัว — กรอบเดียวกับที่สิ่งปลูกสร้างใช้ (Player.IsOverlapped)
     /// เรียกจาก World.Process() ไม่ใช่ Player.Process() เพราะไฟล์ Player.cs มีเจ้าของอยู่
     /// </summary>
+    /// <summary>
+    /// [7 ก.ย. 2026] ลืมว่าเคยส่งสัตว์ตัวนี้ให้ผู้เล่นคนนี้แล้ว
+    /// ⇒ รอบถัดไปของ <see cref="SyncAnimalVisibility"/> จะส่ง AppearAnimal ตัวใหม่ให้
+    /// (ใช้ตอนซากหายแล้วสัตว์เกิดใหม่ — ดู World.OnCorpseDisposed)
+    /// </summary>
+    public void ForgetAnimal(string entityId) => _animalSet.Remove(entityId);
+
     public void SyncAnimalVisibility()
     {
         AnimalManager manager = _world.AnimalManager;
@@ -205,10 +212,12 @@ public partial class Player
         // client/ObjectManager.cs:138 หารด้วย 1000 เอง ⇒ ต้องส่งเป็น **มิลลิวินาที**
         _world.BroadCast(CombatStatus(animal, AnimalStatus.Battle, lookAt: true, noticeAttack: true));
 
-        // ป้องกันของผู้เล่น: players.json → player.defense (ข้อมูลจริงเป็น 0 ⇒ กินเต็ม ๆ)
-        // เกราะจากชุดที่ใส่ยังไม่ได้คิด — ระบบค่าสถานะจากอุปกรณ์ยังไม่มี
+        // ป้องกันของผู้เล่น — ใช้ค่า Derived หลังรวมสกิล (players.json → player.defense ฐานเป็น 0)
+        // [7 ก.ย. 2026] แล้วคูณตัวลดดาเมจจากสกิลหมวดป้องกัน (ดู Player.SkillEffects.cs)
+        // ⚠️ เดิมใช้ค่าฐานดิบอย่างเดียว ⇒ เรียนสกิลป้องกันไปก็โดนสัตว์กัดเจ็บเท่าเดิม
         float value = Math.Max(CombatTuning.MinDamage,
-                               (float)Math.Round(animal.Attack - BattleDataStore.Stats.defense));
+                               (float)Math.Round((animal.Attack - CurrentDerivedDefense())
+                                                 * DamageTakenScale()));
 
         _world.BroadCast(new Damaged
         {
@@ -376,13 +385,24 @@ public partial class Player
 
         AnimalTypes.Info info = AnimalTypes.Get(animal.EntityType);
         string label = info?.DisplayName ?? info?.Name;
-        if (label != null) msg.EntityName = new Gettext(label);
 
         if (animal.IsAlive)
         {
+            if (label != null) msg.EntityName = new Gettext(label);
             msg.Interactions = new[] { (int)Shared.System.Interaction.Attack };
             return true;
         }
+
+        // [7 ก.ย. 2026] ซาก — ต่อเวลาถอยหลังไว้ท้ายชื่อ ผู้เล่นจะได้รู้ว่าเหลือเวลาแล่อีกเท่าไร
+        // ⚠️ ไม่บอก = แล่ค้างไว้แล้วซากหายไปกลางคันโดยไม่มีสัญญาณอะไรเลย
+        // EntityName เป็นช่องข้อความอิสระที่ฝั่งเกมเอาไปโชว์เป็นหัวเรื่องตอนแตะ (Touched.EntityName)
+        double leftSeconds = animal.DiedAt > 0.0
+            ? Math.Max(0.0, animal.DiedAt + AnimalManager.CorpseDisposeDelay - Gauge.CurrentTime)
+            : 0.0;
+        string countdown = leftSeconds > 0.0
+            ? $" (ซากหายในอีก {(int)leftSeconds / 60}:{(int)leftSeconds % 60:00} นาที)"
+            : string.Empty;
+        if (label != null) msg.EntityName = new Gettext(label + countdown);
 
         // ซากสัตว์ — ชำแหละด้วยทางเดียวกับเก็บของธรรมชาติทุกประการ
         // (Collect 506 + Touched.Collectible) ต่างแค่ collectible id มาจาก animal.json → drop_item
@@ -406,7 +426,8 @@ public partial class Player
         if (animal == null || !animal.IsAlive) return false;
 
         float bonus = attack.damage_bonus > 0f ? attack.damage_bonus : 1f;
-        float raw = CurrentAttackPower() * bonus;
+        // [7 ก.ย. 2026] สกิลหมวดต่อสู้เพิ่มดาเมจ (ดู Player.SkillEffects.cs) — ทางเดียวกับตีผู้เล่น
+        float raw = CurrentAttackPower() * bonus * OutgoingDamageScale();
 
         // เจาะเกราะจากท่า — ฟิลด์เดียวกับที่ใช้ตอนตีผู้เล่น (attack_info[0].armor_penetration)
         float defense = animal.Defense * (1f - Math.Clamp(attack.armor_penetration, 0f, 1f));
