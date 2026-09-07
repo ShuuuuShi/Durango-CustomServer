@@ -87,6 +87,7 @@ public partial class Player
     {
         // หมวดที่ขอมาเป็นความจริงของคำขอ — เดิมทับด้วย "sunset" เสมอ (Player.cs:483)
         // ว่าง = โปรโตคอลไม่ได้กำหนดมา ⇒ ใช้หมวดเรื่องหลักเป็นค่าตั้งต้น
+        EnsureDailyReset();
         string category = string.IsNullOrEmpty(msg.Category) ? EpicCategory : msg.Category;
 
         var todos = new List<QuestToDo>();
@@ -134,6 +135,7 @@ public partial class Player
 
     private void HandleGetQuestStateMsg(GetQuestState msg, uint seq)
     {
+        EnsureDailyReset();
         var states = new Dictionary<string, Shared.Quest.QuestState>();
         // client ส่งมาครั้งละ 1 id (QuestSystem.cs:207-209) แต่โปรโตคอลรองรับหลาย id ⇒ ทำครบ
         // ⚠️ key ว่างห้ามใส่ — Dictionary<string,_> โยน ArgumentNullException กับ null key

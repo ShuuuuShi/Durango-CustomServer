@@ -59,6 +59,16 @@ public partial class Player
         FlushQuestSave();
     }
 
+    void EnsureDailyReset()
+    {
+        if (!QuestCatalog.ShouldResetDaily(_context.QuestDailyResetDay)) return;
+        string today = QuestCatalog.CurrentResetDay();
+        ResetDailyQuests();
+        _context.QuestDailyResetDay = today;
+        OnContextChanged();
+        Console.WriteLine($"[เควส] {Short(EntityId)} รีเซ็ต Daily → {today}");
+    }
+
     void ResetDailyQuests()
     {
         foreach (QuestDef def in QuestCatalog.InCategory(QuestCatalog.DailyCategory))
@@ -125,11 +135,7 @@ public partial class Player
     public void NoteQuestEvent(QuestEventType ev, string detail = null, int amount = 1)
     {
         if (amount <= 0) return;
-        if (QuestCatalog.ShouldResetDaily(_context.QuestDailyResetDay))
-        {
-            ResetDailyQuests();
-            _context.QuestDailyResetDay = QuestCatalog.CurrentResetDay();
-        }
+        EnsureDailyReset();
 
         bool any = false;
         foreach (QuestDef def in QuestCatalog.InCategory(QuestCatalog.DailyCategory))
