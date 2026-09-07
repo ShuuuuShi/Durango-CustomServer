@@ -177,36 +177,84 @@ public partial class Player
         return changed;
     }
 
+    /// <summary>
+    /// ใส่สถานะถ้ายังไม่มีหรือหมดแล้ว — ไม่ต่ออายุของที่ยังอยู่
+    /// ใช้ตอนวนทุกเฟรม (ฝนยังตก / ยังยืนในน้ำ) จะได้ไม่ยิง StatusEffects ซ้ำ
+    /// </summary>
+    private bool EnsureTimedStatusEffect(string effectId, int level = 1)
+    {
+        if (_timedStatusEffects.TryGetValue(effectId, out TimedStatusEffect existing) &&
+            WorldStatusRules.IsActiveTimed(existing.Until, Times.UnixTimeNow()))
+        {
+            return false;
+        }
+        return ApplyTimedStatusEffect(effectId, level);
+    }
+
     /// <summary>ซิงก์ SE จากสภาพอากาศปัจจุบันของเกาะ</summary>
     public void SyncWeatherStatusEffects(string weather)
     {
-        bool changed = false;
-        // ฝน → wet (ต่ออายุระหว่างยังฝนตก)
-        if (string.Equals(weather, "rainy", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(weather, "heavy_rainy", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(weather, "climate_storm", StringComparison.OrdinalIgnoreCase))
-        {
-            changed |= ApplyTimedStatusEffect("wet", 1);
-        }
-
-        // ภูเขาไฟ
-        if (string.Equals(weather, "volcanic_storm", StringComparison.OrdinalIgnoreCase))
-        {
-            ClearTimedStatusEffect("volcanic_storm_sign");
-            changed |= ApplyTimedStatusEffect("volcanic_storm", 1);
-        }
-        else if (string.Equals(weather, "volcanic_sign", StringComparison.OrdinalIgnoreCase))
-        {
-            changed |= ApplyTimedStatusEffect("volcanic_storm_sign", 1);
-        }
-        else
-        {
-            // ออกจากเถ้าแล้วไม่รีเฟรช — ให้หมดตาม duration ใน JSON
-        }
-
-        if (changed)
+        if (SyncWeatherStatusEffectsCore(weather, refresh: true))
         {
             SendStatusEffects();
         }
+    }
+
+    /// <summary>
+    /// refresh=true ตอนอากาศเปลี่ยน/เพิ่งเข้าเกาะ — ต่ออายุทันที
+    /// refresh=false ตอนวนทุกเฟรม — ใส่คืนเฉพาะตอนหมดแล้ว (wet ใน JSON ยาว 120 วิ แต่ฝนเฟสถัดไป 300 วิ)
+    /// </summary>
+    private bool SyncWeatherStatusEffectsCore(string weather, bool refresh)
+    {
+        bool changed = false;
+        if (WorldStatusRules.IsRainyWeather(weather))
+        {
+            changed |= refresh
+                ? ApplyTimedStatusEffect("wet", 1)
+                : EnsureTimedStatusEffect("wet", 1);
+        }
+
+        if (WorldStatusRules.IsVolcanicStormWeather(weather))
+        {
+            changed |= ClearTimedStatusEffect("volcanic_storm_sign");
+            changed |= refresh
+                ? ApplyTimedStatusEffect("volcanic_storm", 1)
+                : EnsureTimedStatusEffect("volcanic_storm", 1);
+        }
+        else if (WorldStatusRules.IsVolcanicSignWeather(weather))
+        {
+            changed |= refresh
+                ? ApplyTimedStatusEffect("volcanic_storm_sign", 1)
+                : EnsureTimedStatusEffect("volcanic_storm_sign", 1);
+        }
+
+        return changed;
+    }
+
+    /// <summary>ยืนในน้ำ (มหาสมุทร/แม่น้ำ/ทะเลสาบ) → wet ตาม <c>Durango.Terrain.Util.IsWater</c></summary>
+    private bool SyncStandingWaterStatusEffect()
+    {
+        Movement[] movements = _context.AppearPlayer.Move.Movements;
+        if (movements == null || movements.Length == 0 ||
+            movements[0].Path == null || movements[0].Path.Length == 0)
+        {
+            return false;
+        }
+        WorldPosition pos = movements[0].Path[0].Position;
+        Point2 tile = WorldStatusRules.TileFromWorldPosition(pos.x, pos.y);
+        Shared.Region.Biome biome = WorldStatusRules.UnmaskBiome(_world.BiomeAt(tile));
+        if (!WorldStatusRules.IsWaterBiome(biome)) return false;
+        return EnsureTimedStatusEffect("wet", 1);
+    }
+
+    /// <summary>
+    /// ต่ออายุบัพโลกที่แหล่งยังอยู่ — เรียกทุกเฟรมหลังหมดอายุแล้ว
+    /// คืน true ถ้ามีสถานะเปลี่ยน (ผู้เรียกรวมกับ Expire แล้วค่อย Send ครั้งเดียว)
+    /// </summary>
+    private bool SyncWorldDrivenStatusEffects()
+    {
+        bool changed = SyncWeatherStatusEffectsCore(_world.Weather, refresh: false);
+        changed |= SyncStandingWaterStatusEffect();
+        return changed;
     }
 }
