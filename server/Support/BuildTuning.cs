@@ -33,6 +33,10 @@ public static class BuildTuning
     private static string _siteEnergy = "1 + (area * 2)";
     private static string _buildEnergy = "1";
     private static float _defaultDurability = 7f;
+    // constants.json → build : durability ของหลังชั่วคราว + สูตรรื้อ (มีตัวแปร durability)
+    private static float _defaultTimeLimitedDurability = 60f;
+    private static string _destructEnergy = "10 + durability / 2.";
+    private static string _destructTime = "5 + durability / 10.";
     private static float _cancelTime = 3f;
     private static float _capsulatingTime = 0.5f;
     private static float _placingTime = 0.5f;
@@ -44,6 +48,24 @@ public static class BuildTuning
     public static string SiteEnergy { get { EnsureLoaded(); return _siteEnergy; } }
     public static string BuildEnergy { get { EnsureLoaded(); return _buildEnergy; } }
     public static float DefaultDurability { get { EnsureLoaded(); return _defaultDurability; } }
+
+    /// <summary>durability ของหลังชนิดชั่วคราว — constants.json → build → default_time_limited_durability (= 60)</summary>
+    public static float DefaultTimeLimitedDurability { get { EnsureLoaded(); return _defaultTimeLimitedDurability; } }
+
+    /// <summary>พลังงานที่ใช้รื้อ — constants.json → build → destruct.energy ("10 + durability / 2.")</summary>
+    public static double DestructEnergy(float durability) => EvalByDurability(_destructEnergy, durability, 0.0);
+
+    /// <summary>วินาทีที่ใช้รื้อ — constants.json → build → destruct.time ("5 + durability / 10.")</summary>
+    public static double DestructTime(float durability) => EvalByDurability(_destructTime, durability, 0.0);
+
+    /// <summary>อ่านสูตรที่มีตัวแปร durability — อ่านไม่ออกคืน fallback (กฎเดียวกับ EvalByArea)</summary>
+    public static double EvalByDurability(string formula, float durability, double fallback)
+    {
+        EnsureLoaded();
+        var vars = new Dictionary<string, double> { ["durability"] = durability };
+        return StatFormula.TryEval(formula, vars, out double value) ? value : fallback;
+    }
+
     public static float CancelTime { get { EnsureLoaded(); return _cancelTime; } }
 
     /// <summary>วินาทีที่ใช้ "แพ็ก" สิ่งปลูกสร้างเก็บเป็นไอเทม (capsulating.capsulating_time.default)</summary>
@@ -124,6 +146,9 @@ public static class BuildTuning
         _siteEnergy = (string)build["site_selection"]?["energy"] ?? _siteEnergy;
         _buildEnergy = (string)build["building"]?["energy"] ?? _buildEnergy;
         _defaultDurability = (float?)build["default_durability"] ?? _defaultDurability;
+        _defaultTimeLimitedDurability = (float?)build["default_time_limited_durability"] ?? _defaultTimeLimitedDurability;
+        _destructEnergy = (string)build["destruct"]?["energy"] ?? _destructEnergy;
+        _destructTime = (string)build["destruct"]?["time"] ?? _destructTime;
         _cancelTime = (float?)build["cancel_time"] ?? _cancelTime;
         // capsulating.capsulating_time เป็นตารางแยกตามชนิด ({default, "0", "2", "4"})
         // ค่าจริงในไฟล์เท่ากันหมด (0.5) ⇒ ใช้ default ตัวเดียวพอ ไม่ต้องแยกตามชนิด

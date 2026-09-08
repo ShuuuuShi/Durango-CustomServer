@@ -32,6 +32,7 @@ internal static class LevelUpFxCheck
         CheckInsideHouseBuff();
         CheckFatigueTuning(dataDir);
         CheckActionFatigue();
+        CheckDestructCost();
 
         Console.WriteLine($"[fx-check] ผ่าน {_passed} · ตก {_failed}");
         return _failed == 0 ? 0 : 1;
@@ -223,6 +224,19 @@ internal static class LevelUpFxCheck
         float collect25 = ActionFatigue.Of("collect", 25f); // 0.4 * sqrt(25) = 2
         Expect(Math.Abs(collect25 - 2f) < 0.001f, "collect fatigue = 0.4*sqrt(25) = 2 (ได้ " + collect25 + ")");
         Expect(ActionFatigue.Of("craft", 0f) == 0f, "พลังงาน 0 → เหนื่อย 0 (ไม่หัก)");
+    }
+    static void CheckDestructCost()
+    {
+        // constants.json → build → destruct : energy "10 + durability / 2."  time "5 + durability / 10."
+        // durability = time_limited ? 60 : 7 — พิสูจน์ว่าสูตร (มีจุดท้าย) พาร์สได้ ไม่คืน fallback 0
+        Expect(Math.Abs(BuildTuning.DefaultTimeLimitedDurability - 60f) < 0.001f,
+            "default_time_limited_durability = 60 (ได้ " + BuildTuning.DefaultTimeLimitedDurability + ")");
+        double e7 = BuildTuning.DestructEnergy(7f), t7 = BuildTuning.DestructTime(7f);
+        Expect(Math.Abs(e7 - 13.5) < 0.001, "รื้อ durability 7: energy = 10+7/2 = 13.5 (ได้ " + e7 + ")");
+        Expect(Math.Abs(t7 - 5.7) < 0.001, "รื้อ durability 7: time = 5+7/10 = 5.7 (ได้ " + t7 + ")");
+        double e60 = BuildTuning.DestructEnergy(60f), t60 = BuildTuning.DestructTime(60f);
+        Expect(Math.Abs(e60 - 40.0) < 0.001, "รื้อ durability 60: energy = 10+60/2 = 40 (ได้ " + e60 + ")");
+        Expect(Math.Abs(t60 - 11.0) < 0.001, "รื้อ durability 60: time = 5+60/10 = 11 (ได้ " + t60 + ")");
     }
     static void Expect(bool cond, string title)
     {

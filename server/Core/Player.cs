@@ -174,7 +174,7 @@ public partial class Player
         });
         _connection.Recv(delegate(DestructArtifact msg, PacketHeader header)
         {
-            HandleDestructMsg(msg);
+            HandleDestructMsg(msg, header.Seq);
         });
         _connection.Recv(delegate(RestOn msg, PacketHeader header)
         {
@@ -1588,8 +1588,25 @@ public partial class Player
 
     /// <summary>
     /// รื้อสิ่งปลูกสร้าง — ปฏิเสธถ้ายังมีของในตู้ (ของจะหายถาวร ดู Player.Inventory.HasStoredItems)
+    ///
+    /// ═══ ทำไมต้องหน่วงเวลา ═══
+    /// ต้นฉบับเกม (client/Durango.Logic.Interactions/ArtifactInteractions.cs:309) ยิง DestructArtifact
+    /// แล้ว **รอ reply <c>Destructing</c>(2007) {Duration, ToolType}** เพื่อเล่นหลอดความคืบหน้า + ท่าทุบ
+    /// (OnDestructedReplied:433 — Onehand/Twohand/Barehand_Destroy) เดิมเซิร์ฟลบทันทีไม่ตอบ ⇒ หลัง
+    /// หายวับ ไม่มีหลอด ไม่มีท่า ไม่เสียพลังงานเลย
+    ///
+    /// ═══ ค่าทั้งหมดจากข้อมูลจริง ═══
+    /// <code>
+    /// constants.json → build → destruct : energy = "10 + durability / 2."  time = "5 + durability / 10."
+    ///                        → default_durability = 7 · default_time_limited_durability = 60
+    /// durability ของหลัง = time_limited ? 60 : 7  (entity_types/artifact.json → time_limited)
+    /// ToolType = weapon_framework ของเครื่องมือที่ถือ (performance.json) — onehand→1 twohand→2 อื่น→0
+    /// </code>
+    /// ⚠️ **การตีความ (บอกตรง ๆ):** บล็อก destruct ในไฟล์ระบุแค่ energy — ไม่ได้บอกว่าคิด fatigue ด้วย
+    ///    เลือกหัก fatigue หมวด "build" (SpendBuildEnergy) เพราะ destruct อยู่ใต้คีย์ <c>build</c> และให้เข้าชุด
+    ///    กับระบบความเหนื่อยต่อการกระทำ (การก่อสร้างทุกแบบเหนื่อย) — ถ้าไม่เอา ลบ SpendBuildEnergy เหลือหัก energy อย่างเดียวได้
     /// </summary>
-    private void HandleDestructMsg(DestructArtifact msg)
+    private void HandleDestructMsg(DestructArtifact msg, uint seq)
     {
         if (!MayTouchArtifact(msg.EntityId, "รื้อ")) return;
         // ⚠️ [6 ก.ย. 2026] ของในตู้ไม่ได้ถูกลบไปกับหลัง แต่จะหายจากไฟล์ในรอบเซฟถัดไป
@@ -1600,7 +1617,53 @@ public partial class Player
             Send(new Abort { Text = "ต้องเอาของออกจากตู้ก่อนรื้อ" });
             return;
         }
-        _world.DestructArtifact(msg.EntityId);
+
+        // durability ของหลัง — time_limited?60:7 (ไฟล์ไม่มี durability รายหลัง เหมือน BuildEstimation)
+        float durability = BuildTuning.DefaultDurability;
+        if (_world.ArtifactManager.Get(msg.EntityId) is { } artifact &&
+            SingletonDict<int, Yaml.ArtifactPrototype>.TryGetValue(artifact.EntityType, out Yaml.ArtifactPrototype proto) &&
+            proto.time_limited)
+        {
+            durability = BuildTuning.DefaultTimeLimitedDurability;
+        }
+
+        float duration = (float)Math.Max(0.0, BuildTuning.DestructTime(durability));
+        float energy = (float)Math.Max(0.0, BuildTuning.DestructEnergy(durability));
+
+        // หักพลังงาน+ความเหนื่อยก่อนตอบ (พลังงานไม่พอก็ยังรื้อได้ — ของจริงไม่บล็อก แค่หลอดลด)
+        SpendBuildEnergy(energy);
+
+        // ตอบ Destructing ที่ seq เดิม → client เล่นหลอด+ท่าตาม Duration/ToolType (reply ใบเดียว client auto-clean)
+        Send(new Destructing { Duration = duration, ToolType = EquippedToolType() }, seq);
+
+        // หน่วงตาม Duration แล้วค่อยลบจริง — ใช้คิวของ World (drain ใน Process บน main-thread)
+        // ไม่ใช้ System.Threading.Timer เพราะ callback รัน pool thread แล้วแตะ world = race กับลูปหลัก
+        if (duration <= 0.05f)
+        {
+            _world.DestructArtifact(msg.EntityId);
+        }
+        else
+        {
+            _world.ScheduleDestruct(msg.EntityId, duration);
+        }
+    }
+
+    /// <summary>
+    /// ชนิดท่าทุบของ <c>Destructing.ToolType</c> — อ่านจาก weapon_framework ของเครื่องมือที่ถืออยู่
+    /// (performance.json) 0 = มือเปล่า/เครื่องมืออื่น (Barehand_Destroy) · 1 = onehand · 2 = twohand
+    /// </summary>
+    private byte EquippedToolType()
+    {
+        foreach (var pair in _context.EquippedItems)
+        {
+            int index = _context.InventoryItems.FindIndex(item => item.Id == pair.Value);
+            if (index < 0) continue;
+            string fw = PerformanceYaml.GetWeapon(_context.InventoryItems[index].Prototype)?.WeaponFramework;
+            if (string.IsNullOrEmpty(fw)) continue;
+            if (fw.Equals("onehand", StringComparison.OrdinalIgnoreCase)) return 1;
+            if (fw.Equals("twohand", StringComparison.OrdinalIgnoreCase)) return 2;
+        }
+        return 0;
     }
 
     private void HandleDumpItemsMsg(DumpItems msg)

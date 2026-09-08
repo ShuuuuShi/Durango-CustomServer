@@ -44,6 +44,10 @@ public class World
 
     private readonly WorldContext _context;
 
+    /// <summary>คิวรื้อสิ่งปลูกสร้างที่ตั้งเวลาไว้ — (เวลาที่ครบ, entityId) drain ใน Process (main-thread)
+    /// เก็บในหน่วยความจำอย่างเดียว ไม่เซฟ: destruct จบใน 5-11 วิ ถ้าเซิร์ฟรีสตาร์ตกลางคัน หลังแค่ไม่ถูกรื้อ (ปลอดภัย)</summary>
+    private readonly List<(double Due, string EntityId)> _pendingDestructs = new();
+
     private readonly List<NaturalInfo> _addedNatural;
 
     private readonly List<Point2> _removedNatural;
@@ -311,6 +315,9 @@ public class World
             player.SyncAnimalVisibility();
         }
 
+        // รื้อสิ่งปลูกสร้างที่ครบเวลาแล้ว — นอกลูปผู้เล่น + ไม่ผูกกับ players.Count เพื่อให้จบแม้คนสุดท้ายออกไป
+        ProcessDestructs(Gauge.CurrentTime);
+
         // สัตว์เดินเล่น — ต้องอยู่นอกลูปผู้เล่น เพราะเป็นเรื่องของสัตว์ ไม่ใช่ของใครคนใดคนหนึ่ง
         // (ถ้าไม่มีใครอยู่บนเกาะก็ไม่ต้องเดิน จะได้ไม่เปลืองแรงเปล่า)
         if (_players.Count > 0)
@@ -535,6 +542,34 @@ public class World
     }
 
     private void OnArtifactDisappeared(AppearArtifact aa) => ArtifactDisappeared?.Invoke(aa);
+
+    /// <summary>ตั้งเวลารื้อสิ่งปลูกสร้างอีก <paramref name="seconds"/> วินาที (ระหว่างนั้น client เล่นหลอด+ท่าทุบ)</summary>
+    public void ScheduleDestruct(string entityId, double seconds)
+    {
+        if (string.IsNullOrEmpty(entityId)) return;
+        double due = Gauge.CurrentTime + seconds;
+        // ช่องเดิมที่ค้างคิวอยู่แล้ว ไม่ซ้ำ — เอาเวลาที่ครบก่อน (กันกดรัว)
+        int i = _pendingDestructs.FindIndex(e => e.EntityId == entityId);
+        if (i >= 0)
+        {
+            if (due < _pendingDestructs[i].Due) _pendingDestructs[i] = (due, entityId);
+            return;
+        }
+        _pendingDestructs.Add((due, entityId));
+    }
+
+    /// <summary>ลบหลังที่ครบเวลาแล้ว — เรียกจาก Process (main-thread) เหมือน ProcessRegrow</summary>
+    private void ProcessDestructs(double now)
+    {
+        if (_pendingDestructs.Count == 0) return;
+        for (int i = _pendingDestructs.Count - 1; i >= 0; i--)
+        {
+            if (now < _pendingDestructs[i].Due) continue;
+            string entityId = _pendingDestructs[i].EntityId;
+            _pendingDestructs.RemoveAt(i);
+            DestructArtifact(entityId);   // ลบจริง + broadcast ArtifactDisappeared + Save()
+        }
+    }
 
     public void ExtendFloor(string entityId, bool withRoof)
     {
