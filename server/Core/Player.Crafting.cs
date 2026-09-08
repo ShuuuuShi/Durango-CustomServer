@@ -506,6 +506,9 @@ public partial class Player
         AddItems(products);                                   // เข้ากระเป๋า + OnContextChanged (เซฟ)
         Send(new InventoryUpdated { EntityId = EntityId, Items = products });
 
+        // เครื่องมือที่ใช้คราฟต์สึก (ขวาน/มีด/ค้อน ฯลฯ) — เส้นเดียวกับเก็บของ · stick ไม่สึก (ไม่ใช่ tool)
+        WearTool(msg.ToolItemId);
+
         // [7 ก.ย. 2026] ให้ exp ตอนหักของ+เติมของแล้ว — ไม่รอ Timer/FinishCraft
         // (inventory เปลี่ยนตั้งแต่ตรงนี้แล้ว ถ้าให้ตอนส่ง Crafted จะซ้ำ/ช้าโดยใช่เหตุ)
         AddExpForAction(SkillTuning.CraftWeight, MapRecipeSkillCategory(recipe.category),
@@ -989,6 +992,7 @@ public partial class Player
         if (consumedIds.Length > 0)
             Send(new InventoryUpdated { EntityId = EntityId, RemovedItemIds = consumedIds });
         Send(new InventoryUpdated { EntityId = EntityId, Items = new[] { cooked } });
+        WearTool(msg.ToolItemId);   // เครื่องมือทำอาหารสึก (ถ้าเป็น tool — stick ไม่สึก)
         AddExpForAction(SkillTuning.CraftWeight, MapRecipeSkillCategory(recipe.category), $"ทำอาหาร {msg.RecipeId}");
         NoteQuestEvent(Shared.Quest.QuestEventType.Crafted, recipe.category);
         SpendCraftEnergy(recipe);
