@@ -366,6 +366,58 @@ public class ArtifactManager
         RaiseStateUpdated(entityId, value.States);
     }
 
+    /// <summary>prototype เมล็ดที่ปลูกบนแปลงนี้ — <c>null</c> ถ้ายังไม่ปลูกหรือเก็บไปแล้ว</summary>
+    public string PlantedSeed(string entityId) =>
+        !string.IsNullOrEmpty(entityId) && _plantings.TryGetValue(entityId, out string seed) ? seed : null;
+
+    /// <summary>แปลงนี้มีพืชโตเต็มที่พร้อมเก็บหรือยัง (ยังไม่ล้างสถานะ)</summary>
+    public bool TryGetMatureCrop(string entityId, double now, out string seedPrototypeId, out Crop crop)
+    {
+        seedPrototypeId = null;
+        crop = null;
+        if (string.IsNullOrEmpty(entityId) || !_artifacts.TryGetValue(entityId, out var artifact)) return false;
+        if (artifact.States.Farming is not { } farming) return false;
+        if (!FarmHarvest.IsMature(farming, now)) return false;
+        if (!_plantings.TryGetValue(entityId, out seedPrototypeId) || string.IsNullOrEmpty(seedPrototypeId))
+        {
+            seedPrototypeId = null;
+            return false;
+        }
+        crop = CropYaml.Get(seedPrototypeId);
+        if (crop == null || FarmHarvest.ProductPrototypes(seedPrototypeId, crop).Length == 0)
+        {
+            seedPrototypeId = null;
+            crop = null;
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// ล้าง Farming + โมเดลต้น + plantings หลังเก็บเกี่ยวสำเร็จ
+    ///
+    /// ต้องล้างทั้งสามอย่างพร้อมกัน — ล้างแค่โมเดลแล้ว <see cref="ProcessFarming"/> จะเสกต้นโตกลับมาเอง
+    /// </summary>
+    public bool ClearFarming(string entityId)
+    {
+        if (string.IsNullOrEmpty(entityId) || !_artifacts.TryGetValue(entityId, out var artifact)) return false;
+        if (!artifact.States.Farming.HasValue
+            && string.IsNullOrEmpty(artifact.Display.Crop)
+            && !_plantings.ContainsKey(entityId))
+        {
+            return false;
+        }
+
+        artifact.States.Farming = null;
+        artifact.Display.Crop = null;
+        artifact.Display.EntityId = artifact.EntityId;
+        _plantings.Remove(entityId);
+        _artifacts[entityId] = artifact;
+        ArtifactDisplayUpdated?.Invoke(artifact.Display);
+        RaiseStateUpdated(entityId, artifact.States);
+        return true;
+    }
+
     /// <summary>
     /// สลับต้นอ่อน → ต้นโตเมื่อครบเวลา · เรียกจาก World.Process
     ///

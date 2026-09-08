@@ -1299,7 +1299,38 @@ public partial class Player
                 //  → Open(entityId, tile, RouteType.Normal) → ยิง GetRoutes มาที่เซิร์ฟ)
                 // เกมไม่ได้ดู components เอง มันเชื่อรายการที่เซิร์ฟส่งมาใน Touched.Interactions ล้วน ๆ
                 if (blueprint.Components.Contains("Port")) list.Add(Shared.System.Interaction.SailingRoutes);
-                if (blueprint.Components.Contains("Growable") && flag) list.Add(Shared.System.Interaction.Plant);
+                // [8 ก.ย. 2026] แปลงเพาะปลูก — ปลูกเมื่อว่าง · เก็บเกี่ยวเมื่อต้นโต (Collect + Collectible)
+                //
+                // ⚠️ เดิมผูก Plant กับ `flag` (Mode.Editable) ⇒ เซิร์ฟที่รันโหมด Online
+                // ซึ่งเป็นค่าจริงใน data/config.json **แตะแปลงแล้วไม่มีปุ่มปลูก** ทั้งที่ SeedPlant ทำได้
+                // ฝั่งเกมไม่ได้ดู components เอง มันเชื่อรายการที่เซิร์ฟส่งมาล้วน ๆ
+                // (client/Durango.Logic.Interactions/ArtifactInteractions.cs:90 Plant)
+                //
+                // เก็บเกี่ยวใช้ Collect ชุดเดียวกับของธรรมชาติ ไม่ใช่ message ใหม่:
+                //   Touched.Collectible.Generators → GatheringSystem.SetCollectible โชว์ปุ่ม
+                //   → Collect(2026) → ของจาก grows_to เข้ากระเป๋า แล้วล้างแปลง
+                // ป้ายข้อมูลฝั่งเกมเขียน "수확 가능" เมื่อ GrowsUntil ถึงแล้ว (ArtifactInfoMainWidget.cs:534)
+                if (blueprint.Components.Contains("Growable"))
+                {
+                    Farming? farming = touched?.States.Farming;
+                    bool occupied = farming.HasValue;
+                    bool mature = occupied && FarmHarvest.IsMature(farming.Value, Gauge.CurrentTime);
+                    if (!occupied && (mine || flag))
+                    {
+                        list.Add(Shared.System.Interaction.Plant);
+                    }
+                    if (mature && (mine || flag))
+                    {
+                        string seed = _world.ArtifactManager.PlantedSeed(touch.EntityId);
+                        Crop harvestCrop = CropYaml.Get(seed);
+                        Collectible harvest = FarmHarvest.BuildCollectible(touch.EntityId, seed, harvestCrop);
+                        if (harvest.Generators is { Length: > 0 })
+                        {
+                            list.Add(Shared.System.Interaction.Collect);
+                            msg.Collectible = harvest;
+                        }
+                    }
+                }
                 // [5 ก.ย. 2026] กรง — ไม่ใส่ 2 บรรทัดนี้ แตะกรงแล้วไม่มีปุ่มอะไรขึ้นเลย
                 // (client/Durango.UI/GrowCageGroup.cs:62 ผูกหน้าจอไว้กับ Interaction.Cage)
                 // สถานะความจุกรงเติมให้ตอนสร้าง/โหลดโลกแล้วที่ Support/CageTypes.cs
