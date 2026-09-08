@@ -2,47 +2,19 @@ using System;
 using System.Collections.Generic;
 using Durango.Network;
 using Messages;
+using Shared.Ability;
+using Shared.Item;
 
 namespace Durango.Online;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 //  ไร่นา / พืช / ไฟ / ผลของสิ่งปลูกสร้าง
 //
-//  กลุ่มนี้คือ "คำสั่งที่ยิงจากเมนูแตะสิ่งปลูกสร้าง" ที่เซิร์ฟยังไม่มี handler เลยสักตัว
-//  (grep -rn "delegate(FireBurnable" ฯลฯ ใน server/Core/ ก่อนเขียน = ไม่เจอสักตัว)
-//  จุดยิงเกือบทั้งหมดอยู่ที่ client/Durango.Logic.Interactions/ArtifactInteractions.cs
-//  ยกเว้น ChangeFarmingEncyclopediaMastery ที่มาจาก client/FarmingEncyclopediaSystem.cs:63
+//  เก็บเกี่ยวแปลงที่โตแล้วเดินได้แล้ว: Touch → Collectible ของ grows_to → Collect → ของเข้ากระเป๋า
+//  ดู TryHandleFarmHarvest / HandleTouchMsg (Growable) / ArtifactManager.ClearFarming
 //
-//  ═══ อะไรทำจริงได้ อะไรทำไม่ได้ (และทำไม) ═══
-//
-//  ✔ FireBurnable / ExtinguishBurnable — **ทำจริงได้ครบ**
-//    เพราะ "ติดไฟ/ดับ" ในเกมนี้คือการสลับโมเดลอย่างเดียว (default_look ↔ default_look + "_burning")
-//    ซึ่งมี API สาธารณะรองรับอยู่แล้ว: ArtifactManager.SetDisplayPart(entityId, slot, model)
-//    → ยิง ArtifactDisplayUpdated → Core/Player.cs:87 ส่งให้ทุกคนบนเกาะ + Core/World.cs:381 เซฟ
-//    ตรวจกับข้อมูลจริงแล้ว: prototype ที่มี component "Burnable" มี 19 ชนิด
-//    (entity_types/artifact.json: 7000 bonfire · 7111 s02_bonfire · 6011 kitchen_01 · 7018 kiln_01 …)
-//    และ **ทั้ง 19 ชนิดมีโมเดล <default_look>_burning อยู่จริง** ใน building/artifact_models.json
-//    ยิ่งกว่านั้นทุกชนิดไม่มี slot ไหนให้ looks เลย ⇒ ตอนสร้างเสร็จมันตกลงมาที่ช่อง "common" เสมอ
-//    (Core/Player.Building.cs:1088-1095 FillRemainingDisplayParts — เงื่อนไข Burnable ตัวเดียวกัน)
-//    ⇒ สลับช่อง "common" คือทางที่ถูก ไม่ใช่การเดา
-//
-//  ✘ ที่เหลือตอบ Abort (มีข้อความไทยเสมอ — ห้าม default(Abort) เพราะ Text=null ทำฝั่งเกมแครช)
-//    เหตุผลรายตัวเขียนกำกับไว้ที่ handler ทุกตัว สรุปสั้น ๆ:
-//      · แก้ ArtifactState.Farming / Crack / Effector ไม่ได้ — Core/ArtifactManager.cs ไม่เปิด API
-//        ให้แก้สามตัวนี้ (มีแต่ SeedPlant/ProcessFarming ที่ตั้งค่าเอง · _artifacts เป็น private
-//        และ AppearArtifact เป็น struct ⇒ Get() คืน "สำเนา" แก้แล้วไม่มีผล)
-//      · ไม่มีระบบเงินตรา Gem / บัตรกำนัล — Core/Player.Inventory.cs:666 ส่ง Wallet = null
-//        ⇒ คำสั่งที่ "จ่ายเงินแล้วข้ามเวลา" หักเงินจริงไม่ได้ ให้ฟรีก็เท่ากับโกงระบบเวลาสร้าง
-//    ตอบ Abort ดีกว่าเงียบ: ฝั่งเกมมี global On<Abort> (client/GameManager.cs:269,309)
-//    ที่เอา Text ไปขึ้น SystemMsg ⇒ ผู้เล่นรู้ทันทีว่าไม่มีระบบนี้ แทนที่จะยืนงงหน้าเมนู
-//
-//  ⚠️ เซิร์ฟยังไม่ได้ "โชว์ปุ่ม" ให้คำสั่งกลุ่มนี้เลย — Core/Player.cs:1160-1230 (HandleTouchMsg)
-//     ยังไม่ได้ใส่ค่าเหล่านี้ลงใน Touched.Interactions (เลขจาก client/InteractionData/Interaction.cs):
-//       Sprinkle=419 · Uproot=511 · Fire=512 · Extinguish=513 · GrowRapidly=520
-//       TakeEffect=531 · Invest=608 · SkipPostprocess=10251
-//     ⇒ ต่อให้ handler พร้อมแล้ว ปุ่มก็ยังไม่ขึ้น เพราะฝั่งเกมเชื่อรายการที่เซิร์ฟส่งมาล้วน ๆ
-//     ไฟล์นั้นมีเจ้าของอยู่ (ห้ามแตะในงานนี้) — ฝากไว้ให้คนต่อสายทีหลัง
-//     ตัวที่ควรต่อก่อนคือ Fire/Extinguish เพราะเป็นตัวเดียวในไฟล์นี้ที่ทำงานได้จริงครบวง
+//  ✘ รดน้ำ / ใส่ปุ๋ย / ถอน / เร่งโต ยัง Abort (ไม่บล็อกเส้นเก็บเกี่ยว)
+//    เหตุผลรายตัวเขียนกำกับไว้ที่ handler
 // ═══════════════════════════════════════════════════════════════════════════════════
 
 public partial class Player
@@ -229,6 +201,164 @@ public partial class Player
         {
             Send(new Abort { Text = "ยังไม่เปิดใช้งานระบบข้ามเวลาด้วยเพชร" }, header.Seq);
         });
+    }
+
+    /// <summary>
+    /// เก็บเกี่ยวแปลงที่โตแล้ว — ใช้ message <c>Collect</c> ชุดเดียวกับของธรรมชาติ
+    ///
+    /// คืน <c>true</c> เมื่อเป้าเป็นแปลงที่มี Farming (จัดการแล้ว ทั้งสำเร็จและปฏิเสธ)
+    /// คืน <c>false</c> เมื่อไม่ใช่แปลง ให้ <c>HandleCollectMsg</c> ไปต่อสายของธรรมชาติ/ซาก
+    ///
+    /// ไม่ยิง <c>NoteQuestEvent(Farmed)</c> — Daily <c>daily_farming_a_01</c> นับตอนปลูกเท่านั้น
+    /// ไม่ยิง <c>NoteQuestEvent(Collected)</c> — อย่าไปเดินเควสเก็บของธรรมชาติ
+    /// </summary>
+    private bool TryHandleFarmHarvest(Collect msg, uint seq)
+    {
+        AppearArtifact? found = _world.ArtifactManager.Get(msg.EntityId);
+        if (found is not { } artifact) return false;
+        if (!artifact.States.Farming.HasValue) return false;
+
+        double now = Gauge.CurrentTime;
+        if (!_world.ArtifactManager.TryGetMatureCrop(msg.EntityId, now, out string seed, out Crop crop))
+        {
+            RejectCollect(seq, "พืชยังไม่โตเต็มที่", msg);
+            return true;
+        }
+
+        if (!string.Equals(msg.GeneratorId, FarmHarvest.GeneratorId(crop), StringComparison.Ordinal))
+        {
+            RejectCollect(seq, $"ไม่มี generator '{msg.GeneratorId}' ของแปลงนี้", msg);
+            return true;
+        }
+
+        string owner = _world.ArtifactManager.OwnerOf(msg.EntityId);
+        if (!string.IsNullOrEmpty(owner) && !string.Equals(owner, EntityId, StringComparison.Ordinal))
+        {
+            RejectCollect(seq, "ไม่ใช่แปลงของคุณ", msg);
+            return true;
+        }
+
+        if (!IsWithinCollectRange(artifact.Tile))
+        {
+            RejectCollect(seq, "อยู่ไกลเกินไป", msg);
+            return true;
+        }
+
+        var items = new List<Item>();
+        foreach (string proto in FarmHarvest.ProductPrototypes(seed, crop))
+        {
+            Item? item = Cheats.MakeItem(proto, 1);
+            if (!item.HasValue) continue;
+            Item value = item.Value;
+            value.CollectibleId = crop.GrowsTo;
+            value.GeneratorId = FarmHarvest.GeneratorId(crop);
+            items.Add(value);
+        }
+        if (items.Count == 0)
+        {
+            RejectCollect(seq, "ไม่พบไอเทมผลผลิต", msg);
+            return true;
+        }
+
+        if (!_world.ArtifactManager.ClearFarming(msg.EntityId))
+        {
+            RejectCollect(seq, "ล้างแปลงไม่สำเร็จ", msg);
+            return true;
+        }
+
+        float duration = Math.Max(GatheringTuning.MinCollectSeconds,
+            CollectibleTable.Duration(CollectibleTable.Effort(1)));
+        var collected = new Collected
+        {
+            Items = items.ToArray(),
+            Result = Result.Success,
+            ActionInfo = new ActionInfo
+            {
+                ActionLevel = 1,
+                PotentialLevel = 1,
+                RelatedCategory = Shared.Skill.Category.Farming,
+                RelatedAbility = Derived.Invalid,
+                SuccessRatio = 1f
+            },
+            RanOut = true
+        };
+
+        Send(default(ReplySequenceMark), seq);
+        Send(new Messages.Timer { Duration = duration }, seq);
+        Console.WriteLine($"[ปลูก] {Short(EntityId)} เก็บเกี่ยว {crop.GrowsTo} ×{items.Count} " +
+                          $"จาก {Short(msg.EntityId)} — รอ {duration:0.#} วิ");
+        ScheduleFarmHarvestFinish(collected, items, seq, duration);
+        OnContextChanged();
+        return true;
+    }
+
+    /// <summary>
+    /// ตอบ <c>GetCollectible</c> ของแปลง — ฝั่งเกมยิงมาเมื่อได้ <c>CollectibleChanged</c>
+    /// (เส้นเก็บของธรรมชาติ) แปลงที่โตแล้วยังต้องได้ generator ชุดเดิม
+    /// </summary>
+    private bool TrySendFarmCollectible(string entityId, uint seq)
+    {
+        AppearArtifact? found = _world.ArtifactManager.Get(entityId);
+        if (found is not { } artifact || !artifact.States.Farming.HasValue) return false;
+
+        if (_world.ArtifactManager.TryGetMatureCrop(entityId, Gauge.CurrentTime, out string seed, out Crop crop))
+        {
+            Send(FarmHarvest.BuildCollectible(entityId, seed, crop), seq);
+        }
+        else
+        {
+            Send(new Collectible { EntityId = entityId, Generators = Array.Empty<Generator>() }, seq);
+        }
+        return true;
+    }
+
+    private void ScheduleFarmHarvestFinish(Collected collected, List<Item> items, uint seq, float duration)
+    {
+        if (duration <= 0f || duration > GatheringTuning.MaxCollectSeconds)
+        {
+            CompleteFarmHarvestAfterDelay(collected, items, seq);
+            return;
+        }
+
+        Collected collectedCopy = collected;
+        List<Item> itemsCopy = items;
+        uint seqCopy = seq;
+        System.Threading.Timer timer = null;
+        timer = new System.Threading.Timer(delegate
+        {
+            try
+            {
+                CompleteFarmHarvestAfterDelay(collectedCopy, itemsCopy, seqCopy);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"[ปลูก] จบการเก็บเกี่ยวไม่สำเร็จ: {e.Message}");
+                try { FinishCollect(collectedCopy, seqCopy); } catch { /* ignore */ }
+            }
+            finally
+            {
+                lock (_collectTimers)
+                {
+                    _collectTimers.Remove(timer);
+                }
+                timer?.Dispose();
+            }
+        }, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+        lock (_collectTimers)
+        {
+            _collectTimers.Add(timer);
+        }
+        timer.Change((int)(duration * 1000f), System.Threading.Timeout.Infinite);
+    }
+
+    private void CompleteFarmHarvestAfterDelay(Collected collected, List<Item> items, uint seq)
+    {
+        AddItems(items);
+        Send(new InventoryUpdated { EntityId = EntityId, Items = items.ToArray() });
+        AddExpForAction(SkillTuning.GatherWeight, Shared.Skill.Category.Farming, "เก็บเกี่ยวพืช");
+        FinishCollect(collected, seq);
+        OnContextChanged();
+        Console.WriteLine($"[ปลูก] {Short(EntityId)} จบเก็บเกี่ยว · ของ {items.Count} ชิ้น");
     }
 
     /// <summary>

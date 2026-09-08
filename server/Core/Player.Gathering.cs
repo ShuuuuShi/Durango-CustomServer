@@ -206,6 +206,8 @@ public partial class Player
 
     private void HandleGetCollectibleMsg(GetCollectible msg, uint seq)
     {
+        if (TrySendFarmCollectible(msg.EntityId, seq)) return;
+
         _touchedNaturals.TryGetValue(msg.Tile, out ushort entityType);
         AnimalManager.Animal animal = _world.AnimalManager?.Get(msg.EntityId);
         if (animal != null && !animal.IsAlive) entityType = animal.EntityType;
@@ -220,6 +222,9 @@ public partial class Player
 
     private void HandleCollectMsg(Collect msg, uint seq)
     {
+        // แปลงเพาะปลูกที่โตแล้วใช้ Collect ชุดเดียวกับของธรรมชาติ (ดู Player.Farm.cs)
+        if (TryHandleFarmHarvest(msg, seq)) return;
+
         // ซากสัตว์: ฝั่งเกมส่ง Tile มาเป็น (-1,-1) เพราะสัตว์ไม่ได้อยู่กลางช่องเหมือนต้นไม้
         // ⇒ ถ้าหาด้วย tile ไม่เจอ ให้ลองหาด้วย EntityId (สัตว์มี id จริง ต่างจากของธรรมชาติ)
         AnimalManager.Animal carcass = _world.AnimalManager?.Get(msg.EntityId);
