@@ -46,6 +46,42 @@ internal static class ItemColorRepair
         }
     }
 
+    /// <summary>
+    /// ของกินได้ต้องมี ModifiableCount > 0 ถึงจะปรุงได้ (client/Crafting/RecipeSlot.cs:32)
+    /// ของเก่าที่สร้างตอน ModifiableCount=0 จะปรุงไม่ได้ตลอดไป — เติมให้ 1 เฉพาะชิ้นที่ยัง 0
+    /// (ต้นฉบับออนไลน์คำนวณค่านี้เอง เราไม่มีข้อมูล ⇒ cook-once ตามกลไก)
+    /// </summary>
+    public static void EnsureFoodModifiable([CanBeNull] List<Item> items, string where)
+    {
+        if (items == null || items.Count == 0) return;
+        int fixedCount = 0;
+        for (int i = 0; i < items.Count; i++)
+        {
+            Item item = items[i];
+            if (item.ModifiableCount > 0 || !IsEatable(item)) continue;
+            item.ModifiableCount = 1;
+            items[i] = item;
+            fixedCount++;
+        }
+        if (fixedCount > 0)
+        {
+            Console.WriteLine($"[ปรุง] เติมสิทธิ์ปรุงให้ของกินใน{where} {fixedCount} ชิ้น");
+        }
+    }
+
+    private static bool IsEatable(Item item)
+    {
+        if (item.Tags != null)
+        {
+            foreach (Tag t in item.Tags)
+            {
+                if (string.Equals(t.Id, "eatable", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+        }
+        Prototype proto = PrototypeYaml.GetItemPrototype(item.Prototype, item.Level);
+        return proto?.Tags != null && proto.Tags.ContainsKey("eatable");
+    }
+
     /// <summary>คืน true ถ้าเปลี่ยนสีให้จริง</summary>
     private static bool TryRecolor(ref Item item)
     {

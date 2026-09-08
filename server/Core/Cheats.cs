@@ -58,6 +58,14 @@ public static class Cheats
         }
         value.Tags = list.ToArray();
 
+        // ของกินได้ต้องมี ModifiableCount > 0 ถึงจะเอาไปปรุงได้
+        // (client/Crafting/RecipeSlot.cs:32 ช่อง ModifyBase ต้องการ) — ข้อมูลเกมไม่เก็บค่านี้
+        // (ต้นฉบับออนไลน์คำนวณเอง) ⇒ ให้ของกินปรุงได้ครั้งเดียว (cook-once)
+        if (itemPrototype.Tags != null && itemPrototype.Tags.ContainsKey("eatable"))
+        {
+            value.ModifiableCount = 1;
+        }
+
         // เงื่อนไขการซ่อม — ไม่แนบ ⇒ ฝั่งเกมถือว่า "ซ่อมไม่ได้" แล้วหน้าต่างซ่อมไม่เปิดเลย
         // (client/Durango.Logic.Item/ItemData.cs:107 IsRepairable) ดูเหตุผลเต็มที่ RepairTuning
         value.RepairRequirement = RepairTuning.Of(itemPrototype, level);
