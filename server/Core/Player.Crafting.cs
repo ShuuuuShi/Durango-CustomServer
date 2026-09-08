@@ -7,6 +7,7 @@ using Durango.Utils;
 using Messages;
 using MsgPack;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Shared.Item;
 using UnityEngine;
 using Yaml;
@@ -135,6 +136,7 @@ public class CraftRecipeData
     public CraftRecipeSlotData[] slots;
     public CraftRecipeOutput[] prototypes;                  // ของที่ได้แบบมีเงื่อนไข (ทับ prototype_id)
     public Shared.Ability.Derived? required_ability;
+    public string required_ability_value;   // สูตร ra เช่น "0.5 * level" — ใช้คิดโอกาส great success
     public string required_recipe;
 
     // ── type=Modify (ทำอาหาร) ── อ่านตรงจาก recipes.json ────────────────────────────
@@ -173,6 +175,54 @@ public class CraftRecipeCriterion
 /// ไม่ไปเสียบใน Support/DataStore.Load เพราะไฟล์นั้นเป็นของระบบอื่น (แก้พร้อมกันแล้วชนกัน)
 /// และ Json.DataDir ถูกตั้งไว้แล้วตั้งแต่ DataStore.Load ⇒ อ่านไฟล์ที่นี่ได้ตรง ๆ
 /// </summary>
+/// <summary>
+/// โอกาสคราฟต์ "สำเร็จยอดเยี่ยม" — สูตร/ค่าจาก constants.json -> craft_great_success (ของ NEXON เป๊ะ)
+///   ability_result = pa / ra  (pa=ความสามารถคราฟต์ของผู้เล่น, ra=ที่สูตรต้องการ)
+///   result_ratio   = 0.12 * ability_result * max_ratio * (1 - (ra-30)*(ra-120)/3600)
+///   หนีบใน [min_success_rate, max_success_rate]
+/// max_ratio แยกตามหมวด (คีย์ = required_ability เช่น 217=cook 0.1, 210=weaponcraft 0.2)
+///
+/// ⚠️ ผล "great" ปรับปรุงของยังไงไม่มีในข้อมูล (ตรรกะอยู่ในเซิร์ฟออนไลน์ NEXON) 
+///    -> ตีความว่า great = ได้ของ "เลเวลเต็ม" (max_level = potential) ซึ่งเป็นของดีสุดที่สูตรทำได้
+/// </summary>
+public static class CraftGreatSuccessTuning
+{
+    private static bool _loaded;
+    private static float _minRate = 0.1f;
+    private static float _maxRate = 0.3f;
+    private static readonly Dictionary<string, float> _maxRatio = new();
+    private static float _defaultRatio = 0.1f;
+
+    private static void EnsureLoaded()
+    {
+        if (_loaded) return;
+        _loaded = true;
+        JObject root = Json.ReadFromFile<JObject>("constants");
+        if (root?["craft_great_success"] is not JObject g) return;
+        _minRate = (float?)g["min_success_rate"] ?? _minRate;
+        _maxRate = (float?)g["max_success_rate"] ?? _maxRate;
+        if (g["max_ratio"] is JObject mr)
+        {
+            foreach (JProperty pr in mr.Properties())
+            {
+                float v = (float?)pr.Value ?? 0f;
+                if (pr.Name == "default") _defaultRatio = v;
+                else _maxRatio[pr.Name] = v;
+            }
+        }
+    }
+
+    /// <summary>โอกาส great success (0..maxRate) — pa,ra,หมวด(required_ability)</summary>
+    public static float Chance(float pa, float ra, int abilityKey)
+    {
+        EnsureLoaded();
+        if (ra <= 0f) return _minRate;
+        float maxRatio = _maxRatio.TryGetValue(abilityKey.ToString(), out float r) ? r : _defaultRatio;
+        double abilityResult = pa / ra;
+        double resultRatio = 0.12 * abilityResult * maxRatio * (1.0 - (ra - 30.0) * (ra - 120.0) / 3600.0);
+        return (float)Math.Clamp(resultRatio, _minRate, _maxRate);
+    }
+}
 public static class CraftRecipeStore
 {
     private static readonly object Lock = new();
@@ -436,7 +486,11 @@ public partial class Player
 
         if (isCook) { HandleCookResult(recipe, msg, materials, seq); return; }
 
-        Item[] products = MakeProducts(recipe, msg.Materials, materials);
+        // [8 ก.ย. 2026] สุ่ม "สำเร็จยอดเยี่ยม" ตามสูตร NEXON — great = ได้ของเลเวลเต็ม (potential)
+        int normalLevel = ProductLevel(recipe, materials);
+        int maxMatLevel = materials.Count > 0 ? materials.Max(m => m.Level) : normalLevel;
+        Result craftResult = RollCraft(recipe, normalLevel, maxMatLevel, out int finalLevel);
+        Item[] products = MakeProducts(recipe, msg.Materials, materials, finalLevel);
         if (products.Length == 0)
         {
             Send(new Abort { Text = "สูตรนี้ไม่มีของที่ผลิตได้" }, seq);
@@ -462,7 +516,7 @@ public partial class Player
 
         var crafted = new Crafted
         {
-            Result = Result.Success,
+            Result = craftResult,
             ActionInfo = MakeActionInfo(recipe, products[0].Level),
             Items = products
         };
@@ -692,12 +746,62 @@ public partial class Player
     /// ของที่ได้จากสูตร — prototype_id เป็นค่าเริ่มต้น และ prototypes[] ทับได้ตามวัตถุดิบที่ใส่
     /// (ในไฟล์มี 85 สูตรที่มี prototypes เช่น needle → needle_bone เมื่อช่อง main เป็นของที่มี tag "bone")
     /// </summary>
+    private static readonly System.Random _craftRng = new System.Random();
+
+    /// <summary>
+    /// สุ่มผลคราฟ — "สำเร็จยอดเยี่ยม" (great) ตามสูตร NEXON ⇒ ได้ของเลเวลเต็ม (potential = max_level)
+    /// ไม่ roll ล้มเหลว เพราะสูตร success_probability ต้องมี correction ที่ไม่มีในข้อมูล (ไม่เดา)
+    /// </summary>
+    private Result RollCraft(CraftRecipeData recipe, int normalLevel, int maxMaterialLevel, out int finalLevel)
+    {
+        finalLevel = normalLevel;
+        float chance = GreatSuccessChance(recipe, normalLevel);
+        if (chance > 0f && _craftRng.NextDouble() < chance)
+        {
+            // great = ได้คุณภาพดีสุดเท่าที่วัสดุให้ได้ (เลเวลวัสดุสูงสุด) หนีบใน [min_level, max_level]
+            // ⚠️ "great ปรับของยังไง" ไม่มีในข้อมูล NEXON ⇒ ใช้ค่าที่อิงวัสดุจริง ไม่ใช่ max ตายตัว
+            int min = recipe.min_level > 0 ? recipe.min_level : 1;
+            int max = recipe.max_level > 0 ? recipe.max_level : min;
+            finalLevel = Math.Clamp(Math.Max(normalLevel, maxMaterialLevel), min, Math.Max(min, max));
+            return Result.GreatSuccess;
+        }
+        return Result.Success;
+    }
+
+    /// <summary>โอกาส great success ของสูตรนี้ที่เลเวลนี้ — pa จากสกิลคราฟของผู้เล่น, ra จาก required_ability_value</summary>
+    private float GreatSuccessChance(CraftRecipeData recipe, int level)
+    {
+        if (recipe.required_ability is not { } ability) return 0f;
+        float ra = 0.5f * level;
+        if (!string.IsNullOrEmpty(recipe.required_ability_value)
+            && StatFormula.TryEval(recipe.required_ability_value, "level", level, out double rav))
+        {
+            ra = (float)rav;
+        }
+        float pa = CraftAbilityValue(ability);
+        return CraftGreatSuccessTuning.Chance(pa, ra, (int)ability);
+    }
+
+    /// <summary>ความสามารถคราฟของผู้เล่นสำหรับ Derived นี้ — รวมโมดิฟายเออร์จากสกิลที่เรียน (base 0)</summary>
+    private float CraftAbilityValue(Shared.Ability.Derived ability)
+    {
+        float sum = 0f;
+        foreach (var (id, value) in CollectModifiers())
+        {
+            if (SkillDataStore.DerivedOfModifier.TryGetValue(id, out Shared.Ability.Derived d) && d == ability)
+            {
+                sum += value;
+            }
+        }
+        return sum;
+    }
+
     private static Item[] MakeProducts(CraftRecipeData recipe, Dictionary<string, string[]> sent,
-                                       List<Item> materials)
+                                       List<Item> materials, int levelOverride = -1)
     {
         string prototypeId = ResolvePrototypeId(recipe, sent, materials);
         if (string.IsNullOrEmpty(prototypeId)) return Array.Empty<Item>();
-        int level = ProductLevel(recipe, materials);
+        int level = levelOverride >= 0 ? levelOverride : ProductLevel(recipe, materials);
         int count = Math.Max(1, recipe.count);
         var list = new List<Item>(count);
         for (int i = 0; i < count; i++)
@@ -1029,7 +1133,7 @@ public partial class Player
                 UnrevealedRareTagCount = 0,
                 ModifiableCount = 0,
                 SuccessRate = CraftTuning.SuccessRate,
-                GreatSuccessRate = CraftTuning.GreatSuccessRate,
+                GreatSuccessRate = GreatSuccessChance(recipe, level),
                 RequiredAbilityValue = 0f
             }
         }, seq);
