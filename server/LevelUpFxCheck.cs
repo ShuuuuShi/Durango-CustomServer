@@ -34,6 +34,7 @@ internal static class LevelUpFxCheck
         CheckActionFatigue();
         CheckDestructCost();
         CheckPetLifeSpan();
+        CheckGiftCapsule(dataDir);
 
         Console.WriteLine($"[fx-check] ผ่าน {_passed} · ตก {_failed}");
         return _failed == 0 ? 0 : 1;
@@ -234,6 +235,21 @@ internal static class LevelUpFxCheck
         float life = d.TryGetValue(Shared.Ability.Derived.LifeSpan, out float v) ? v : -1f;
         Expect(System.Math.Abs(life - 2592000f) < 1f,
             "สัตว์ไม่มีแท็ก: LifeSpan = 30วัน×86400 = 2,592,000 วิ (ได้ " + life + ")");
+    }
+    static void CheckGiftCapsule(string dataDir)
+    {
+        // ต้องมีข้อมูลแบบแปลน/พรอโตไทป์ครบก่อนห่อแคปซูล (เหมือน boot)
+        Yaml.Util.DataStore.Load(dataDir);
+        // กรงสัตว์ cage_01_6 (8014) + คอกเพาะพันธุ์ cage_domestication_4 (6003)
+        foreach (var (type, id) in new[] { ((ushort)8014, "cage_01_6"), ((ushort)6003, "cage_domestication_4") })
+        {
+            Messages.Item? cap = Durango.Online.Player.MakeGiftCapsule(type);
+            bool ok = cap.HasValue
+                && cap.Value.Ext is Messages.ArtifactCapsule ac
+                && ac.BlueprintId == id
+                && ac.State.BuildingState == Shared.Building.BuildingState.Completed;
+            Expect(ok, "แคปซูลของขวัญ " + id + " (type " + type + ") ห่อได้ + BlueprintState=Completed");
+        }
     }
     static void CheckDestructCost()
     {

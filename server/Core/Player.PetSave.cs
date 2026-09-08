@@ -33,6 +33,7 @@ public partial class Player
         LoadPersistedState();
         ContextChanged += FlushPersistedState;
         _connection.ConnetionClosed += SaveOnDisconnect;
+        GrantPendingGifts();      // แจกของขวัญที่ยังไม่เคยรับ (หลัง subscribe เพื่อให้เซฟจริง)
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════

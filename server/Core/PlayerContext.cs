@@ -145,6 +145,10 @@ public class PlayerContext
     [JsonProperty("death_count")]
     public int DeathCount;
 
+    /// <summary>ล็อตของขวัญที่ผู้เล่นนี้รับไปแล้ว — กันแจกซ้ำ (เซฟเก่าไม่มี = ยังไม่รับ ⇒ ได้ตอน login ถัดไป)</summary>
+    [JsonProperty("claimed_gifts")]
+    public List<string> ClaimedGifts;
+
     /// <summary>
     /// [7 ก.ย. 2026] ความคืบหน้าเควส Daily/Once ที่เซิร์ฟติดตาม — คีย์คือ quest id
     /// ไฟล์เก่าไม่มีคีย์นี้ ⇒ null แล้ว hydrate สร้างแถว WIP จากแคตตาล็อก
