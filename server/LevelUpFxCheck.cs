@@ -33,6 +33,7 @@ internal static class LevelUpFxCheck
         CheckFatigueTuning(dataDir);
         CheckActionFatigue();
         CheckDestructCost();
+        CheckPetLifeSpan();
 
         Console.WriteLine($"[fx-check] ผ่าน {_passed} · ตก {_failed}");
         return _failed == 0 ? 0 : 1;
@@ -224,6 +225,15 @@ internal static class LevelUpFxCheck
         float collect25 = ActionFatigue.Of("collect", 25f); // 0.4 * sqrt(25) = 2
         Expect(Math.Abs(collect25 - 2f) < 0.001f, "collect fatigue = 0.4*sqrt(25) = 2 (ได้ " + collect25 + ")");
         Expect(ActionFatigue.Of("craft", 0f) == 0f, "พลังงาน 0 → เหนื่อย 0 (ไม่หัก)");
+    }
+    static void CheckPetLifeSpan()
+    {
+        // สัตว์ที่ไม่มีแท็ก: DerivedOf ต้องคืน LifeSpan เป็น "วินาที" (30 วัน × 86400 = 2,592,000)
+        // ไม่ใช่ 30 ดิบ — บั๊กเก่า early-return ข้าม ToWireUnits → ป้ายอายุขัยขึ้น "30초"
+        var d = Player.PetFactory.DerivedOf(0, 1, null);
+        float life = d.TryGetValue(Shared.Ability.Derived.LifeSpan, out float v) ? v : -1f;
+        Expect(System.Math.Abs(life - 2592000f) < 1f,
+            "สัตว์ไม่มีแท็ก: LifeSpan = 30วัน×86400 = 2,592,000 วิ (ได้ " + life + ")");
     }
     static void CheckDestructCost()
     {

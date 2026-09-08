@@ -1457,7 +1457,7 @@ public partial class Player
     /// ประกอบ Pet หนึ่งตัวจากไฟล์ข้อมูล — ใช้ทั้งตอน GetPreviewPet และตอนสร้างสัตว์จริง
     /// (ตอนนี้มีแต่พรีวิวที่เรียกใช้ เพราะยังไม่มีทางได้สัตว์ตัวจริง — ดูข้อจำกัดข้อ 3 ที่หัวไฟล์)
     /// </summary>
-    private static class PetFactory
+    internal static class PetFactory
     {
         public static Messages.Pet? Build(ushort petEntityType, PetRank rank, int level, string tamerEntityId)
         {
@@ -1543,16 +1543,19 @@ public partial class Player
                 [Derived.Accuracy] = animal?.Accuracy(level) ?? 0f,
                 [Derived.LifeSpan] = (float)PetTuning.LifeSpanDaysBase
             };
-            if (tags == null || tags.Count == 0) return d;
-            foreach (KeyValuePair<string, int> tag in tags)
+            if (tags != null && tags.Count > 0)
             {
-                PetTables.MilestoneTag def = PetTables.MilestoneTagOf(tag.Key);
-                if (def == null) continue;
-                float amount = def.Amount(tag.Value);
-                if (def.Target == Derived.Invalid) continue;
-                if (def.IsRatio) d[def.Target] = d.GetValueOrDefault(def.Target) * (1f + amount);
-                else d[def.Target] = d.GetValueOrDefault(def.Target) + amount;
+                foreach (KeyValuePair<string, int> tag in tags)
+                {
+                    PetTables.MilestoneTag def = PetTables.MilestoneTagOf(tag.Key);
+                    if (def == null) continue;
+                    float amount = def.Amount(tag.Value);
+                    if (def.Target == Derived.Invalid) continue;
+                    if (def.IsRatio) d[def.Target] = d.GetValueOrDefault(def.Target) * (1f + amount);
+                    else d[def.Target] = d.GetValueOrDefault(def.Target) + amount;
+                }
             }
+            // แปลงหน่วยครั้งเดียวท้ายสุด — ต้องรันแม้ไม่มีแท็ก ไม่งั้น LifeSpan ค้างเป็น "วัน" (บั๊ก 30초)
             ToWireUnits(d);
             return d;
         }

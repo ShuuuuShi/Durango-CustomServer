@@ -117,6 +117,17 @@ public partial class Player
             ? PetTables.Costs.MilestoneRetryCost(entry.Pet.Statistics.Level, entry.MilestoneRedrawCount + 1)
             : null;
 
+        // ── ค่าสถานะ/อายุขัย: คิดใหม่จากเลเวล+แท็ก ไม่อ่านจากไฟล์ (เหตุผลเดียวกับหลอด/ราคาข้างบน) ──
+        // กันบั๊กหน่วยเก่า: DerivedOf เคยคืน LifeSpan เป็น "วัน" ดิบ (30) ให้สัตว์ที่ไม่มีแท็ก
+        // ⇒ ป้ายอายุขัยขึ้น "30초" ค้างตลอด · คิดใหม่ที่นี่ให้เป็นวินาทีตามสูตรล่าสุด (idempotent)
+        entry.Pet.Statistics.DerivedAbilities =
+            PetFactory.DerivedOf(entry.Pet.EntityType, entry.Pet.Statistics.Level, entry.Pet.Stat.Tags);
+        // AgingUntil ในเซฟเก่าถูกตั้งจาก LifeSpan ที่ผิดหน่วยเช่นกัน ⇒ คิดใหม่จาก AgingSince (เวลาที่เกิด)
+        if (entry.Pet.Statistics.DerivedAbilities.TryGetValue(Shared.Ability.Derived.LifeSpan, out float lifeSec) && lifeSec > 0f)
+        {
+            entry.Pet.Stat.AgingUntil = entry.Pet.Stat.AgingSince + lifeSec;
+        }
+
         return entry;
     }
 
