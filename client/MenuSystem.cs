@@ -146,15 +146,37 @@ public class MenuSystem : GameSystem<MenuSystem>
 
 	private void GameManager_MainSceneLoaded()
 	{
+		RefreshHiddenMenus();
+		EnableMenu(MenuType.Offerwall, Platform.Instance.IsAvailableOfferwall);
+	}
+
+	/// <summary>เมนูที่ "ฟังก์ชันนี้" เป็นคนปิดเพราะโหมด — จำไว้เพื่อเปิดคืนได้เฉพาะตัวที่ปิดเอง</summary>
+	private readonly HashSet<MenuType> _hiddenByMode = new HashSet<MenuType>();
+
+	/// <summary>
+	/// เปิด/ปิดเมนูตาม ClusterMode ปัจจุบัน — ต้องเรียกใหม่ทุกครั้งที่โหมดเปลี่ยน
+	/// เพราะ MainSceneLoaded รันรอบเดียว ถ้าตอนนั้นยังเป็น Editable เมนูแอดมินจะค้างตลอด
+	///
+	/// ⚠️ ห้ามสั่ง EnableMenu(true) รวดทุกตัวที่ไม่ต้องซ่อน — จะไปทับเงื่อนไขของระบบอื่นที่ปิดเมนู
+	///    ไว้ก่อนหน้า เช่น EventSystem.Start ปิด Event เพราะเซิร์ฟไม่ push TodayAttendanceRewards
+	///    (server/Core/Player.Event.cs:46-49) · ShopSystem / LearningGuideSystem / WarpRushSystem
+	///    ก็ปิดตามสถานะของตัวเอง ⇒ คืนเฉพาะตัวที่รอบก่อน "เรา" เป็นคนปิด
+	/// </summary>
+	public void RefreshHiddenMenus()
+	{
 		MenuType[] array = Enums<MenuType>.All();
 		foreach (MenuType type in array)
 		{
 			if (IsHiddenMenu(type))
 			{
-				EnableMenu(type, enable: false);
+				_hiddenByMode.Add(type);
+				EnableMenu(type, enable: false, checkHidden: false);
+			}
+			else if (_hiddenByMode.Remove(type))
+			{
+				EnableMenu(type, enable: true, checkHidden: false);
 			}
 		}
-		EnableMenu(MenuType.Offerwall, Platform.Instance.IsAvailableOfferwall);
 	}
 
 	public static bool IsHiddenMenu(MenuType type)

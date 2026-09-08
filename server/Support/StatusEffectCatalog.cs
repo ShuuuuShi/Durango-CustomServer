@@ -2,17 +2,26 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Durango.Utils;   // Json.ReadFromFile — ตัวช่วยอ่าน data/assets ของโปรเจกต์ (Support/Json.cs)
+using Messages;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Shared.StatusEffect;
 
 namespace Durango.Online;
 
 /// <summary>
-/// อ่าน <c>data/assets/survival/status_effects.json</c> สำหรับ duration / deactivates / ผล type-1
-/// ไม่แต่งตัวเลขเอง — ใช้ค่าในไฟล์ตรง ๆ
+/// อ่าน <c>data/assets/survival/status_effects.json</c> สำหรับ duration / deactivates / ผลทุก type
+/// ไม่แต่งตัวเลขเอง — ใช้ค่าในไฟล์ตรง ๆ แล้วคิดสูตรด้วย <see cref="StatFormula"/>
 /// </summary>
 public static class StatusEffectCatalog
 {
+    public sealed class EffectSpec
+    {
+        public int Type;
+        public string Key;
+        public string ValueExpr;
+    }
+
     public sealed class Template
     {
         public string Id;
@@ -21,8 +30,44 @@ public static class StatusEffectCatalog
         public double? DurationSeconds;
         public string[] Deactivates = Array.Empty<string>();
         public string[] Tags = Array.Empty<string>();
-        /// <summary>ผล type=1 (velocity ต่อวินาทีของหลอด) จาก JSON — key เป็นชื่อหลอด survival</summary>
+        /// <summary>ผลจาก JSON ทั้งก้อน — type/key/สูตร ยังไม่คิดเลขจนกว่าจะแพ็กตามเลเวล</summary>
+        public List<EffectSpec> EffectSpecs = new();
+        /// <summary>ผล type=1 (velocity ต่อวินาทีของหลอด) คิดที่ MinLevel — ใช้ตอนเซิร์ฟปรับหลอด</summary>
         public Dictionary<string, float> Type1Velocities = new();
+
+        public Dictionary<string, float> GetType1Velocities(int level)
+        {
+            var d = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            if (EffectSpecs == null) return d;
+            foreach (EffectSpec spec in EffectSpecs)
+            {
+                if (spec.Type != (int)EffectType.Survival) continue;
+                if (string.IsNullOrEmpty(spec.Key) || string.IsNullOrEmpty(spec.ValueExpr)) continue;
+                if (!StatFormula.TryEval(spec.ValueExpr, "level", level, out double v)) continue;
+                d[spec.Key] = (float)v;
+            }
+            return d;
+        }
+
+        public EffectDetail[] PackDetails(int level)
+        {
+            if (EffectSpecs == null || EffectSpecs.Count == 0) return Array.Empty<EffectDetail>();
+            var list = new List<EffectDetail>(EffectSpecs.Count);
+            foreach (EffectSpec spec in EffectSpecs)
+            {
+                // Unpack ฝั่งเกมรับได้แค่ 0..14 (Messages/EffectDetail.cs) — ข้าม None/Invalid
+                if (spec.Type <= (int)EffectType.None || spec.Type > 14) continue;
+                if (string.IsNullOrEmpty(spec.Key) || string.IsNullOrEmpty(spec.ValueExpr)) continue;
+                if (!StatFormula.TryEval(spec.ValueExpr, "level", level, out double v)) continue;
+                list.Add(new EffectDetail
+                {
+                    Type = (EffectType)spec.Type,
+                    Key = spec.Key,
+                    Value = (float)v
+                });
+            }
+            return list.ToArray();
+        }
     }
 
     private static Dictionary<string, List<Template>> _byId;
@@ -95,12 +140,13 @@ public static class StatusEffectCatalog
             {
                 if (effect is not JObject eo) continue;
                 int type = eo.Value<int?>("type") ?? 0;
-                if (type != 1) continue; // รอบนี้ใช้แค่ velocity ต่อหลอด
                 string key = eo.Value<string>("key");
                 string value = eo.Value<string>("value");
                 if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(value)) continue;
-                // ค่าในไฟล์ส่วนใหญ่เป็นตัวเลขคงที่; สูตรมี level ค่อยรองรับตอนเลือกเลเวล
-                if (StatFormula.TryEval(value, "level", t.MinLevel, out double v))
+                t.EffectSpecs.Add(new EffectSpec { Type = type, Key = key, ValueExpr = value });
+                // type=1 = Survival velocity ต่อหลอด — คิดที่ MinLevel ไว้ให้โค้ดเก่าที่อ่านฟิลด์นี้
+                if (type == (int)EffectType.Survival &&
+                    StatFormula.TryEval(value, "level", t.MinLevel, out double v))
                 {
                     t.Type1Velocities[key] = (float)v;
                 }
@@ -130,5 +176,16 @@ public static class StatusEffectCatalog
         if (overrideSeconds.HasValue && overrideSeconds.Value > 0) return overrideSeconds.Value;
         Template t = Get(id, level);
         return t?.DurationSeconds ?? 0;
+    }
+
+    /// <summary>
+    /// แพ็ก <see cref="EffectDetail"/> ให้ client โชว์ทูลทิป / คิด fatigue / modifier
+    /// ไอคอนขึ้นได้จาก yaml แม้ Effects ว่าง แต่ตัวเลขจริงอ่านจากฟิลด์นี้เท่านั้น
+    /// </summary>
+    public static EffectDetail[] PackDetails(string id, int level)
+    {
+        Template t = Get(id, level);
+        if (t == null) return Array.Empty<EffectDetail>();
+        return t.PackDetails(level);
     }
 }

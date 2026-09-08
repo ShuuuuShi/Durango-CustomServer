@@ -5,9 +5,11 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using Durango.Logic;
 using Durango.Logic.Combat;
 using Durango.Logic.Clusters;
 using Durango.Logic.Item;
+using Durango.UI;
 using Durango.Utils;
 using InteractionData;
 using Shared.Battle;
@@ -306,6 +308,8 @@ public static class BotBridge
                 case "tilesetdump": return CmdTileSetDump();
                 case "animdumpstat": return CmdAnimDumpStat();
                 case "menus": return CmdMenus();
+                case "uidump": return CmdUiDump();
+                case "opencraft": return CmdOpenCraft();
                 default: return Err("unknown cmd: " + cmd);
             }
         }
@@ -1022,6 +1026,60 @@ public static class BotBridge
         return ReadNames(bgm, "_tileSetBgm", "TileSet");
     }
 
+    private static string CmdUiDump()
+    {
+        var sb = new StringBuilder(512);
+        sb.Append("{\"ok\":true,\"clusterMode\":");
+        JStr(sb, GameManager.ClusterMode.ToString());
+        sb.Append(",\"debugBuild\":").Append(Debug.isDebugBuild ? "true" : "false");
+        AppendOpened(sb, "recipe", UIManager.FindScript<RecipeSelectorGroup>());
+        AppendOpened(sb, "makeCheat", UIManager.FindScript<MakeCheatGroup>());
+        AppendOpened(sb, "command", UIManager.FindScript<CommandButtonGroup>());
+        AppendOpened(sb, "menuList", UIManager.FindScript<MenuListGroupBase>());
+        AppendOpened(sb, "chat", UIManager.FindScript<ChattingGroup_PC>());
+        var recipe = UIManager.FindScript<RecipeSelectorGroup>();
+        if (recipe != null)
+        {
+            var f = typeof(RecipeSelectorGroup).GetField("_isBuildCheat",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+            object v = (f == null) ? null : f.GetValue(recipe);
+            sb.Append(",\"isBuildCheat\":").Append((v is bool b && b) ? "true" : "false");
+        }
+        sb.Append(",\"enabled\":[");
+        bool first = true;
+        if (GameSystem<MenuSystem>.HasInstance())
+        {
+            var ms = GameSystem<MenuSystem>.Instance();
+            foreach (Durango.Logic.MenuType t in Durango.Utils.Enums<Durango.Logic.MenuType>.All())
+            {
+                if (!ms.IsEnabled(t)) continue;
+                if (!first) sb.Append(',');
+                first = false;
+                JStr(sb, t.ToString());
+            }
+        }
+        sb.Append("]}");
+        return sb.ToString();
+    }
+
+    private static void AppendOpened(StringBuilder sb, string key, UIBase ui)
+    {
+        sb.Append(",\"").Append(key).Append("Opened\":");
+        sb.Append((ui != null && ui.IsOpened) ? "true" : "false");
+    }
+
+    private static string CmdOpenCraft()
+    {
+        RecipeSelectorGroup group = UIManager.FindScript<RecipeSelectorGroup>();
+        if (group == null) return Err("no RecipeSelectorGroup");
+        group.Open();
+        var f = typeof(RecipeSelectorGroup).GetField("_isBuildCheat",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        object v = (f == null) ? null : f.GetValue(group);
+        return "{\"ok\":true,\"opened\":true,\"isBuildCheat\":" + ((v is bool b && b) ? "true" : "false") +
+               ",\"clusterMode\":" + Quote(GameManager.ClusterMode.ToString()) + "}";
+    }
+
     private static string CmdMenus()
     {
         if (!GameSystem<InteractionSystem>.HasInstance()) return Err("no interaction system");
@@ -1164,6 +1222,10 @@ public static class BotBridge
         sb.Append(",\"screen\":[");
         sb.Append(Screen.width).Append(',').Append(Screen.height);
         sb.Append(']');
+        sb.Append(",\"clusterMode\":");
+        JStr(sb, GameManager.ClusterMode.ToString());
+        sb.Append(",\"debugBuild\":");
+        sb.Append(Debug.isDebugBuild ? "true" : "false");
 
         var player = PlayerBehavior.LocalPlayer;
         sb.Append(",\"player\":");

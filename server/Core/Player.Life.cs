@@ -95,6 +95,9 @@ public partial class Player
         _connection.Recv(delegate(LookAroundMood msg, PacketHeader header)
         {
             Send(new Messages.Timer { Duration = LifeConstants.LookAroundTime }, header.Seq);
+            // มองบรรยากาศตอนยืนในบ้าน — ใส่บัพ inside ถ้ายังไม่มี (เดินเข้าก็ใส่แล้ว)
+            _insideCheckedTile = new Point2(int.MinValue, int.MinValue);
+            if (SyncInsideStatusEffect()) SendStatusEffects();
         });
 
         // ══════════════════════════════════════════════════════════════════════════

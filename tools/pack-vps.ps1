@@ -238,6 +238,7 @@ if (-not $SkipGame) {
             clusters = @{
                 $ServerName = @{
                     gateway_url_root = $Address
+                    mode             = 'Online'
                     name             = @{ en_US = 'LastHuman'; th_TH = 'LastHuman'; ko_KR = 'LastHuman' }
                 }
             }

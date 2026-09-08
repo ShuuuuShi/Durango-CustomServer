@@ -942,10 +942,19 @@ public class TitleMenuGroup : MonoBehaviour
 				}
 				int value = list[0].Value;
 				list[0] = new KeyValuePair<string, int>(text2, value);
-				string source = jObject.Get<string>("cluster_mode");
-				GameManager.SetCluster(GameManager.ClusterKey, GameManager.GatewayUrl, source.ToEnum(Mode.Offline));
 				GameManager.ConnectCluster = null;
 			}
+			// [8 ก.ย. 2026] ยึด cluster_mode จาก /entry เสมอ — ไม่ใช่แค่ตอน ConnectCluster != null
+			//
+			// เดิมอ่านคีย์นี้เฉพาะเส้นเซิร์ฟในตัว (LAN / เกาะสร้างสรรค์) ⇒ ต่อ LastHuman ทาง HTTP
+			// แล้ว ClusterMode ค้างค่าตอนเลือกคลัสเตอร์ ซึ่ง JSON ส่วนใหญ่ไม่มีฟิลด์ "mode"
+			// (default enum = Online) แต่ถ้าโหลดตกไป TextAsset offline/clusters จะได้เกาะ "free"
+			// = Editable ทั้งที่เซิร์ฟตอบ Online
+			// ⇒ HUD เป็นเมนูแอดมิน · หน้าคราฟต์เป็นเสกทันที · ซ่อนปุ่มต่อสู้
+			//
+			// พาร์สไม่ได้ให้เป็น Online (ไม่ใช่ Offline) เพื่อไม่ให้ HUD พังเพราะคีย์หาย
+			string clusterMode = jObject.Get<string>("cluster_mode");
+			GameManager.SetCluster(GameManager.ClusterKey, GameManager.GatewayUrl, clusterMode.ToEnum(Mode.Online));
 			JArray addresses2 = jObject.Get("radiotower_addresses") as JArray;
 			List<KeyValuePair<string, int>> endpoints = ParseAddresses(addresses2);
 			Durango.Utils.Singleton<GameManager>.Instance().SetEndpoints(list);

@@ -43,3 +43,5 @@ __pycache__/
 tools/android/base/
 tools/android/keys/
 *.apk
+shots/
+tmp-*.png

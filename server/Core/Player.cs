@@ -304,6 +304,8 @@ public partial class Player
         });
         _connection.Recv(delegate(GetStatusEffects msg, PacketHeader header)
         {
+            _insideCheckedTile = new Point2(int.MinValue, int.MinValue);
+            SyncWorldDrivenStatusEffects();
             SendStatusEffects(header.Seq);
         });
         // เปิด/ปิดสถานะที่ "client เป็นคนตัดสินใจเอง" — ตอนนี้เกมส่งมาตัวเดียวคือ away_from_keyboard
@@ -696,7 +698,7 @@ public partial class Player
                 Until = 0.0,
                 Stacked = 0,
                 DurationHidden = true,
-                Effects = Array.Empty<EffectDetail>()
+                Effects = StatusEffectCatalog.PackDetails(effect.Key, 1)
             });
         }
         foreach (TimedStatusEffect effect in _timedStatusEffects.Values)
@@ -712,7 +714,8 @@ public partial class Player
                 Until = effect.Until,
                 Stacked = 0,
                 DurationHidden = effect.Until <= 0,
-                Effects = Array.Empty<EffectDetail>()
+                NameGettext = effect.NameGettext,
+                Effects = StatusEffectCatalog.PackDetails(effect.Id, effect.Level)
             };
             if (idx >= 0) list[idx] = packed;
             else list.Add(packed);
@@ -1732,14 +1735,18 @@ public partial class Player
 
     private void HandleGetArtifactBlueprintsMsg(GetArtifactBlueprints msg, uint seq)
     {
+        // [8 ก.ย. 2026] กรองด้วยสิ่งปลูกสร้างที่ "ปลดล็อกแล้ว" — เดิมส่งทุกหลัง is_craft
+        // = โหมดครีเอทีฟ (สร้างได้ทุกอย่างตั้งแต่ตัวแรก) ต้องกรองให้ตรงกับสูตรไอเทม (SendRecipes)
+        HashSet<string> unlocked = UnlockedBlueprintIds();
         var list = new List<string>();
         foreach (MergedBlueprint allBlueprint in BlueprintStore.GetAllBlueprints())
         {
-            if (allBlueprint.IsShowCraftMode)
+            if (allBlueprint.IsShowCraftMode && unlocked.Contains(allBlueprint.Id))
             {
                 list.Add(allBlueprint.Id);
             }
         }
+        Console.WriteLine($"[craft] {Short(EntityId)} ส่งบลูปริ้นท์ที่ปลดแล้ว {list.Count} หลัง");
         Send(new ArtifactBlueprints { Ids = list.ToArray() }, seq);
     }
 
@@ -1980,6 +1987,9 @@ public partial class Player
         {
             SendStatusEffects();
         }
+        // ต้องอยู่ "หลัง" ชุดสถานะ — ผล type=2 ของบัพเป็นตัวคูณลดความเหนื่อยรายหมวด
+        // ใส่ก่อนบัพอัปเดตจะได้เลขของเฟรมที่แล้ว (เดินเข้าบ้านแล้วยังเหนื่อยเท่าเดิมอีกเฟรม)
+        SyncFatigueVelocities();
         UpdateSurvival();
         // รีเฟรชความเร็วตามความเหนื่อยเป็นระยะ (ไม่ทุกเฟรม — SendBaseMoveSpeed กันค่าซ้ำเอง)
         SendBaseMoveSpeed();

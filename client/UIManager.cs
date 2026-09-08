@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using Durango.Logic.Clusters;
 using Durango.Logic.Social;
 using Durango.Logic.Timeline;
 using Durango.Network;
@@ -348,13 +349,12 @@ public class UIManager : Singleton<UIManager>, IUriInvokable
 
 	private static bool UIFilterFunc(GameObject obj)
 	{
-		if (!Debug.isDebugBuild)
+		// แผงโกง (Commands / เสกของ / สร้างทันที) ติดมากับ Unity development player
+		// LastHuman เล่น Online เสมอ — ซ่อนทุกโหมด อย่ารอ ClusterMode เพราะ UI โหลดก่อน /entry
+		string text = obj.name;
+		if (text.Contains("Development") || text.Contains("CommandButton") || text.Contains("BuildCheat") || text.Contains("MakeCheat"))
 		{
-			string text = obj.name;
-			if (text.Contains("Development") || text.Contains("CommandButton") || text.Contains("BuildCheat") || text.Contains("MakeCheat"))
-			{
-				return false;
-			}
+			return false;
 		}
 		return true;
 	}

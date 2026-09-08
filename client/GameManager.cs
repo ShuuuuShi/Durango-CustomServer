@@ -158,6 +158,10 @@ public class GameManager : Singleton<GameManager>
 		ClusterKey = clusterKey;
 		GatewayUrl = url;
 		ClusterMode = mode;
+		if (GameSystem<MenuSystem>.HasInstance())
+		{
+			GameSystem<MenuSystem>.Instance().RefreshHiddenMenus();
+		}
 	}
 
 	public static void SetArenaAuthServer(string arenaAuthServerUrl)

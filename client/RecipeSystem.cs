@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using Building;
 using Crafting;
-using Durango.Logic.Clusters;
 using Durango.Logic.Item;
 using Durango.Network;
 using Durango.Terrain;
@@ -104,10 +103,7 @@ public class RecipeSystem : GameSystem<RecipeSystem>
 		{
 			_recipeContainer.InitRecipes(SingletonDict<string, Yaml.Recipe>.Instance);
 			_recipeContainer.InitBlueprints(SingletonDict<string, Yaml.Blueprint>.Instance, SingletonDict<int, ArtifactPrototype>.Instance);
-			if (GameManager.ClusterMode != Mode.Online)
-			{
-				_recipeContainer.InitAbstractNaturalBlueprint(DataHelper.GetBiomeSpriteInfos());
-			}
+			// ห้ามใส่บลูปริ้นท์ธรรมชาติปลอมของโหมดสร้างสรรค์ — เมนูคราฟต์ต้องเป็นชุด Online อย่างเดียว
 			_recipeContainer.InitNotifications();
 			RemodelingBlueprints.Initialize(SingletonDict<string, Dictionary<string, RemodelingBlueprint>>.Instance, SingletonDict<int, ArtifactPrototype>.Instance);
 		};
@@ -477,10 +473,7 @@ public class RecipeSystem : GameSystem<RecipeSystem>
 
 	public bool CanCraftNow(CategoryItem categoryItem)
 	{
-		if (GameManager.ClusterMode != Mode.Online)
-		{
-			return true;
-		}
+		// ห้ามทางลัดโหมดสร้างสรรค์ (สูตรพร้อมเสมอ) — ต้องมีวัสดุ/โต๊ะจริงเหมือน Online
 		if (categoryItem is Crafting.Recipe)
 		{
 			Crafting.Recipe recipe = categoryItem as Crafting.Recipe;

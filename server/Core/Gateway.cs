@@ -807,6 +807,46 @@ public class Gateway
         return diff == 0;
     }
 
+    /// <summary>
+    /// GET /players/{entityId} — รูปแบบตรง <c>client/Durango.Player/PlayerInfoJson.cs</c>
+    /// ใช้โชว์ชื่อเจ้าของที่ดิน (님의 사유지) และป็อปอัปข้อมูลผู้เล่น
+    /// </summary>
+    private WebServer.Response GetPublicPlayerInfo(string entityId)
+    {
+        PlayerContext ctx = _host.FindContextByEntityId(entityId) ?? _gameServer.GetPlayerContext(entityId);
+        if (ctx == null || string.IsNullOrEmpty(ctx.EntityId))
+        {
+            return new WebServer.JsonResponse("{}", HttpStatusCode.NotFound);
+        }
+        AppearPlayer appear = ctx.AppearPlayer;
+        var body = new JObject
+        {
+            ["entity_id"] = ctx.EntityId,
+            ["freq"] = appear.Freq,
+            ["name"] = ctx.PlayerInfo?.PlayerName ?? appear.Name ?? string.Empty,
+            ["level"] = ctx.PlayerInfo != null && ctx.PlayerInfo.PlayerLevel > 0
+                ? ctx.PlayerInfo.PlayerLevel
+                : appear.Level,
+            ["clan"] = new JObject
+            {
+                ["clan_id"] = appear.Member.ClanId ?? string.Empty,
+                ["clan_name"] = appear.Member.ClanName ?? string.Empty
+            },
+            ["personal_region_id"] = ctx.PersonalRegionId ?? string.Empty
+        };
+        try
+        {
+            PlayerDisplay display = appear.Display;
+            if (string.IsNullOrEmpty(display.EntityId)) display.EntityId = ctx.EntityId;
+            body["display"] = JToken.Parse(Json.Write(display));
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[gateway] /players display เขียนไม่ได้: {e.Message}");
+        }
+        return new WebServer.JsonResponse(body.ToString());
+    }
+
     /// <summary>หา context จาก Authorization header (session token — client ใส่ทุก request แบบ auth)</summary>
     private static WebServer.Response Forbidden() =>
         new WebServer.TextResponse("text/plain", "403 Forbidden", HttpStatusCode.Forbidden);
@@ -894,6 +934,27 @@ public class Gateway
 
     private WebServer.RouteFunction UnhandledUrl(string url)
     {
+        // ชื่อ/หน้าตาตัวละคร — EstateOwnerWidget กับป็อปอัปอื่นยิง GET /players/<entityId>
+        // (client/PlayerInfoManager.cs RequestFunc) ถ้าไม่มีเส้นนี้ชื่อเจ้าของที่ดินไม่ขึ้น
+        if (url.StartsWith("/players/", StringComparison.OrdinalIgnoreCase))
+        {
+            string rest = url.Substring("/players/".Length);
+            int qIdx = rest.IndexOf('?');
+            if (qIdx >= 0) rest = rest.Substring(0, qIdx);
+            if (rest.Length > 0 && rest.IndexOf('/') < 0)
+            {
+                string entityId = rest;
+                return (HttpListenerRequest request, Dictionary<string, string> _) =>
+                {
+                    if (!string.Equals(request.HttpMethod, "GET", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return new WebServer.NotFountResponse();
+                    }
+                    return GetPublicPlayerInfo(entityId);
+                };
+            }
+        }
+
         // ══ Admin Web UI — เสิร์ฟไฟล์จาก server/admin/ ═══════════════════════════════════════════
         // /admin/ → index.html, /admin/style.css → CSS, /admin/app.js → JS
         // ต้องเปิด admin token ถึงจะเข้าได้ (กันคนนอกเห็นหน้าจัดการเซิร์ฟ)

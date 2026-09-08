@@ -5,6 +5,7 @@ using System.Linq;
 using Messages;
 using Newtonsoft.Json.Linq;
 using Shared.Region;
+using Shared.Survival;
 
 namespace Durango.Online;
 
@@ -34,6 +35,14 @@ public static class RegionCatalog
 
         /// <summary>ฝูงสัตว์ที่เกิดบนเกาะแบบนี้ · ชื่อกลุ่ม (land/beach/…) → รายการฝูง</summary>
         public Dictionary<string, List<HerdSpawn>> Herds = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// ไบโอมบนเกาะแบบนี้ให้ความเหนื่อยหมวดไหน — จาก <c>region_templates.json → biome_effects</c>
+        /// (ครบทั้ง 267 แม่แบบ) เช่น <c>volcanic → [volcanic_heat]</c> · <c>swamp_mud → [humid]</c>
+        /// คู่ไบโอม↔หมวดตรงกับ <c>constants.json → resistance.types_by_biome</c> ที่ NEXON
+        /// แม็ปเป็น <c>Dictionary&lt;Biome, Derived&gt;</c> เองอยู่แล้ว (client/Yaml/Resistance.cs)
+        /// </summary>
+        public Dictionary<Biome, FatigueCategory[]> BiomeEffects = new();
 
         /// <summary>
         /// ชื่อสถานการณ์สภาพอากาศของเกาะแบบนี้ — ค่าจริงจาก <c>region_templates.json → weather</c>
@@ -114,6 +123,16 @@ public static class RegionCatalog
                     if (o["biome_effects"] is JObject effects)
                     {
                         info.Biome = ParseBiome(effects.Properties().FirstOrDefault()?.Name);
+                        foreach (JProperty be in effects.Properties())
+                        {
+                            Biome biome = ParseBiome(be.Name);
+                            if (biome == Biome.Invalid || be.Value is not JArray cats) continue;
+                            FatigueCategory[] list = cats
+                                .Select(x => FatigueTuning.ParseCategory(x?.ToString()))
+                                .Where(c => c != FatigueCategory.Invalid)
+                                .ToArray();
+                            if (list.Length > 0) info.BiomeEffects[biome] = list;
+                        }
                     }
                     if (o["herds"] is JObject herds)
                     {

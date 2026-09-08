@@ -3,7 +3,6 @@ using System.Linq;
 using Building;
 using Crafting;
 using Durango.Logic;
-using Durango.Logic.Clusters;
 using Durango.Logic.Item;
 using Durango.Logic.Notification;
 using Durango.Logic.Skill;
@@ -121,7 +120,9 @@ public class RecipeSelectorGroup : UIBase, INotificationable
 		GameSystem<RecipeSystem>.Instance().RecipeItemsUpdated += RecipeSystem_RecipeItemsUpdated;
 		base.OnOpenSucceed += delegate
 		{
-			_isBuildCheat = GameManager.ClusterMode == Mode.Editable;
+			// LastHuman เล่นโหมด Online เสมอ — ห้ามสลับเป็นแผงเสกสิ่งปลูกสร้างทันที
+			// (RecipeBuildCheatWidget) แม้ ClusterMode จะค้างเป็น Editable จาก /entry
+			_isBuildCheat = false;
 			_recipeListWidget.ClearSearchText();
 			ResetCategories(scrollToSelected: true);
 			GameSystem<RecipeSystem>.Instance().RefreshNearWorkbenches(_selectedWorkbench);

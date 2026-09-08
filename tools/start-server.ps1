@@ -6,8 +6,9 @@
 #   game    8191   TCP   — handshake GetClock → Auth → Ready แล้วเข้าโลก
 # game\server.txt ต้องชี้ 127.0.0.1:8190 (ค่าเริ่มต้นตรงอยู่แล้ว)
 #
-# ⚠️ เซิร์ฟตัวนี้ **ไม่มี** --radiotower / --cluster-mode Online / --region-role / --admin-token
-#    / --whitelist (ของเซิร์ฟตัวเก่า) ใส่ไปแล้วเซิร์ฟไม่รู้จัก flag → ดับทันที
+# ⚠️ เซิร์ฟตัวนี้ไม่มี --radiotower / --region-role / --admin-token / --whitelist
+#    (ของเซิร์ฟตัวเก่า) ใส่ไปแล้วเซิร์ฟไม่รู้จัก flag → ดับทันที
+#    --cluster-mode Online มีแล้ว และต้องใส่ — ตัวเกมอ่านค่านี้จาก /entry ไปตั้ง HUD
 #
 # ⚠️ ไฟล์นี้ต้องเซฟเป็น UTF-8 **มี BOM** เท่านั้น — PowerShell 5.1 อ่านไฟล์ที่ไม่มี BOM
 #    เป็น ANSI แล้วภาษาไทยจะกลายเป็นขยะทั้งไฟล์ (ส่วน .bat ต้องเป็น ASCII ล้วน)
@@ -28,7 +29,8 @@ $GamePort    = 8191
 $CoreArgs = @(
     '--gateway-port', "$GatewayPort",
     '--game-port',    "$GamePort",
-    '--name',         'main'
+    '--name',         'main',
+    '--cluster-mode', 'Online'
 )
 
 function Say($text, $color = 'Gray') { Write-Host $text -ForegroundColor $color }

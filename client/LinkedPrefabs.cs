@@ -92,14 +92,20 @@ public class LinkedPrefabs
 		for (int size = KUtility.GetSize(_prefabs); j < size; j++)
 		{
 			GameObject gameObject = _prefabs[j];
-			if (!(gameObject == null) && !(gameObject.GetComponent<T>() == null))
+			if (gameObject == null || gameObject.GetComponent<T>() == null)
 			{
-				GameObject gameObject2 = AddChild(gameObject, transform);
-				InitializeObject(gameObject2);
-				T component2 = gameObject2.GetComponent<T>();
-				_cachedScript.Add(typeFromHandle, component2);
-				return component2;
+				continue;
 			}
+			// อย่า lazy-load แผงที่ UIFilter ตัดทิ้ง (MakeCheat / CommandButton)
+			if (_condition != null && !_condition(gameObject))
+			{
+				continue;
+			}
+			GameObject gameObject2 = AddChild(gameObject, transform);
+			InitializeObject(gameObject2);
+			T component2 = gameObject2.GetComponent<T>();
+			_cachedScript.Add(typeFromHandle, component2);
+			return component2;
 		}
 		return (T)null;
 	}

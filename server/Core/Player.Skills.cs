@@ -206,6 +206,9 @@ internal class SkillRewardJson
     /// <summary>สูตรที่รางวัลนี้ปลดล็อก (type 2 — 604 จาก 1,321 รายการมีช่องนี้)</summary>
     [JsonProperty("recipe_ids")] public string[] RecipeIds;
 
+    /// <summary>สิ่งปลูกสร้างที่รางวัลนี้ปลดล็อก (type 4 — คนละช่องกับ recipe_ids)</summary>
+    [JsonProperty("blueprint_ids")] public string[] BlueprintIds;
+
     /// <summary>
     /// [7 ก.ย. 2026] หมวดของ "ของที่เก็บ/แล่ได้" ที่รางวัลนี้ปลด (type 0 — 171 รายการ)
     ///
@@ -1277,6 +1280,35 @@ public partial class Player
                         {
                             unlocked.Add(recipeId);
                         }
+                    }
+                }
+            }
+        }
+        return unlocked;
+    }
+
+    /// <summary>
+    /// สิ่งปลูกสร้างที่ปลดล็อกแล้ว — เส้นเดียวกับ UnlockedRecipeIds แต่ใช้ช่อง blueprint_ids (type 4)
+    ///
+    /// ⚠️ ไม่มีเมธอดนี้ = แท็บ "สิ่งปลูกสร้าง" ส่งทุกหลัง is_craft (โหมดครีเอทีฟ) ⇒ สร้างได้ทุกอย่าง
+    ///    โดยไม่ต้องเรียนสกิล ต่างจากสูตรไอเทมที่กรองแล้ว
+    /// </summary>
+    public HashSet<string> UnlockedBlueprintIds()
+    {
+        var unlocked = new HashSet<string>(StringComparer.Ordinal);
+        if (_skills?.Learned == null) return unlocked;
+        foreach (var (skillId, subs) in _skills.Learned)
+        {
+            foreach (var (subId, level) in subs)
+            {
+                for (int lv = 1; lv <= level; lv++)
+                {
+                    SkillNodeJson node = FindNode(skillId, subId, lv, out _);
+                    foreach (string rewardId in node?.Rewards ?? Array.Empty<string>())
+                    {
+                        if (!SkillDataStore.Rewards.TryGetValue(rewardId, out SkillRewardJson reward)) continue;
+                        foreach (string blueprintId in reward?.BlueprintIds ?? Array.Empty<string>())
+                            unlocked.Add(blueprintId);
                     }
                 }
             }

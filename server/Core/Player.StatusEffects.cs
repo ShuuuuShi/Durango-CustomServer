@@ -14,8 +14,12 @@ public partial class Player
         public string Id;
         public int Level = 1;
         public double Since;
-        public double Until; // 0 = ไม่มีอายุ (เช่น rest ระหว่างนั่ง)
+        public double Until; // 0 = ไม่มีอายุ (เช่น rest ระหว่างนั่ง / inside ในบ้าน)
+        public string NameGettext;
     }
+
+    private const string InsideStatusEffectId = "inside";
+    private Point2 _insideCheckedTile = new(int.MinValue, int.MinValue);
 
     /// <summary>สถานะที่มีเวลาหมดอายุ — คีย์เป็น effect id</summary>
     private readonly Dictionary<string, TimedStatusEffect> _timedStatusEffects =
@@ -255,6 +259,101 @@ public partial class Player
     {
         bool changed = SyncWeatherStatusEffectsCore(_world.Weather, refresh: false);
         changed |= SyncStandingWaterStatusEffect();
+        changed |= SyncInsideStatusEffect();
+        changed |= SyncCampFireStatusEffect();
         return changed;
+    }
+
+    /// <summary>
+    /// เดินเข้าเขตบ้านที่เข้าได้ → บัพ <c>inside</c> จาก status_effects.json (ชื่อ "집")
+    /// โชว์ชื่อเจ้าของผ่าน NameGettext ถ้ามี
+    /// </summary>
+    private bool SyncInsideStatusEffect()
+    {
+        Point2 tile = LifeTileOf(this);
+        if (tile.x == _insideCheckedTile.x && tile.y == _insideCheckedTile.y)
+        {
+            return false;
+        }
+        _insideCheckedTile = tile;
+
+        AppearArtifact? house = FindEnterableHouseAt(tile);
+        bool had = _timedStatusEffects.TryGetValue(InsideStatusEffectId, out TimedStatusEffect existing);
+        if (!house.HasValue)
+        {
+            return had && ClearTimedStatusEffect(InsideStatusEffectId);
+        }
+
+        string name = HouseOwnerBuffName(house.Value);
+        if (had)
+        {
+            if (string.Equals(existing.NameGettext, name, StringComparison.Ordinal)) return false;
+            existing.NameGettext = name;
+            return true;
+        }
+
+        if (!ApplyTimedStatusEffect(InsideStatusEffectId, 1, durationOverride: 0)) return false;
+        _timedStatusEffects[InsideStatusEffectId].NameGettext = name;
+        return true;
+    }
+
+    private AppearArtifact? FindEnterableHouseAt(Point2 tile)
+    {
+        if (tile.x < -500) return null;
+        AppearArtifact? best = null;
+        foreach (AppearArtifact artifact in _world.ArtifactManager.Enumerable(a => a.IsAlive))
+        {
+            if (!HouseEnterability.IsEnterable(artifact.EntityType)) continue;
+            if (!HouseEnterability.ContainsTile(artifact.Tile, artifact.Size, tile)) continue;
+            if (!best.HasValue || artifact.Size.x * artifact.Size.y < best.Value.Size.x * best.Value.Size.y)
+            {
+                best = artifact;
+            }
+        }
+        return best;
+    }
+
+    private string HouseOwnerBuffName(AppearArtifact house)
+    {
+        string ownerId = _world.ArtifactManager.OwnerOf(house.EntityId);
+        if (string.IsNullOrEmpty(ownerId)) ownerId = house.FounderEntityId;
+        string ownerName = ResolvePlayerName(ownerId);
+        if (string.IsNullOrEmpty(ownerName)) return null;
+        string fmt = MoCatalog.Translate("{0} 님의 집");
+        return string.Format(fmt, ownerName);
+    }
+
+    private string ResolvePlayerName(string entityId)
+    {
+        if (string.IsNullOrEmpty(entityId)) return null;
+        if (string.Equals(entityId, EntityId, StringComparison.Ordinal)) return Name;
+        foreach (Player other in _world.PlayersSnapshot())
+        {
+            if (string.Equals(other.EntityId, entityId, StringComparison.Ordinal) &&
+                !string.IsNullOrEmpty(other.Name))
+            {
+                return other.Name;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// ยืนบนที่ดินที่ประกาศแล้ว → บัพ <c>camp_fire</c> (아늑함) จาก status_effects.json
+    /// ถอดเมื่อเดินออกจากเขต
+    /// </summary>
+    private bool SyncCampFireStatusEffect()
+    {
+        Point2 tile = LifeTileOf(this);
+        if (tile.x < -500)
+        {
+            return _timedStatusEffects.ContainsKey("camp_fire") && ClearTimedStatusEffect("camp_fire");
+        }
+        Point2 cell = World.CellFromTile(tile);
+        bool onEstate = _world.TryGetEstateIdAtCell(cell, out _);
+        bool had = _timedStatusEffects.ContainsKey("camp_fire");
+        if (!onEstate) return had && ClearTimedStatusEffect("camp_fire");
+        if (had) return false;
+        return ApplyTimedStatusEffect("camp_fire", 1, durationOverride: 0);
     }
 }

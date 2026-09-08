@@ -136,6 +136,11 @@ public class CraftRecipeData
     public CraftRecipeOutput[] prototypes;                  // ของที่ได้แบบมีเงื่อนไข (ทับ prototype_id)
     public Shared.Ability.Derived? required_ability;
     public string required_recipe;
+
+    // ── type=Modify (ทำอาหาร) ── อ่านตรงจาก recipes.json ────────────────────────────
+    public Dictionary<string, string> add_color;   // ช่องสี "0"/"1"/"2" → hex ที่จะทาทับ (browning)
+    public float add_color_rate;                    // อัตราผสมสี (0.1 = เข้มขึ้น 10%)
+    public bool deduct_modifiable_count;            // จริง = หัก ModifiableCount ของ base ไป 1
 }
 
 public class CraftRecipeSlotData
@@ -182,7 +187,8 @@ public static class CraftRecipeStore
             if (_byId != null) return;
             var loaded = Json.ReadFromFile<Dictionary<string, CraftRecipeData>>("item/recipes");
             _byId = loaded ?? new Dictionary<string, CraftRecipeData>();
-            _craftableIds = _byId.Where(pair => pair.Value != null && pair.Value.type == CraftType.Craft)
+            _craftableIds = _byId.Where(pair => pair.Value != null && (pair.Value.type == CraftType.Craft
+                                     || (pair.Value.type == CraftType.Modify && pair.Value.category == "cook")))
                                  .Select(pair => pair.Key)
                                  .ToArray();
             Console.WriteLine($"[craft] โหลดสูตรคราฟต์ {_byId.Count} รายการ " +
@@ -380,12 +386,14 @@ public partial class Player
     }
 
     /// <summary>พิมพ์เขียวที่โชว์ในโหมดสร้าง — เกณฑ์เดียวกับ Core/Player.cs:1175-1186</summary>
-    private static string[] CraftableBlueprintIds()
+    /// <summary>สิ่งปลูกสร้างที่โชว์ในแท็บ "สิ่งปลูกสร้าง" — กรองตามที่ปลดล็อกแล้ว (โหมด Online)</summary>
+    private string[] CraftableBlueprintIds()
     {
+        HashSet<string> unlocked = UnlockedBlueprintIds();
         var list = new List<string>();
         foreach (MergedBlueprint blueprint in BlueprintStore.GetAllBlueprints())
         {
-            if (blueprint.IsShowCraftMode) list.Add(blueprint.Id);
+            if (blueprint.IsShowCraftMode && unlocked.Contains(blueprint.Id)) list.Add(blueprint.Id);
         }
         return list.ToArray();
     }
@@ -402,7 +410,10 @@ public partial class Player
         }
         // Modify(1)/Reform(2) ไม่ได้ "สร้างของใหม่" แต่ไปแก้ของเดิม (เพิ่ม tag/ช่องปรับปรุง)
         // ซึ่งต้องมีระบบ ModifiableCount/ReformSlots ที่เซิร์ฟยังไม่ทำ ⇒ ปฏิเสธตรง ๆ ดีกว่ากินของ
-        if (recipe.type != CraftType.Craft)
+        // [8 ก.ย. 2026] cook = type Modify (แปลงของในตัว) 
+        // ปล่อยผ่านได้ — dye/reform ยังไม่ทำ จึงยังปฏิเสธ
+        bool isCook = recipe.type == CraftType.Modify && recipe.category == "cook";
+        if (recipe.type != CraftType.Craft && !isCook)
         {
             Send(new Abort { Text = "ยังไม่รองรับสูตรประเภทดัดแปลง/ปรับปรุง" }, seq);
             return;
@@ -422,6 +433,8 @@ public partial class Player
             Send(new Abort { Text = toolError }, seq);
             return;
         }
+
+        if (isCook) { HandleCookResult(recipe, msg, materials, seq); return; }
 
         Item[] products = MakeProducts(recipe, msg.Materials, materials);
         if (products.Length == 0)
@@ -832,10 +845,142 @@ public partial class Player
 
     // ── ผลลัพธ์ที่คาดว่าจะได้ (หน้าต่างคราฟต์) ────────────────────────────────────────
 
+    /// <summary>
+    /// ทำอาหาร (type Modify) - แปลงของ base ในตัว ไม่ออก prototype ใหม่ (ตามข้อมูล recipes.json)
+    /// base slot = ของที่ถูกปรุง (หัก ModifiableCount + ทา add_color ให้ดูสุก) - slot อื่น = เครื่องปรุงที่กินหมด
+    /// </summary>
+    private void HandleCookResult(CraftRecipeData recipe, Craft msg, List<Item> materials, uint seq)
+    {
+        string baseId = null;
+        if (msg.Materials != null && msg.Materials.TryGetValue("base", out string[] baseIds) && baseIds is { Length: > 0 })
+            baseId = baseIds[0];
+        int baseIndex = string.IsNullOrEmpty(baseId) ? -1 : _context.InventoryItems.FindIndex(it => it.Id == baseId);
+        if (baseIndex < 0)
+        {
+            Send(new Abort { Text = "ไม่พบวัตถุดิบหลักในกระเป๋า" }, seq);
+            return;
+        }
+        Item cooked = _context.InventoryItems[baseIndex];
+        if (recipe.deduct_modifiable_count && cooked.ModifiableCount <= 0)
+        {
+            Send(new Abort { Text = "ของชิ้นนี้ปรุงต่อไม่ได้แล้ว" }, seq);
+            return;
+        }
+        string[] consumedIds = materials
+            .Where(it => !string.Equals(it.Id, baseId, StringComparison.Ordinal))
+            .Select(it => it.Id).ToArray();
+        if (recipe.deduct_modifiable_count)
+        {
+            cooked.ModifiableCount = Math.Max(0, cooked.ModifiableCount - 1);
+            cooked.ModifiedCount += 1;
+        }
+        ApplyAddColor(ref cooked, recipe);
+        if (consumedIds.Length > 0)
+            _context.InventoryItems.RemoveAll(it => consumedIds.Contains(it.Id));
+        baseIndex = _context.InventoryItems.FindIndex(it => it.Id == baseId);
+        if (baseIndex >= 0) _context.InventoryItems[baseIndex] = cooked;
+        OnContextChanged();
+        if (consumedIds.Length > 0)
+            Send(new InventoryUpdated { EntityId = EntityId, RemovedItemIds = consumedIds });
+        Send(new InventoryUpdated { EntityId = EntityId, Items = new[] { cooked } });
+        AddExpForAction(SkillTuning.CraftWeight, MapRecipeSkillCategory(recipe.category), $"ทำอาหาร {msg.RecipeId}");
+        NoteQuestEvent(Shared.Quest.QuestEventType.Crafted, recipe.category);
+        SpendCraftEnergy(recipe);
+        var crafted = new Crafted
+        {
+            Result = Result.Success,
+            ActionInfo = MakeActionInfo(recipe, cooked.Level),
+            Items = new[] { cooked }
+        };
+        float duration = Math.Clamp(recipe.duration * CraftDurationScale(), 0f, CraftTuning.MaxCraftSeconds);
+        Send(default(ReplySequenceMark), seq);
+        Send(new Messages.Timer { Duration = duration }, seq);
+        if (duration <= 0f) { FinishCraft(crafted, seq); return; }
+        ScheduleCraftFinish(crafted, seq, duration);
+    }
+
+    /// <summary>ทา add_color ทับสีของ item ตาม add_color_rate (alpha blend มาตรฐาน = ความหมายตรงตัวของ field)</summary>
+    private static void ApplyAddColor(ref Item item, CraftRecipeData recipe)
+    {
+        if (recipe.add_color == null || recipe.add_color.Count == 0 || recipe.add_color_rate <= 0f) return;
+        item.ColorR = BlendHex(item.ColorR, recipe.add_color.GetValueOrDefault("0"), recipe.add_color_rate);
+        item.ColorG = BlendHex(item.ColorG, recipe.add_color.GetValueOrDefault("1"), recipe.add_color_rate);
+        item.ColorB = BlendHex(item.ColorB, recipe.add_color.GetValueOrDefault("2"), recipe.add_color_rate);
+    }
+
+    private static string BlendHex(string current, string target, float rate)
+    {
+        if (!TryParseHex(current, out int cr, out int cg, out int cb)) return current;
+        if (!TryParseHex(target, out int tr, out int tg, out int tb)) return current;
+        rate = Math.Clamp(rate, 0f, 1f);
+        int r = (int)Math.Round(cr * (1 - rate) + tr * rate);
+        int g = (int)Math.Round(cg * (1 - rate) + tg * rate);
+        int b = (int)Math.Round(cb * (1 - rate) + tb * rate);
+        return $"{Math.Clamp(r, 0, 255):X2}{Math.Clamp(g, 0, 255):X2}{Math.Clamp(b, 0, 255):X2}";
+    }
+
+    private static bool TryParseHex(string hex, out int r, out int g, out int b)
+    {
+        r = g = b = 0;
+        if (string.IsNullOrEmpty(hex)) return false;
+        hex = hex.TrimStart('#');
+        if (hex.Length != 6) return false;
+        return int.TryParse(hex.AsSpan(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out r)
+            && int.TryParse(hex.AsSpan(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out g)
+            && int.TryParse(hex.AsSpan(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out b);
+    }
+
+    /// <summary>ประเมินผลทำอาหาร - ผลคือของ base ที่ถูกปรุง (คงชนิดเดิม, modifiable ลด 1)</summary>
+    private void HandleCookEstimate(CraftRecipeData recipe, EstimateCraft msg, uint seq)
+    {
+        string baseId = null;
+        if (msg.Materials != null && msg.Materials.TryGetValue("base", out string[] ids) && ids is { Length: > 0 })
+            baseId = ids[0];
+        Item? bi = string.IsNullOrEmpty(baseId) ? null : FindInventoryItem(baseId);
+        if (!bi.HasValue)
+        {
+            Send(new Abort { Text = "ใส่วัตถุดิบหลักก่อน" }, seq);
+            return;
+        }
+        Item item = bi.Value;
+        Prototype prototype = PrototypeYaml.GetItemPrototype(item.Prototype);
+        var tags = new Dictionary<string, int>();
+        if (prototype?.Tags != null)
+            foreach (var t in prototype.Tags) tags[t.Key] = item.Level;
+        int modAfter = recipe.deduct_modifiable_count ? Math.Max(0, item.ModifiableCount - 1) : item.ModifiableCount;
+        Send(new CraftEstimationInfo
+        {
+            CraftLevel = item.Level,
+            CraftEstimation = new CraftEstimation
+            {
+                PrototypeId = item.Prototype,
+                Level = item.Level,
+                Name = prototype?.Name,
+                Durability = new Vector2(1f, 1f),
+                Tags = tags,
+                UnrevealedRareTagCount = 0,
+                ModifiableCount = modAfter,
+                SuccessRate = CraftTuning.SuccessRate,
+                GreatSuccessRate = CraftTuning.GreatSuccessRate,
+                RequiredAbilityValue = 0f
+            }
+        }, seq);
+    }
+
     private void HandleEstimateCraftMsg(EstimateCraft msg, uint seq)
     {
         CraftRecipeData recipe = CraftRecipeStore.Get(msg.RecipeId);
-        if (recipe == null || recipe.type != CraftType.Craft)
+        if (recipe == null)
+        {
+            Send(new Abort { Text = "ประเมินผลสูตรนี้ไม่ได้" }, seq);
+            return;
+        }
+        if (recipe.type == CraftType.Modify && recipe.category == "cook")
+        {
+            HandleCookEstimate(recipe, msg, seq);
+            return;
+        }
+        if (recipe.type != CraftType.Craft)
         {
             // มี .Rest รออยู่ (client/CraftSystem.cs:225-231) ⇒ ตอบ Abort แล้วช่องผลลัพธ์ขึ้น "-"
             Send(new Abort { Text = "ประเมินผลสูตรนี้ไม่ได้" }, seq);

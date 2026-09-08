@@ -36,6 +36,9 @@ public class Cluster
 
 	public bool IsRecommendable { get; set; }
 
+	// [8 ก.ย. 2026] อ่านจาก clusters.json ได้ — เดิมไม่มี JsonProperty จึงเป็น enum 0 = Online เสมอ
+	// ยกเว้นตอน Servers.GetServers ใส่ Offline/Editable เอง (เส้นเกาะสร้างสรรค์)
+	[JsonProperty(PropertyName = "mode")]
 	public Mode Mode { get; set; }
 
 	public string LocalPlayer { get; set; }
