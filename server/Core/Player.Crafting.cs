@@ -944,6 +944,8 @@ public partial class Player
             return;
         }
         _survival.Add(SurvivalState.KeyEnergy, -energy);
+        // เพิ่มความเหนื่อยตามการกระทำ (fatigue_cost.craft = 2*√energy) — ครอบคลุมทั้งคราฟต์และทำอาหาร
+        _survival.Add(SurvivalState.KeyFatigue, ActionFatigue.Of("craft", energy));
         FlushSurvival();     // ค่ากระโดด ⇒ ต้องส่งเส้นใหม่ทันที ไม่รอรอบตรวจ (ดู Core/SurvivalState.cs)
     }
 

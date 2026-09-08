@@ -1151,6 +1151,8 @@ public partial class Player
     {
         if (energy <= 0f) return;
         _survival.Add(SurvivalState.KeyEnergy, -energy);
+        // เพิ่มความเหนื่อยตามการกระทำ (fatigue_cost.build = 4*√energy)
+        _survival.Add(SurvivalState.KeyFatigue, ActionFatigue.Of("build", energy));
         FlushSurvival();      // ค่ากระโดด ⇒ ส่งเส้นใหม่ทันที ไม่รอรอบตรวจ
     }
 

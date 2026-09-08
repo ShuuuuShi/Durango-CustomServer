@@ -31,6 +31,7 @@ internal static class LevelUpFxCheck
         CheckStatusEffectDetailsPacked();
         CheckInsideHouseBuff();
         CheckFatigueTuning(dataDir);
+        CheckActionFatigue();
 
         Console.WriteLine($"[fx-check] ผ่าน {_passed} · ตก {_failed}");
         return _failed == 0 ? 0 : 1;
@@ -211,6 +212,17 @@ internal static class LevelUpFxCheck
         Expect(Math.Abs(outside - 0.12) < 0.0001, "กลางแจ้งหมวด hot = 0.12/วิ");
         Expect(Math.Abs(insideHouse - 0.03) < 0.0001, "เข้าบ้านแล้วเหลือ 0.03/วิ (บัพ inside หัก 75%)");
         Expect(insideHouse < outside, "บัพ inside ทำให้เหนื่อยช้าลงจริง ไม่ใช่แค่ไอคอน");
+    }
+    /// <summary>ความเหนื่อยต่อการกระทำ — fatigue_cost จาก constants.json (2√e คราฟต์, 4√e สร้าง, 0.4√e เก็บ)</summary>
+    static void CheckActionFatigue()
+    {
+        float craft9 = ActionFatigue.Of("craft", 9f);   // 2 * sqrt(9) = 6
+        Expect(Math.Abs(craft9 - 6f) < 0.001f, "craft fatigue = 2*sqrt(9) = 6 (ได้ " + craft9 + ")");
+        float build4 = ActionFatigue.Of("build", 4f);   // 4 * sqrt(4) = 8
+        Expect(Math.Abs(build4 - 8f) < 0.001f, "build fatigue = 4*sqrt(4) = 8 (ได้ " + build4 + ")");
+        float collect25 = ActionFatigue.Of("collect", 25f); // 0.4 * sqrt(25) = 2
+        Expect(Math.Abs(collect25 - 2f) < 0.001f, "collect fatigue = 0.4*sqrt(25) = 2 (ได้ " + collect25 + ")");
+        Expect(ActionFatigue.Of("craft", 0f) == 0f, "พลังงาน 0 → เหนื่อย 0 (ไม่หัก)");
     }
     static void Expect(bool cond, string title)
     {
