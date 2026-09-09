@@ -19,7 +19,7 @@ Apa saja yang bisa membantu:
 - bahkan file parsial juga tetap berguna
 
 Cara kirim:
-👉 Silakan DM ke [isi nama akun Discord], atau kirim lewat link upload: [isi link]
+👉 Post langsung di channel ini saja (link download, Google Drive, Mega, dll.) — tidak perlu DM
 
 Kalau sempat, boleh sertakan info singkat seperti:
 - kira-kira dari tahun/versi berapa
