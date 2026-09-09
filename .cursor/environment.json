@@ -1,6 +1,9 @@
 {
   "name": "Durango LastHuman",
   "install": "bash .cursor/install.sh",
+  "repositoryDependencies": [
+    "github.com/ShuuuuShi/Durango-Server"
+  ],
   "terminals": [
     {
       "name": "server",
